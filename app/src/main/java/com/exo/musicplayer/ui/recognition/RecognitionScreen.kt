@@ -26,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -48,6 +47,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.exo.musicplayer.data.youtube.PreviewState
+import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.data.recognition.MusicMatch
 import com.exo.musicplayer.data.recognition.RecognitionResult
 
@@ -66,6 +67,11 @@ fun RecognitionScreen(
     onFindInLibrary: (MusicMatch) -> Unit,
     onCopy: (MusicMatch) -> Unit,
     onDownload: (MusicMatch) -> Unit,
+    youtubeResults: List<YouTubeVideo>,
+    youtubeStatus: String?,
+    preview: PreviewState,
+    onPreviewYouTube: (YouTubeVideo) -> Unit,
+    onDownloadYouTube: (YouTubeVideo) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier.fillMaxSize()) {
@@ -81,7 +87,9 @@ fun RecognitionScreen(
                 "is playing. Or search by name across iTunes, Deezer, MusicBrainz, " +
                 "Audius, the Internet Archive, YouTube and Genius at once, by a line " +
                 "of the lyrics if the name is what you've forgotten, or paste a " +
-                "TikTok or Instagram link and it will listen to that.",
+                "TikTok or Instagram link and it will listen to that. The YouTube " +
+                "tab searches all of YouTube, previews any result, and saves it " +
+                "as a tagged mp3.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -142,6 +150,26 @@ fun RecognitionScreen(
         Spacer(Modifier.height(8.dp))
 
         when {
+            // Checked before the busy state so the list stays on screen while a
+            // second search runs - a phone search takes seconds, and blanking
+            // the results people are reading is worse than a stale list.
+            mode == SearchMode.YOUTUBE && youtubeResults.isNotEmpty() -> Column {
+                youtubeStatus?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                }
+                YouTubeResultList(
+                    videos = youtubeResults,
+                    preview = preview,
+                    onPreview = onPreviewYouTube,
+                    onDownload = onDownloadYouTube
+                )
+            }
+
             stage != RecognitionStage.IDLE -> Centered {
                 CircularProgressIndicator()
                 Spacer(Modifier.height(16.dp))
@@ -208,8 +236,13 @@ fun RecognitionScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Pick a video or audio file and Resonate will listen to it, " +
-                        "or search by name.",
+                    if (mode == SearchMode.YOUTUBE) {
+                        "Type anything and press Go. Every result can be previewed " +
+                            "before you take it, and downloads land as tagged mp3 files."
+                    } else {
+                        "Pick a video or audio file and Resonate will listen to it, " +
+                            "or search by name."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center

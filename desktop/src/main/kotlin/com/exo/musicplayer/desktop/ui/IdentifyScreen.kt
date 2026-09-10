@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -66,12 +67,14 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
             IdentifyMode.NAME -> controller.searchByFields()
             IdentifyMode.LYRICS -> controller.searchByLyrics()
             IdentifyMode.LINK -> controller.identifyLink()
+            IdentifyMode.YOUTUBE -> controller.searchYouTube()
         }
     }
 
     val canRun = when (mode) {
         IdentifyMode.NAME ->
             controller.identifyArtist.isNotBlank() || controller.identifyTitle.isNotBlank()
+        IdentifyMode.YOUTUBE -> controller.youtubeQuery.isNotBlank()
         else -> controller.identifyQuery.isNotBlank()
     }
 
@@ -97,12 +100,25 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                     IdentifyMode.LINK ->
                         "Pulls the audio down, fingerprints it, and throws the file away. " +
                             "TikTok, Instagram, YouTube and a thousand other sites."
+                    IdentifyMode.YOUTUBE ->
+                        "The whole of YouTube, not just YouTube Music, because the music " +
+                            "filter reports no view counts, dates or descriptions at all. " +
+                            "Preview a result to hear it, then take it as an mp3."
                 }
             )
             Spacer(Modifier.height(12.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (mode == IdentifyMode.NAME) {
+                if (mode == IdentifyMode.YOUTUBE) {
+                    TextInput(
+                        value = controller.youtubeQuery,
+                        onValueChange = { controller.youtubeQuery = it },
+                        placeholder = mode.placeholder,
+                        leading = Icons.Default.Search,
+                        modifier = Modifier.weight(1f),
+                        onSubmit = { run() }
+                    )
+                } else if (mode == IdentifyMode.NAME) {
                     // Two boxes rather than one. Telling the ranker which half
                     // is the performer is what lets it reject a cover titled
                     // "Bohemian Rhapsody - Queen" by somebody who is not Queen.
@@ -140,7 +156,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                 Spacer(Modifier.width(10.dp))
                 AccentButton(
                     if (mode == IdentifyMode.LINK) "Identify" else "Search",
-                    enabled = !controller.identifyBusy && canRun
+                    enabled = !controller.identifyBusy && !controller.youtubeBusy && canRun
                 ) { run() }
             }
 
@@ -188,9 +204,14 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                 )
             }
 
-            controller.identifyStatus?.let { status ->
+            val status = if (mode == IdentifyMode.YOUTUBE) {
+                controller.youtubeStatus
+            } else {
+                controller.identifyStatus
+            }
+            status?.let {
                 Spacer(Modifier.height(12.dp))
-                Text(status, style = MaterialTheme.typography.bodySmall, color = Palette.Accent)
+                Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.Accent)
             }
             if (controller.identifyNeedsFfmpeg) {
                 Spacer(Modifier.height(8.dp))
@@ -201,7 +222,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                     color = Palette.TextDim
                 )
             }
-            if (controller.identifyBusy) {
+            if (controller.identifyBusy || controller.youtubeBusy) {
                 Spacer(Modifier.height(10.dp))
                 ThinProgress(null)
             }
@@ -209,7 +230,24 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
 
         Spacer(Modifier.height(14.dp))
 
-        if (controller.identifyResults.isEmpty()) {
+        if (mode == IdentifyMode.YOUTUBE) {
+            val preview by controller.preview.state.collectAsState()
+            if (controller.youtubeResults.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Default.Search,
+                    title = "Search YouTube",
+                    body = "Type anything and press Search. Every result can be previewed\n" +
+                        "before you take it, and downloads land as tagged mp3 files."
+                )
+            } else {
+                YouTubeResultList(
+                    videos = controller.youtubeResults,
+                    preview = preview,
+                    onPreview = { controller.previewYouTube(it) },
+                    onDownload = { controller.downloadYouTube(it) }
+                )
+            }
+        } else if (controller.identifyResults.isEmpty()) {
             EmptyState(
                 icon = Icons.Default.Fingerprint,
                 title = "Nothing found yet",

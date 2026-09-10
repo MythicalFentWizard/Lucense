@@ -113,11 +113,14 @@ fun DownloadScreen(
             }
         }
 
-        Row(
+        // A Column, not a Row. These used to be siblings in a Row whose first
+        // child was itself fillMaxWidth, which took the entire width and pushed
+        // the Download button off the right-hand edge - present in the tree,
+        // laid out past the screen, invisible.
+        Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 16.dp)
         ) {
             // Quality is a short ladder, not a slider: sites serve a few
             // fixed renditions and anything finer would be a fiction.
@@ -140,18 +143,23 @@ fun DownloadScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = onDownload,
-                enabled = !state.busy && url.isNotBlank(),
-                modifier = Modifier.weight(1f)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(Icons.Default.Download, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Download")
-            }
-            if (state.busy) {
-                OutlinedButton(onClick = onCancel) { Text("Stop") }
+                Button(
+                    onClick = onDownload,
+                    enabled = !state.busy && url.isNotBlank(),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Download, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Download")
+                }
+                if (state.busy) {
+                    OutlinedButton(onClick = onCancel) { Text("Stop") }
+                }
             }
         }
 

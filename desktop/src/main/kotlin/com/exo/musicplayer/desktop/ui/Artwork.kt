@@ -108,6 +108,43 @@ fun RemoteArtwork(
     ArtworkFrame(bitmap, size, corner, modifier)
 }
 
+/**
+ * A remote image at whatever shape the caller's modifier gives it.
+ *
+ * [RemoteArtwork] is square because cover art is; a YouTube thumbnail is 16:9
+ * and a channel avatar is a circle, so this takes the geometry as a modifier
+ * instead of a single size. Same cache and same failure handling underneath.
+ */
+@Composable
+fun RemoteImage(
+    url: String?,
+    modifier: Modifier = Modifier,
+    corner: Dp = 6.dp,
+    placeholder: Boolean = true
+) {
+    var bitmap by remember(url) { mutableStateOf(url?.let(RemoteImages::cached)) }
+
+    LaunchedEffect(url) {
+        if (url != null && bitmap == null) bitmap = RemoteImages.load(url)
+    }
+
+    Box(
+        modifier
+            .clip(RoundedCornerShape(corner))
+            .background(if (placeholder) Palette.Hover else androidx.compose.ui.graphics.Color.Transparent),
+        contentAlignment = Alignment.Center
+    ) {
+        bitmap?.let {
+            Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
 private object RemoteImages {
 
     private val memory = Thumbnails.ByteBudgetCache(budget = 24L * 1024 * 1024)

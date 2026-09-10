@@ -444,6 +444,10 @@ private fun AppScaffold(
                     val label by recognition.sourceLabel.collectAsStateWithLifecycle()
                     val rmode by recognition.mode.collectAsStateWithLifecycle()
 
+                    val youtubeResults by recognition.youtubeResults.collectAsStateWithLifecycle()
+                    val youtubeStatus by recognition.youtubeStatus.collectAsStateWithLifecycle()
+                    val preview by recognition.preview.state.collectAsStateWithLifecycle()
+
                     RecognitionScreen(
                         stage = stage,
                         result = result,
@@ -465,6 +469,22 @@ private fun AppScaffold(
                                 query = listOfNotNull(match.artist, match.title)
                                     .joinToString(" ")
                             )
+                            showDownload = true
+                        },
+                        youtubeResults = youtubeResults,
+                        youtubeStatus = youtubeStatus,
+                        preview = preview,
+                        onPreviewYouTube = recognition::previewYouTube,
+                        onDownloadYouTube = { video ->
+                            // A real watch URL, so this takes the direct path
+                            // rather than the search-by-name fallback.
+                            download.downloadMatch(
+                                downloadUrl = video.watchUrl,
+                                query = video.title
+                            )
+                            // The preview would otherwise keep playing over the
+                            // download screen it just opened.
+                            recognition.stopPreview()
                             showDownload = true
                         },
                         onCopy = { match ->

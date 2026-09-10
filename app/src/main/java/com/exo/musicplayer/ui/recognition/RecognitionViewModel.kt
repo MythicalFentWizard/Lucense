@@ -21,6 +21,11 @@ import com.exo.musicplayer.data.recognition.NeteaseLyricSearch
 import com.exo.musicplayer.data.recognition.MusicBrainzProvider
 import com.exo.musicplayer.data.recognition.RecognitionResult
 import com.exo.musicplayer.data.recognition.ShazamClient
+import com.exo.musicplayer.data.youtube.AndroidYouTubeBackend
+import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
+import com.exo.musicplayer.data.youtube.YouTubePreviewPlayer
+import com.exo.musicplayer.data.youtube.YouTubeSearch
+import com.exo.musicplayer.data.youtube.YouTubeVideo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,7 +39,9 @@ enum class RecognitionStage(val message: String) {
     SEARCHING("Searching…")
 }
 
-class RecognitionViewModel(application: Application) : AndroidViewModel(application) {
+class RecognitionViewModel(
+    private val application: Application
+) : AndroidViewModel(application) {
 
     private val shazam = ShazamClient()
 
@@ -70,6 +77,87 @@ class RecognitionViewModel(application: Application) : AndroidViewModel(applicat
         listOf(GeniusLyricSearch(), NeteaseLyricSearch())
     )
 
+    // ---- YouTube search ----
+    //
+    // A separate list from the catalogue results, because a YouTube hit is a
+    // different kind of thing: a video with a channel, a view count and an
+    // upload date, not a catalogue making a claim about what a song is.
+    // Merging them would mean treating an uploader as an artist, which is how
+    // wrong metadata ends up written into tags.
+    //
+    // Piped is asked first because it answers in well under a second and
+    // carries the upload date that the yt-dlp path cannot report. yt-dlp is
+    // the fallback and always works, but on a phone it has to start a bundled
+    // Python runtime first, so it is noticeably slower.
+
+    private val youtubeBackend by lazy { AndroidYouTubeBackend(downloader) }
+
+    private val youtube by lazy {
+        YouTubeSearch(listOf(PipedYouTubeBackend(), youtubeBackend))
+    }
+
+    val preview by lazy { YouTubePreviewPlayer(application, viewModelScope) }
+
+    private val _youtubeResults = MutableStateFlow<List<YouTubeVideo>>(emptyList())
+    val youtubeResults: StateFlow<List<YouTubeVideo>> = _youtubeResults.asStateFlow()
+
+    private val _youtubeStatus = MutableStateFlow<String?>(null)
+    val youtubeStatus: StateFlow<String?> = _youtubeStatus.asStateFlow()
+
+    fun searchYouTube() {
+        val text = _query.value.trim()
+        if (text.isEmpty()) return
+        _sourceLabel.value = null
+
+        viewModelScope.launch {
+            _youtubeResults.value = emptyList()
+            _stage.value = RecognitionStage.SEARCHING
+            _youtubeStatus.value = null
+
+            val result = youtube.search(text, limit = 25)
+            _youtubeResults.value = result.videos
+            _youtubeStatus.value = when {
+                result.videos.isEmpty() ->
+                    "Nothing came back. Try updating yt-dlp from the download screen."
+                result.skipped.isEmpty() ->
+                    "${result.videos.size} results via ${result.via}"
+                else ->
+                    // Named rather than hidden: a slow search is worth
+                    // explaining, and a dead Piped instance is the usual cause.
+                    "${result.videos.size} results via ${result.via} — " +
+                        "${result.skipped.joinToString(", ")} did not answer"
+            }
+            _stage.value = RecognitionStage.IDLE
+        }
+    }
+
+    /** Plays a result without downloading it. Tapping the same row stops it. */
+    fun previewYouTube(video: YouTubeVideo) {
+        preview.toggle(video.id) { id -> youtubeBackend.audioStreamUrl(id, quality) }
+    }
+
+    fun stopPreview() = preview.stop()
+
+    /**
+     * The quality a preview is fetched at.
+     *
+     * Deliberately the lowest rung rather than the download setting: a preview
+     * only has to be recognisable, and the smaller rendition starts sooner and
+     * costs less of a phone data allowance.
+     */
+    private val quality = DownloadQuality.LOW
+
+    fun clearYouTube() {
+        _youtubeResults.value = emptyList()
+        _youtubeStatus.value = null
+        preview.stop()
+    }
+
+    override fun onCleared() {
+        preview.release()
+        super.onCleared()
+    }
+
     private val _mode = MutableStateFlow(SearchMode.NAME)
     val mode: StateFlow<SearchMode> = _mode.asStateFlow()
 
@@ -95,6 +183,7 @@ class RecognitionViewModel(application: Application) : AndroidViewModel(applicat
             SearchMode.NAME -> searchByName()
             SearchMode.LYRICS -> searchByLyrics()
             SearchMode.LINK -> identifyLink()
+            SearchMode.YOUTUBE -> searchYouTube()
         }
     }
 
@@ -264,5 +353,6 @@ class RecognitionViewModel(application: Application) : AndroidViewModel(applicat
 enum class SearchMode(val label: String, val hint: String) {
     NAME("Name", "Artist and title, in any order"),
     LYRICS("Lyrics", "A line you remember, however roughly"),
-    LINK("Link", "TikTok, Instagram, YouTube link")
+    LINK("Link", "TikTok, Instagram, YouTube link"),
+    YOUTUBE("YouTube", "Search YouTube for anything")
 }

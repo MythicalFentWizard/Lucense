@@ -44,6 +44,11 @@ import com.exo.musicplayer.desktop.audio.AudioDevices
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.audio.MediaAudio
 import com.exo.musicplayer.desktop.audio.SampleOutcome
+import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
+import com.exo.musicplayer.data.youtube.YouTubeSearch
+import com.exo.musicplayer.data.youtube.YouTubeVideo
+import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import com.exo.musicplayer.desktop.download.DesktopYouTubeBackend
 import com.exo.musicplayer.desktop.audio.PlaybackEngine
 import com.exo.musicplayer.desktop.download.DownloadProgress
 import com.exo.musicplayer.desktop.download.ToolStatus
@@ -590,6 +595,81 @@ class DesktopController(private val scope: CoroutineScope) {
     /** Artist and title asked for separately, so each can be scored on its own field. */
     var identifyArtist by mutableStateOf("")
     var identifyTitle by mutableStateOf("")
+
+    // ---- YouTube search -----------------------------------------------------
+    //
+    // A separate list from identifyResults, because a YouTube hit is a
+    // different kind of thing: a video with a channel, a view count and an
+    // upload date, not a catalogue's claim about what a song is. Merging them
+    // would mean deciding that an uploader is an artist, which is how wrong
+    // metadata ends up written into tags.
+    //
+    // Piped is asked first because it answers in well under a second and
+    // carries the upload date; the bundled yt-dlp answers in about three and
+    // always works. Whichever replies first wins - see YouTubeSearch.
+
+    private val youtubeBackend = DesktopYouTubeBackend()
+
+    private val youtube = YouTubeSearch(
+        listOf(PipedYouTubeBackend(), youtubeBackend)
+    )
+
+    val preview = PreviewPlayer { ToolPaths.ffmpeg }
+
+    var youtubeResults by mutableStateOf<List<YouTubeVideo>>(emptyList())
+        private set
+    var youtubeBusy by mutableStateOf(false)
+        private set
+    var youtubeStatus by mutableStateOf<String?>(null)
+        private set
+
+    fun searchYouTube(text: String = youtubeQuery) {
+        val query = text.trim()
+        if (query.isBlank() || youtubeBusy) return
+
+        youtubeBusy = true
+        youtubeStatus = "Searching YouTube…"
+        scope.launch {
+            val result = youtube.search(query, limit = 25)
+            youtubeResults = result.videos
+            youtubeStatus = when {
+                result.videos.isEmpty() ->
+                    "Nothing came back. yt-dlp may need updating — one click in " +
+                        "the Download tab."
+                result.skipped.isEmpty() ->
+                    "${result.videos.size} results via ${result.via}"
+                else ->
+                    // Named rather than hidden: a slow search is worth
+                    // explaining, and a dead Piped is the usual reason.
+                    "${result.videos.size} results via ${result.via} — " +
+                        "${result.skipped.joinToString(", ")} did not answer"
+            }
+            youtubeBusy = false
+        }
+    }
+
+    var youtubeQuery by mutableStateOf("")
+
+    /** Plays a result without downloading it. Tapping the same row stops it. */
+    fun previewYouTube(video: YouTubeVideo) {
+        // The main player keeps its place; two things playing at once is never
+        // what a preview tap meant.
+        if (engine.status.value.playing) engine.togglePlay()
+        preview.toggle(video.id) { id -> youtubeBackend.audioStreamUrl(id, downloadQuality) }
+    }
+
+    fun stopPreview() = preview.stop()
+
+    /** Hands the video to the existing downloader, as an mp3 at the set quality. */
+    fun downloadYouTube(video: YouTubeVideo) {
+        startDownload(video.watchUrl)
+    }
+
+    fun clearYouTube() {
+        youtubeResults = emptyList()
+        youtubeStatus = null
+        preview.stop()
+    }
 
     /** Set when the last attempt failed only because ffmpeg is missing. */
     var identifyNeedsFfmpeg by mutableStateOf(false)
@@ -1886,7 +1966,8 @@ class DesktopController(private val scope: CoroutineScope) {
 enum class IdentifyMode(val label: String, val placeholder: String) {
     NAME("Name", "Artist and title, or whatever you can remember"),
     LYRICS("Lyrics", "A line you remember, however roughly"),
-    LINK("Link", "TikTok, Instagram, YouTube, SoundCloud link")
+    LINK("Link", "TikTok, Instagram, YouTube, SoundCloud link"),
+    YOUTUBE("YouTube", "Search YouTube — anything, not just music")
 }
 
 /** The four bulk tools, and the mark each one records so reruns can skip. */
