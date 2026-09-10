@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
@@ -59,6 +60,10 @@ fun RecognitionScreen(
     query: String,
     sourceLabel: String?,
     onQueryChange: (String) -> Unit,
+    artist: String,
+    onArtistChange: (String) -> Unit,
+    title: String,
+    onTitleChange: (String) -> Unit,
     onSearch: () -> Unit,
     mode: SearchMode,
     onModeChange: (SearchMode) -> Unit,
@@ -113,23 +118,66 @@ fun RecognitionScreen(
             }
         }
 
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                placeholder = { Text(mode.hint) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = onSearch, enabled = query.isNotBlank()) { Text("Go") }
+        if (mode == SearchMode.NAME) {
+            // Two boxes, as on the desktop. Telling the ranker which half is
+            // the performer is what lets it reject a cover titled
+            // "Bohemian Rhapsody - Queen" by somebody who is not Queen.
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = artist,
+                        onValueChange = onArtistChange,
+                        placeholder = { Text("Artist name") },
+                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = onTitleChange,
+                        placeholder = { Text("Song name") },
+                        leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null) },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = onSearch,
+                        enabled = artist.isNotBlank() || title.isNotBlank() || query.isNotBlank()
+                    ) { Text("Go") }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Either box on its own works too — the artist alone to browse what " +
+                        "they have, the song alone when the artist is what you have forgotten.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text(mode.hint) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = onSearch, enabled = query.isNotBlank()) { Text("Go") }
+            }
         }
 
         // Searching by name and searching by lyrics hit different indexes, so
@@ -215,16 +263,42 @@ fun RecognitionScreen(
                 )
             }
 
-            result is RecognitionResult.Found -> LazyColumn(Modifier.fillMaxSize()) {
-                items(result.matches, key = { it.display + it.album }) { match ->
-                    MatchCard(
-                        match = match,
-                        onFindInLibrary = { onFindInLibrary(match) },
-                        onCopy = { onCopy(match) },
-                        onDownload = { onDownload(match) }
-                    )
+            result is RecognitionResult.Found -> {
+                // Grouped so the rows you can act on are the ones you land on.
+                // Streaming-only results are still worth keeping for their
+                // names, years and cover art, but they cannot be downloaded,
+                // and burying the downloadable ones under them just makes for
+                // scrolling. Same split as the desktop.
+                val downloadable = result.matches.filterNot { it.drmProtected }
+                val detailsOnly = result.matches.filter { it.drmProtected }
+
+                LazyColumn(Modifier.fillMaxSize()) {
+                    if (downloadable.isNotEmpty()) {
+                        item { ResultHeading("Ready to download", downloadable.size) }
+                        items(downloadable, key = { "dl" + it.display + it.album }) { match ->
+                            MatchCard(
+                                match = match,
+                                onFindInLibrary = { onFindInLibrary(match) },
+                                onCopy = { onCopy(match) },
+                                onDownload = { onDownload(match) }
+                            )
+                        }
+                    }
+                    if (detailsOnly.isNotEmpty()) {
+                        item {
+                            ResultHeading("Details only — streaming services", detailsOnly.size)
+                        }
+                        items(detailsOnly, key = { "md" + it.display + it.album }) { match ->
+                            MatchCard(
+                                match = match,
+                                onFindInLibrary = { onFindInLibrary(match) },
+                                onCopy = { onCopy(match) },
+                                onDownload = { onDownload(match) }
+                            )
+                        }
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
                 }
-                item { Spacer(Modifier.height(16.dp)) }
             }
 
             else -> Centered {
@@ -375,5 +449,29 @@ private fun Centered(content: @Composable () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) { content() }
+    }
+}
+
+/** Section divider above a group of results. */
+@Composable
+private fun ResultHeading(label: String, count: Int) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

@@ -1,4 +1,4 @@
-package com.exo.musicplayer.desktop.audio
+package com.exo.musicplayer.data.audio
 
 import com.exo.musicplayer.data.recognition.Dsp
 import kotlin.math.PI
@@ -12,10 +12,15 @@ import kotlin.math.sqrt
  * Band levels taken from the audio actually being played.
  *
  * Real measurement rather than decoration: the samples fed in are the ones on
- * their way to the sound card, *after* the effect chain, so slowing a track down
- * or dialling in reverb visibly changes the display. A meter that animated to a
+ * their way to the output, after the effect chain, so slowing a track down or
+ * dialling in reverb visibly changes the display. A meter that animated to a
  * canned pattern would be worse than no meter, because it would look like
  * feedback and not be any.
+ *
+ * Shared, and fed from a different place on each platform: Windows hands it the
+ * float buffer on its way to the audio line, Android taps the decoded PCM out of
+ * the ExoPlayer sink. The analysis, the band spacing and the decay are therefore
+ * identical on both, which is the point - the same track should look the same.
  *
  * Bands are spaced logarithmically because pitch is: an even split across a
  * 22 kHz range would put nearly everything audible into the first two bars.
@@ -37,6 +42,16 @@ class SpectrumAnalyser(private val bandCount: Int = 14) {
     }
 
     @Volatile var enabled: Boolean = false
+
+    /**
+     * Frames [feed] needs before it will do anything.
+     *
+     * Exposed because a caller that receives audio in smaller chunks has to
+     * accumulate up to this before feeding - the Android sink hands over
+     * buffers well under this size, so a tap that fed each one straight
+     * through would silently never produce a reading.
+     */
+    val framesNeeded: Int get() = FFT_SIZE
 
     private val re = FloatArray(FFT_SIZE)
     private val im = FloatArray(FFT_SIZE)

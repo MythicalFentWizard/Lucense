@@ -687,6 +687,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         library.deletePlaylist(playlistId)
     }
 
+    // ---- Editing a track by hand ----
+
+    private val _editTarget = MutableStateFlow<Track?>(null)
+    val editTarget: StateFlow<Track?> = _editTarget.asStateFlow()
+
+    fun editTrack(track: Track) { _editTarget.value = track }
+
+    fun dismissEdit() { _editTarget.value = null }
+
+    fun saveTrackDetails(
+        track: Track,
+        title: String,
+        artist: String,
+        album: String,
+        year: Int?
+    ) {
+        _editTarget.value = null
+        viewModelScope.launch {
+            runCatching { library.saveDetails(track, title, artist, album, year) }
+        }
+    }
+
     // ---- Zip and ship ----
     //
     // Packs the library or a playlist into one file, reports where it landed,

@@ -37,7 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
-import com.exo.musicplayer.desktop.audio.SpectrumAnalyser
+import com.exo.musicplayer.data.audio.SpectrumAnalyser
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip

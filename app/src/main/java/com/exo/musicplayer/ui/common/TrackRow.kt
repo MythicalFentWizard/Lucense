@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -56,6 +57,7 @@ fun TrackRow(
     onAddToPlaylist: () -> Unit,
     onToggleFavorite: () -> Unit,
     onFixTags: () -> Unit,
+    onEditDetails: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     /** Playlist views remove the entry rather than the file, so the wording differs. */
@@ -201,6 +203,11 @@ fun TrackRow(
                     text = { Text("Identify & fix tags") },
                     leadingIcon = { Icon(Icons.Default.AutoFixHigh, null) },
                     onClick = { menuOpen = false; onFixTags() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Edit details…") },
+                    leadingIcon = { Icon(Icons.Default.Edit, null) },
+                    onClick = { menuOpen = false; onEditDetails() }
                 )
                 DropdownMenuItem(
                     text = { Text(deleteLabel) },

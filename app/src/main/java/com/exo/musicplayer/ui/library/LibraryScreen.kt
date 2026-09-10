@@ -80,6 +80,7 @@ fun LibraryScreen(
     onAddToPlaylist: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onFixTags: (Track) -> Unit,
+    onEditDetails: (Track) -> Unit,
     onDelete: (Track) -> Unit,
     selectedIds: Set<Long>,
     onToggleSelect: (Track) -> Unit,
@@ -216,6 +217,7 @@ fun LibraryScreen(
                     onAddToPlaylist = { onAddToPlaylist(track) },
                     onToggleFavorite = { onToggleFavorite(track) },
                     onFixTags = { onFixTags(track) },
+                                onEditDetails = { onEditDetails(track) },
                     onDelete = { onDelete(track) },
                     isSelected = track.id in selectedIds,
                     onLongPress = { onToggleSelect(track) }

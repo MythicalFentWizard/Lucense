@@ -66,6 +66,7 @@ import com.exo.musicplayer.ui.MoodState
 import com.exo.musicplayer.ui.common.AddToPlaylistDialog
 import com.exo.musicplayer.ui.common.BulkImportDialog
 import com.exo.musicplayer.ui.common.DuplicatesDialog
+import com.exo.musicplayer.ui.common.EditTrackDialog
 import com.exo.musicplayer.ui.common.FixTagsDialog
 import com.exo.musicplayer.ui.common.LibraryToolsDialog
 import com.exo.musicplayer.ui.download.DownloadScreen
@@ -215,6 +216,7 @@ private fun AppScaffold(
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val mood by viewModel.mood.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val editTarget by viewModel.editTarget.collectAsStateWithLifecycle()
     val tagTarget by viewModel.tagTarget.collectAsStateWithLifecycle()
     val tagBusy by viewModel.tagBusy.collectAsStateWithLifecycle()
     val tagResult by viewModel.tagResult.collectAsStateWithLifecycle()
@@ -407,6 +409,7 @@ private fun AppScaffold(
                     onAddToPlaylist = { addingToPlaylist = it },
                     onToggleFavorite = { viewModel.toggleFavorite(it) },
                     onFixTags = { viewModel.startFixTags(it) },
+                    onEditDetails = { viewModel.editTrack(it) },
                     onDelete = { viewModel.deleteTrack(it) },
                     selectedIds = selectedIds,
                     onToggleSelect = { viewModel.toggleSelected(it.id) },
@@ -444,6 +447,8 @@ private fun AppScaffold(
                     val label by recognition.sourceLabel.collectAsStateWithLifecycle()
                     val rmode by recognition.mode.collectAsStateWithLifecycle()
 
+                    val rartist by recognition.artist.collectAsStateWithLifecycle()
+                    val rtitle by recognition.title.collectAsStateWithLifecycle()
                     val youtubeResults by recognition.youtubeResults.collectAsStateWithLifecycle()
                     val youtubeStatus by recognition.youtubeStatus.collectAsStateWithLifecycle()
                     val preview by recognition.preview.state.collectAsStateWithLifecycle()
@@ -454,6 +459,10 @@ private fun AppScaffold(
                         query = rquery,
                         sourceLabel = label,
                         onQueryChange = recognition::setQuery,
+                        artist = rartist,
+                        onArtistChange = recognition::setArtist,
+                        title = rtitle,
+                        onTitleChange = recognition::setTitle,
                         onSearch = recognition::runSearch,
                         mode = rmode,
                         onModeChange = recognition::setMode,
@@ -510,7 +519,8 @@ private fun AppScaffold(
                     onAddToQueue = viewModel::addToQueue,
                     onAddToPlaylist = { addingToPlaylist = it },
                     onToggleFavorite = { viewModel.toggleFavorite(it) },
-                    onFixTags = { viewModel.startFixTags(it) }
+                    onFixTags = { viewModel.startFixTags(it) },
+                    onEditDetails = { viewModel.editTrack(it) }
                 )
 
                 Tab.PLAYLISTS -> {
@@ -546,6 +556,7 @@ private fun AppScaffold(
                             onAddToQueue = viewModel::addToQueue,
                             onToggleFavorite = { viewModel.toggleFavorite(it) },
                             onFixTags = { viewModel.startFixTags(it) },
+                            onEditDetails = { viewModel.editTrack(it) },
                             onRemoveFromPlaylist = {
                                 viewModel.removeFromPlaylist(open.id, it.id)
                             }
@@ -827,6 +838,16 @@ private fun AppScaffold(
 
     bulk?.let { progress ->
         BulkImportDialog(progress = progress, onCancel = { viewModel.cancelBulkImport() })
+    }
+
+    editTarget?.let { track ->
+        EditTrackDialog(
+            track = track,
+            onSave = { title, artist, album, year ->
+                viewModel.saveTrackDetails(track, title, artist, album, year)
+            },
+            onDismiss = { viewModel.dismissEdit() }
+        )
     }
 
     tagTarget?.let { track ->

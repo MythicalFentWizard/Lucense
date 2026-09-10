@@ -167,6 +167,25 @@ class RecognitionViewModel(
     private val _result = MutableStateFlow<RecognitionResult?>(null)
     val result: StateFlow<RecognitionResult?> = _result.asStateFlow()
 
+    /**
+     * Artist and title asked for separately, as on the desktop.
+     *
+     * Two boxes rather than one because it is what lets the ranker score each
+     * half against the right field. Given "Bohemian Rhapsody" and "Queen" as
+     * one string, a cover uploaded as "Bohemian Rhapsody - Queen" by somebody
+     * who is not Queen scores almost as highly as the real recording; told
+     * which half is the performer, it does not.
+     */
+    private val _artist = MutableStateFlow("")
+    val artist: StateFlow<String> = _artist.asStateFlow()
+
+    private val _title = MutableStateFlow("")
+    val title: StateFlow<String> = _title.asStateFlow()
+
+    fun setArtist(value: String) { _artist.value = value }
+
+    fun setTitle(value: String) { _title.value = value }
+
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
@@ -292,7 +311,19 @@ class RecognitionViewModel(
         }
     }
 
+    /**
+     * By-name search over the catalogue chain.
+     *
+     * Uses the two fields when either is filled, and falls back to the single
+     * query box otherwise - so a pasted "artist - title" still works.
+     */
     fun searchByName() {
+        val artistText = _artist.value.trim()
+        val titleText = _title.value.trim()
+        if (artistText.isNotEmpty() || titleText.isNotEmpty()) {
+            searchByFields(artistText, titleText)
+            return
+        }
         val text = _query.value.trim()
         if (text.isEmpty()) return
         _sourceLabel.value = null
@@ -306,6 +337,35 @@ class RecognitionViewModel(
                 // happened to come back in. Without this a search for one song
                 // returns another that merely shares a couple of words.
                 val matches = MatchRanker.rank(text, found)
+                val dropped = found.size - matches.size
+                _sourceLabel.value = buildString {
+                    append(
+                        matches.map { it.provider }.distinct()
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · ")
+                    )
+                    if (dropped > 0) append("  — $dropped unrelated hidden")
+                }.takeIf { it.isNotBlank() }
+                if (matches.isEmpty()) RecognitionResult.NoMatch
+                else RecognitionResult.Found(matches)
+            }.getOrElse { RecognitionResult.Error(it.message ?: "Search failed.") }
+            _stage.value = RecognitionStage.IDLE
+        }
+    }
+
+    private fun searchByFields(artistText: String, titleText: String) {
+        _sourceLabel.value = null
+        viewModelScope.launch {
+            _result.value = null
+            _stage.value = RecognitionStage.SEARCHING
+            _result.value = runCatching {
+                // The providers take one string, so the halves are joined for
+                // the lookup and separated again only for scoring.
+                val combined = listOf(artistText, titleText)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ")
+                val found = search.searchAll(combined)
+                val matches = MatchRanker.rankSplit(artistText, titleText, found)
                 val dropped = found.size - matches.size
                 _sourceLabel.value = buildString {
                     append(

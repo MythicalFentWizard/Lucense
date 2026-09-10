@@ -58,6 +58,8 @@ fun EffectsSheet(
     mirrorOutputs: Boolean,
     onPickOutput: (String) -> Unit,
     onMirrorOutputs: (Boolean) -> Unit,
+    /** Drives the "live"/"idle" note on the meter. */
+    playing: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -66,6 +68,11 @@ fun EffectsSheet(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
     ) {
+        // Above the controls, as on the Windows build: the effects are the
+        // reason to look at the meter, so it belongs where the effects are and
+        // it only runs while this sheet is open.
+        SpectrumMeter(playing = playing, modifier = Modifier.padding(bottom = 16.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 Icons.Default.GraphicEq,
