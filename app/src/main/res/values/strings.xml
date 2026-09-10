@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Resonate</string>
+    <string name="share_target_label">Add to Resonate</string>
+    <string name="open_target_label">Play in Resonate</string>
+
+    <string name="notif_channel_playback">Playback</string>
+    <string name="notif_channel_playback_desc">Controls for the currently playing track</string>
+
+    <string name="import_title">Adding to your library</string>
+    <string name="import_done">Added to library</string>
+    <string name="import_open_library">Open library</string>
+    <string name="import_play_now">Play now</string>
+    <string name="import_dismiss">Done</string>
+</resources>

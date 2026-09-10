@@ -1,0 +1,30 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Toolchain fetched by tools/fetch-deps.sh — large, reproducible, not source.
+.android-sdk/
+.gradle-dist/
+
+# Bundled command-line tools. Fetched by tools/fetch-tools.sh rather than
+# committed: ffmpeg.exe alone is 139 MB, past GitHub's 100 MB file limit, and
+# it is an unmodified upstream GPL build that is better linked than vendored.
+desktop/resources/windows-x64/*.exe
+
+# Vendored Android SDK and the archives it was unpacked from. The folder name
+# contains a space, which is exactly why an "sdk/" rule silently missed it.
+sdk/
+sdk files/
+*.rar
+*.zip
+
+# Scratch output from build and probe scripts.
+*.log
+.chain.sh
+.wait-both.sh
+.kotlin/
