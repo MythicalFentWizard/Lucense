@@ -1,5 +1,12 @@
 package com.exo.musicplayer.ui.common
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +45,7 @@ import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.util.asDuration
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun TrackRow(
     track: Track,
     isCurrent: Boolean,
@@ -51,18 +59,62 @@ fun TrackRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     /** Playlist views remove the entry rather than the file, so the wording differs. */
-    deleteLabel: String = "Delete from library"
+    deleteLabel: String = "Delete from library",
+    /** Ticked, and tinted, while this row is part of a selection. */
+    isSelected: Boolean = false,
+    /**
+     * Long press. Screens that support selecting several tracks pass this to
+     * start a selection; the ones that do not leave it null and keep the plain
+     * click behaviour, which is why every parameter here has a default.
+     */
+    onLongPress: (() -> Unit)? = null
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(
+                if (onLongPress == null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(
+                        onClick = onClick,
+                        onLongClick = onLongPress
+                    )
+                }
+            )
+            .background(
+                if (isSelected) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                } else {
+                    Color.Transparent
+                }
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Artwork(track = track, size = 52.dp)
+        Box {
+            Artwork(track = track, size = 52.dp)
+            if (isSelected) {
+                // Over the artwork rather than beside it, so entering
+                // selection mode does not shift every row sideways.
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Selected",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+        }
         Spacer(Modifier.width(14.dp))
 
         Column(Modifier.weight(1f)) {

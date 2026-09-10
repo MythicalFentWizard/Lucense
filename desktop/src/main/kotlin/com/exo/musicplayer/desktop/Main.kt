@@ -25,6 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -50,21 +55,43 @@ fun main() = application {
     // The folder picker is Swing; matching the OS look keeps it from standing out.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
 
+    // Held here rather than inside AppHost so the controller outlives
+    // recomposition and the window's key handler can reach it.
+    val scope = rememberCoroutineScope()
+    val controller = remember { DesktopController(scope) }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "Resonate",
-        state = rememberWindowState(width = 1280.dp, height = 820.dp)
+        state = rememberWindowState(width = 1280.dp, height = 820.dp),
+        // Window level, not view level: Ctrl+A has to work whether or not the
+        // track table happens to hold focus, and a text field that owns the
+        // keystroke still gets first refusal because it is a preview handler
+        // only for keys we claim.
+        onPreviewKeyEvent = { event ->
+            when {
+                event.type == KeyEventType.KeyDown &&
+                    event.isCtrlPressed && event.key == Key.A -> {
+                    controller.selectAll(controller.visibleTracks)
+                    true
+                }
+                event.type == KeyEventType.KeyDown && event.key == Key.Escape &&
+                    controller.hasSelection -> {
+                    controller.clearSelection()
+                    true
+                }
+                else -> false
+            }
+        }
     ) {
         ResonateDesktopTheme {
-            AppHost()
+            AppHost(controller)
         }
     }
 }
 
 @Composable
-private fun AppHost() {
-    val scope = rememberCoroutineScope()
-    val controller = remember { DesktopController(scope) }
+private fun AppHost(controller: DesktopController) {
     val status by controller.engine.status.collectAsState()
 
     // Shown once per launch, not on every navigation — a splash that reappears

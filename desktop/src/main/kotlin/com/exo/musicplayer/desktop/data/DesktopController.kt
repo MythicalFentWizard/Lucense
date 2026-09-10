@@ -5,6 +5,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.exo.musicplayer.data.archive.ArchiveEntry
+import com.exo.musicplayer.data.archive.MusicArchive
 import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.data.download.LinkResolver
 import com.exo.musicplayer.data.download.ResolvedLink
@@ -1533,6 +1535,260 @@ class DesktopController(private val scope: CoroutineScope) {
     }
 
     val downloadDir: String get() = settings.downloadDir
+
+    // ---- Selecting several tracks -------------------------------------------
+    //
+    // Windows conventions, because this is a Windows app: Ctrl+click toggles
+    // one, Shift+click takes a range from the last thing touched, Ctrl+A takes
+    // everything on screen, Escape drops it. A plain click still plays, which
+    // is the one place this differs from a file manager - it is a music player
+    // first, and losing click-to-play to gain click-to-select would be a poor
+    // trade.
+    //
+    // Held as absolute paths rather than indices: the table is re-sorted and
+    // re-filtered constantly, and an index would silently come to mean a
+    // different track.
+
+    var selectedPaths by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** Where a Shift+click range measures from. */
+    private var selectionAnchor: String? = null
+
+    val hasSelection: Boolean get() = selectedPaths.isNotEmpty()
+
+    fun clearSelection() {
+        selectedPaths = emptySet()
+        selectionAnchor = null
+    }
+
+    /** Ctrl+click: add or remove one, and move the anchor here. */
+    fun toggleSelection(track: DesktopTrack) {
+        val path = track.file.absolutePath
+        selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
+        selectionAnchor = path
+    }
+
+    /**
+     * Shift+click: everything between the anchor and here.
+     *
+     * With no anchor yet this behaves as a plain Ctrl+click, which is what
+     * every file manager does on a first Shift+click.
+     */
+    fun extendSelection(track: DesktopTrack, visible: List<DesktopTrack>) {
+        val anchorPath = selectionAnchor
+        if (anchorPath == null) {
+            toggleSelection(track)
+            return
+        }
+        val from = visible.indexOfFirst { it.file.absolutePath == anchorPath }
+        val to = visible.indexOfFirst { it.file.absolutePath == track.file.absolutePath }
+        if (from < 0 || to < 0) {
+            toggleSelection(track)
+            return
+        }
+        val range = if (from <= to) from..to else to..from
+        // Added to what is already selected rather than replacing it, so
+        // Ctrl+click then Shift+click builds up as expected.
+        selectedPaths = selectedPaths + range.map { visible[it].file.absolutePath }
+    }
+
+    fun selectAll(visible: List<DesktopTrack>) {
+        selectedPaths = visible.map { it.file.absolutePath }.toSet()
+        selectionAnchor = visible.lastOrNull()?.file?.absolutePath
+    }
+
+    fun selectedTracks(visible: List<DesktopTrack>): List<DesktopTrack> =
+        visible.filter { it.file.absolutePath in selectedPaths }
+
+    /** Plays the selection, in the order it appears on screen. */
+    fun playSelection(visible: List<DesktopTrack>) {
+        val chosen = selectedTracks(visible)
+        chosen.firstOrNull()?.let { play(it, chosen) }
+    }
+
+    fun favouriteSelection(visible: List<DesktopTrack>) {
+        val chosen = selectedTracks(visible)
+        if (chosen.isEmpty()) return
+        // One decision for the whole selection: if any are not favourites,
+        // favourite all of them. Toggling each would leave a mixed set mixed.
+        val makeFavourite = chosen.any { it.file.absolutePath !in favourites }
+        scope.launch {
+            io {
+                for (track in chosen) {
+                    store.setFavourite(track.file.absolutePath, makeFavourite)
+                }
+            }
+            favourites = io { store.favourites() }
+        }
+    }
+
+    fun zipSelection(visible: List<DesktopTrack>) {
+        val chosen = selectedTracks(visible)
+        clearSelection()
+        startArchive("Selection", chosen)
+    }
+
+    /** Opens the containing folder, selecting the first of them. */
+    fun revealSelection(visible: List<DesktopTrack>) {
+        val first = selectedTracks(visible).firstOrNull() ?: return
+        runCatching {
+            ProcessBuilder("explorer.exe", "/select,${first.file.absolutePath}").start()
+        }
+    }
+
+    /**
+     * Sends the selected files to the Recycle Bin.
+     *
+     * Not [java.io.File.delete]: these are the user's own files in their own
+     * folders, and a mis-click has to be recoverable.
+     */
+    fun deleteSelection(visible: List<DesktopTrack>) {
+        val chosen = selectedTracks(visible)
+        if (chosen.isEmpty()) return
+        clearSelection()
+        scope.launch {
+            val removed = io {
+                chosen.count { track ->
+                    runCatching {
+                        val desktop = java.awt.Desktop.getDesktop()
+                        if (desktop.isSupported(java.awt.Desktop.Action.MOVE_TO_TRASH)) {
+                            desktop.moveToTrash(track.file)
+                        } else {
+                            track.file.delete()
+                        }
+                    }.getOrDefault(false)
+                }
+            }
+            io { store.forgetPaths(chosen.map { it.file.absolutePath }) }
+            archiveNote = null
+            rescan()
+            selectionNote = "Moved $removed file${if (removed == 1) "" else "s"} to the Recycle Bin."
+        }
+    }
+
+    var selectionNote by mutableStateOf<String?>(null)
+        private set
+
+    fun dismissSelectionNote() { selectionNote = null }
+
+    // ---- Zip and ship -------------------------------------------------------
+
+    /** Progress and outcome of the current archive job. */
+    var archiveRunning by mutableStateOf(false)
+        private set
+    var archiveProgress by mutableStateOf(0f)
+        private set
+    var archiveCurrent by mutableStateOf("")
+        private set
+    var archiveNote by mutableStateOf<String?>(null)
+        private set
+    var archiveFile by mutableStateOf<File?>(null)
+        private set
+
+    private var archiveJob: Job? = null
+    @Volatile private var archiveCancelled = false
+
+    /** Zips the whole library. */
+    fun zipLibrary() = startArchive("Library", tracks)
+
+    /** Zips one playlist, in its own order. */
+    fun zipPlaylist(playlist: StoredPlaylist) {
+        scope.launch {
+            val paths = io { store.playlistPaths(playlist.id) }
+            val byPath = tracks.associateBy { it.file.absolutePath }
+            startArchive(playlist.name, paths.mapNotNull { byPath[it] })
+        }
+    }
+
+    /**
+     * Packs [chosen] into a zip beside the downloads folder.
+     *
+     * Entry names carry the artist so an archive is navigable once unpacked —
+     * a folder of two hundred files called "01.mp3" is not. Numbering keeps a
+     * playlist's order, which the filesystem would otherwise sort away.
+     */
+    internal fun startArchive(label: String, chosen: List<DesktopTrack>) {
+        if (archiveRunning) return
+        if (chosen.isEmpty()) {
+            archiveNote = "Nothing to archive."
+            return
+        }
+
+        archiveCancelled = false
+        archiveRunning = true
+        archiveProgress = 0f
+        archiveNote = null
+        archiveFile = null
+
+        archiveJob = scope.launch {
+            val stamp = java.time.LocalDate.now().toString()
+            val destination = File(
+                File(settings.downloadDir, "archives"),
+                MusicArchive.safeName("Resonate $label $stamp") + ".zip"
+            )
+            val digits = chosen.size.toString().length
+            val entries = chosen.mapIndexed { index, track ->
+                val number = (index + 1).toString().padStart(digits, '0')
+                val artist = track.artist?.takeIf { it.isNotBlank() }
+                val stem = listOfNotNull(artist, track.title).joinToString(" - ")
+                ArchiveEntry(
+                    source = track.file,
+                    entryName = "$number ${MusicArchive.safeName(stem)}.${track.file.extension}"
+                )
+            }
+
+            val result = io {
+                MusicArchive.zip(
+                    entries = entries,
+                    destination = destination,
+                    onProgress = { progress ->
+                        archiveProgress = progress.fraction
+                        archiveCurrent = progress.currentName
+                    },
+                    shouldContinue = { !archiveCancelled }
+                )
+            }
+
+            archiveRunning = false
+            archiveCurrent = ""
+            result.fold(
+                onSuccess = { done ->
+                    archiveFile = done.file
+                    archiveNote = buildString {
+                        append("${done.included} tracks, ")
+                        append("%.1f MB".format(done.bytes / 1_048_576.0))
+                        if (done.skipped.isNotEmpty()) {
+                            append(" — ${done.skipped.size} missing from storage")
+                        }
+                    }
+                },
+                onFailure = { archiveNote = it.message ?: "Couldn't build the archive." }
+            )
+            archiveJob = null
+        }
+    }
+
+    fun cancelArchive() {
+        archiveCancelled = true
+        archiveJob?.cancel()
+        archiveJob = null
+        archiveRunning = false
+        archiveNote = "Cancelled."
+    }
+
+    /** Opens the folder the archive landed in, and selects it. */
+    fun revealArchive() {
+        val file = archiveFile ?: return
+        runCatching {
+            ProcessBuilder("explorer.exe", "/select,${file.absolutePath}").start()
+        }
+    }
+
+    fun dismissArchive() {
+        archiveNote = null
+        archiveFile = null
+    }
 
     // ---- Duplicates ---------------------------------------------------------
 

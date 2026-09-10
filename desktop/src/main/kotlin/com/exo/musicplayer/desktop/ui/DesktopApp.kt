@@ -31,9 +31,13 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -69,6 +73,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -146,6 +152,8 @@ fun DesktopApp(
                             dialog = DialogKind.DUPLICATES
                         }
                     )
+
+                    ArchiveStrip(controller)
 
                     if (controller.scanning) {
                         LinearProgressIndicator(
@@ -407,6 +415,12 @@ private fun ContentHeader(
                     icon = Icons.Default.ContentCopy,
                     onClick = onDuplicates
                 )
+                Spacer(Modifier.width(8.dp))
+                GhostButton(
+                    "Zip and ship",
+                    enabled = !controller.archiveRunning,
+                    icon = Icons.Default.Archive
+                ) { controller.zipLibrary() }
             }
         }
     }
@@ -468,7 +482,28 @@ private fun LibraryPane(
         return
     }
 
+    // Ctrl and Shift are read at click time rather than tracked, because a
+    // modifier held down between compositions is not an event.
+    val windowInfo = LocalWindowInfo.current
+
     Column(Modifier.fillMaxSize()) {
+        if (controller.hasSelection) {
+            SelectionBar(controller, tracks)
+        }
+        controller.selectionNote?.let { note ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Dismiss") { controller.dismissSelectionNote() }
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -493,7 +528,21 @@ private fun LibraryPane(
                     controller = controller,
                     isCurrent = track.file == nowPlaying?.file,
                     isFavourite = track.file.absolutePath in controller.favourites,
-                    onPlay = { controller.play(track, tracks) },
+                    isSelected = track.file.absolutePath in controller.selectedPaths,
+                    onPlay = {
+                        val modifiers = windowInfo.keyboardModifiers
+                        when {
+                            modifiers.isCtrlPressed -> controller.toggleSelection(track)
+                            modifiers.isShiftPressed -> controller.extendSelection(track, tracks)
+                            else -> {
+                                // A plain click plays, and drops any selection -
+                                // leaving one active behind the thing you just
+                                // started would be a trap.
+                                controller.clearSelection()
+                                controller.play(track, tracks)
+                            }
+                        }
+                    },
                     onAddToPlaylist = { onAddToPlaylist(listOf(track)) },
                     onIdentify = { onIdentify(track) }
                 )
@@ -528,6 +577,7 @@ private fun TrackRow(
     controller: DesktopController,
     isCurrent: Boolean,
     isFavourite: Boolean,
+    isSelected: Boolean,
     onPlay: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onIdentify: () -> Unit
@@ -556,6 +606,9 @@ private fun TrackRow(
                 .fillMaxWidth()
                 .background(
                     when {
+                        // Selection outranks "now playing" here: while a
+                        // selection exists it is the thing being acted on.
+                        isSelected -> Palette.Accent.copy(alpha = 0.20f)
                         isCurrent -> Palette.Selected
                         hovered -> Palette.Hover
                         else -> Color.Transparent
@@ -569,7 +622,14 @@ private fun TrackRow(
             Box(Modifier.width(40.dp)) {
                 // The row number gives way to a play affordance on hover, which
                 // is how desktop players signal "click here" without a button.
-                if (hovered) {
+                if (isSelected) {
+                    Icon(
+                        Icons.Default.Check,
+                        null,
+                        Modifier.size(15.dp),
+                        tint = Palette.Accent
+                    )
+                } else if (hovered) {
                     Icon(Icons.Default.PlayArrow, null, Modifier.size(15.dp), tint = Palette.Text)
                 } else {
                     Text(
@@ -883,5 +943,137 @@ private fun revealInExplorer(file: File) {
                 if (Desktop.isDesktopSupported()) Desktop.getDesktop().open(parent)
             }
         }
+    }
+}
+
+/**
+ * Progress and outcome of a zip, under the toolbar.
+ *
+ * Shown here rather than in a dialog because archiving a large library takes a
+ * while and there is no reason to block the app during it - you can carry on
+ * browsing and come back when the path appears.
+ */
+@Composable
+private fun ArchiveStrip(controller: DesktopController) {
+    val note = controller.archiveNote
+    val file = controller.archiveFile
+    if (!controller.archiveRunning && note == null) return
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Palette.Raised)
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.Archive,
+                null,
+                Modifier.size(15.dp),
+                tint = Palette.Accent
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (controller.archiveRunning) "Building archive" else "Archive ready",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Palette.Text,
+                modifier = Modifier.weight(1f)
+            )
+            if (controller.archiveRunning) {
+                GhostButton("Stop") { controller.cancelArchive() }
+            } else {
+                if (file != null) {
+                    GhostButton("Open folder", icon = Icons.Default.FolderOpen) {
+                        controller.revealArchive()
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                GhostButton("Dismiss") { controller.dismissArchive() }
+            }
+        }
+
+        if (controller.archiveRunning) {
+            Spacer(Modifier.height(9.dp))
+            ThinProgress(controller.archiveProgress)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                controller.archiveCurrent,
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        note?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.Accent)
+        }
+        // The path is the point of the feature, so it is spelled out in full
+        // rather than left for the user to go and find.
+        file?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                it.absolutePath,
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextDim
+            )
+        }
+    }
+}
+
+/**
+ * Actions for a multi-track selection.
+ *
+ * Ctrl+click to add one, Shift+click for a run, Ctrl+A for everything on
+ * screen, Escape to drop it - the shortcuts a Windows user already has in their
+ * fingers, so the bar states them rather than teaching them.
+ */
+@Composable
+private fun SelectionBar(controller: DesktopController, visible: List<DesktopTrack>) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Palette.Selected)
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "${controller.selectedPaths.size} selected",
+            style = MaterialTheme.typography.titleMedium,
+            color = Palette.Text
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "Ctrl+click to add · Shift+click for a range · Ctrl+A for all · Esc to clear",
+            style = MaterialTheme.typography.labelSmall,
+            color = Palette.TextFaint,
+            modifier = Modifier.weight(1f)
+        )
+
+        GhostButton("Play", icon = Icons.Default.PlayArrow) {
+            controller.playSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Favourite", icon = Icons.Default.FavoriteBorder) {
+            controller.favouriteSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Zip and ship", icon = Icons.Default.Archive) {
+            controller.zipSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Show in Explorer", icon = Icons.Default.FolderOpen) {
+            controller.revealSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Delete", icon = Icons.Default.Delete) {
+            controller.deleteSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Clear") { controller.clearSelection() }
     }
 }

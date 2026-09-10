@@ -24,26 +24,44 @@ import androidx.compose.ui.unit.sp
  * mobile one.
  */
 object Palette {
-    // The surface stack stays fixed across accents. Recolouring the chrome as
-    // well is what makes themed desktop apps look like skins; keeping one
-    // considered set of greys and moving only the accent is what the apps people
-    // call premium actually do.
-    val Base = Color(0xFF0E0B14)          // window background, deepest layer
-    val Sidebar = Color(0xFF141020)       // navigation rail
-    val Content = Color(0xFF17131F)       // main surface
-    val Raised = Color(0xFF1E1929)        // transport bar, headers
-    val Hover = Color(0xFF262036)
-    val Line = Color(0xFF2A2438)
 
-    val Text = Color(0xFFF4F2F8)
-    val TextDim = Color(0xFFA79FBC)
-    val TextFaint = Color(0xFF6E667F)
-
-    // Snapshot state, so choosing an accent redraws everything reading it
-    // without every screen having to take a theme parameter.
+    /**
+     * Every surface is derived from the chosen accent's hue.
+     *
+     * This used to be a fixed stack with a comment claiming it was "one
+     * considered set of greys". It was not: every value carried Amethyst's
+     * violet hue baked in, so picking Ember gave you a purple window with
+     * orange buttons and the theme picker looked broken. It effectively was.
+     *
+     * Saturation and lightness per layer are fixed and were reverse-engineered
+     * from the old Amethyst values, so that accent looks exactly as it did
+     * (within 1/255 on every channel) while the others finally get their own
+     * hue. Keeping lightness fixed is what preserves the layering: the
+     * window/sidebar/content/raised stack reads the same whichever accent is
+     * chosen, because only the hue moves.
+     *
+     * [AccentChoice.surfaceTint] scales saturation by how saturated the accent
+     * itself is, so Slate - which is nearly neutral - produces nearly neutral
+     * surfaces instead of blue-grey ones.
+     */
     private val current = mutableStateOf(AccentChoice.AMETHYST)
 
     val choice: AccentChoice get() = current.value
+
+    private fun surface(saturation: Float, lightness: Float): Color =
+        Color.hsl(current.value.hue, saturation * current.value.surfaceTint, lightness)
+
+    val Base: Color get() = surface(0.30f, 0.061f)       // window, deepest layer
+    val Sidebar: Color get() = surface(0.33f, 0.094f)    // navigation rail
+    val Content: Color get() = surface(0.24f, 0.098f)    // main surface
+    val Raised: Color get() = surface(0.24f, 0.129f)     // transport bar, headers
+    val Hover: Color get() = surface(0.26f, 0.169f)
+    val Line: Color get() = surface(0.22f, 0.180f)
+
+    val Text: Color get() = surface(0.30f, 0.961f)
+    val TextDim: Color get() = surface(0.18f, 0.680f)
+    val TextFaint: Color get() = surface(0.11f, 0.449f)
+
     val Accent: Color get() = current.value.accent
     val AccentSoft: Color get() = current.value.soft
     val Selected: Color get() = current.value.selected
@@ -57,23 +75,45 @@ object Palette {
 /**
  * The accent palettes.
  *
- * Purple leads because it is what Resonate has always been; the rest are chosen
- * to hold the same contrast against the dark stack rather than to be a spread of
- * hues for its own sake.
+ * Purple leads because it is what Resonate has always been. [hue] drives the
+ * whole surface stack, and [surfaceTint] is the accent's own saturation - a
+ * near-grey accent has no business tinting the chrome.
  */
 enum class AccentChoice(
     val label: String,
     val accent: Color,
     val soft: Color,
     val selected: Color,
-    val onAccent: Color
+    val onAccent: Color,
+    /** Hue in degrees, taken from [accent]. */
+    val hue: Float,
+    /** How strongly the surfaces take that hue, 0..1. */
+    val surfaceTint: Float
 ) {
-    AMETHYST("Amethyst", Color(0xFFB99BFF), Color(0xFF6E56A8), Color(0xFF322A48), Color(0xFF25143F)),
-    EMBER("Ember", Color(0xFFFF9B7A), Color(0xFFA85B41), Color(0xFF48302A), Color(0xFF3F1A0E)),
-    MERIDIAN("Meridian", Color(0xFF7ACBFF), Color(0xFF3F7CA8), Color(0xFF243A48), Color(0xFF06283F)),
-    MOSS("Moss", Color(0xFF8FE0A8), Color(0xFF448A5C), Color(0xFF26402F), Color(0xFF0C2E18)),
-    ROSE("Rose", Color(0xFFFF9BC4), Color(0xFFA85177), Color(0xFF482A38), Color(0xFF3F0E24)),
-    SLATE("Slate", Color(0xFFC7CBD6), Color(0xFF6C7183), Color(0xFF32353F), Color(0xFF1B1D24));
+    AMETHYST(
+        "Amethyst", Color(0xFFB99BFF), Color(0xFF6E56A8), Color(0xFF322A48),
+        Color(0xFF25143F), hue = 258f, surfaceTint = 1.00f
+    ),
+    EMBER(
+        "Ember", Color(0xFFFF9B7A), Color(0xFFA85B41), Color(0xFF48302A),
+        Color(0xFF3F1A0E), hue = 15f, surfaceTint = 1.00f
+    ),
+    MERIDIAN(
+        "Meridian", Color(0xFF7ACBFF), Color(0xFF3F7CA8), Color(0xFF243A48),
+        Color(0xFF06283F), hue = 203f, surfaceTint = 1.00f
+    ),
+    MOSS(
+        "Moss", Color(0xFF8FE0A8), Color(0xFF448A5C), Color(0xFF26402F),
+        Color(0xFF0C2E18), hue = 139f, surfaceTint = 0.57f
+    ),
+    ROSE(
+        "Rose", Color(0xFFFF9BC4), Color(0xFFA85177), Color(0xFF482A38),
+        Color(0xFF3F0E24), hue = 335f, surfaceTint = 1.00f
+    ),
+    SLATE(
+        "Slate", Color(0xFFC7CBD6), Color(0xFF6C7183), Color(0xFF32353F),
+        Color(0xFF1B1D24), hue = 224f, surfaceTint = 0.15f
+    );
 
     companion object {
         fun fromName(name: String?): AccentChoice =
@@ -81,8 +121,6 @@ enum class AccentChoice(
     }
 }
 
-// Read inside the theme composable rather than held in a top-level val, so
-// switching accent takes effect without a restart.
 @Composable
 private fun desktopColors() = darkColorScheme(
     primary = Palette.Accent,

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Save
@@ -323,6 +324,12 @@ private fun OpenPlaylist(
                 }
                 Spacer(Modifier.width(8.dp))
                 GhostButton("Rename") { renaming = true }
+                Spacer(Modifier.width(8.dp))
+                GhostButton(
+                    "Zip and ship",
+                    enabled = !controller.archiveRunning,
+                    icon = Icons.Default.Archive
+                ) { controller.zipPlaylist(playlist) }
                 Spacer(Modifier.width(8.dp))
                 GhostButton("Export…", icon = Icons.Default.Save) {
                     onPickPlaylistFile(true, playlist.name)?.let {
