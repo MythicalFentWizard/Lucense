@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -61,10 +63,16 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
 
     fun run() {
         when (mode) {
-            IdentifyMode.NAME -> controller.searchCatalogues()
+            IdentifyMode.NAME -> controller.searchByFields()
             IdentifyMode.LYRICS -> controller.searchByLyrics()
             IdentifyMode.LINK -> controller.identifyLink()
         }
+    }
+
+    val canRun = when (mode) {
+        IdentifyMode.NAME ->
+            controller.identifyArtist.isNotBlank() || controller.identifyTitle.isNotBlank()
+        else -> controller.identifyQuery.isNotBlank()
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
@@ -94,23 +102,56 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
             Spacer(Modifier.height(12.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextInput(
-                    value = controller.identifyQuery,
-                    onValueChange = { controller.identifyQuery = it },
-                    placeholder = mode.placeholder,
-                    leading = if (mode == IdentifyMode.LINK) {
-                        Icons.Default.Link
-                    } else {
-                        Icons.Default.Search
-                    },
-                    modifier = Modifier.weight(1f),
-                    onSubmit = { run() }
-                )
+                if (mode == IdentifyMode.NAME) {
+                    // Two boxes rather than one. Telling the ranker which half
+                    // is the performer is what lets it reject a cover titled
+                    // "Bohemian Rhapsody - Queen" by somebody who is not Queen.
+                    TextInput(
+                        value = controller.identifyArtist,
+                        onValueChange = { controller.identifyArtist = it },
+                        placeholder = "Artist name",
+                        leading = Icons.Default.Person,
+                        modifier = Modifier.weight(1f),
+                        onSubmit = { run() }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextInput(
+                        value = controller.identifyTitle,
+                        onValueChange = { controller.identifyTitle = it },
+                        placeholder = "Song name",
+                        leading = Icons.Default.MusicNote,
+                        modifier = Modifier.weight(1.3f),
+                        onSubmit = { run() }
+                    )
+                } else {
+                    TextInput(
+                        value = controller.identifyQuery,
+                        onValueChange = { controller.identifyQuery = it },
+                        placeholder = mode.placeholder,
+                        leading = if (mode == IdentifyMode.LINK) {
+                            Icons.Default.Link
+                        } else {
+                            Icons.Default.Search
+                        },
+                        modifier = Modifier.weight(1f),
+                        onSubmit = { run() }
+                    )
+                }
                 Spacer(Modifier.width(10.dp))
                 AccentButton(
                     if (mode == IdentifyMode.LINK) "Identify" else "Search",
-                    enabled = !controller.identifyBusy && controller.identifyQuery.isNotBlank()
+                    enabled = !controller.identifyBusy && canRun
                 ) { run() }
+            }
+
+            if (mode == IdentifyMode.NAME) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Either box on its own works too — the artist alone to browse what " +
+                        "they have, the song alone when the artist is what you have forgotten.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.TextFaint
+                )
             }
 
             Spacer(Modifier.height(10.dp))
@@ -172,28 +213,91 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
             EmptyState(
                 icon = Icons.Default.Fingerprint,
                 title = "Nothing found yet",
-                body = "Search by name or by a line of lyrics, paste a link, or point it at " +
-                    "an audio\nor video file and let the fingerprinter work it out."
+                body = "Search by artist and song, by a line of lyrics, paste a link, or\n" +
+                    "point it at an audio or video file and let the fingerprinter work it out."
             )
         } else {
+            // Grouped so the rows you can act on are the ones you land on.
+            // Streaming-only results are still worth keeping for their names,
+            // years and cover art, but they cannot be downloaded, so burying
+            // the downloadable ones underneath them just makes for scrolling.
+            val downloadable = controller.identifyResults.filterNot { it.drmProtected }
+            val detailsOnly = controller.identifyResults.filter { it.drmProtected }
+
             LazyColumn(Modifier.fillMaxSize()) {
-                items(controller.identifyResults) { match ->
-                    MatchRow(
-                        match = match,
-                        target = target,
-                        onApply = { target?.let { controller.applyMatch(it, match) } },
-                        onDownload = { controller.downloadMatch(match) },
-                        onUseAsQuery = {
-                            controller.identifyQuery = match.display
-                            controller.identifyMode = IdentifyMode.NAME
-                            controller.searchCatalogues(match.display)
-                        }
-                    )
-                    Spacer(Modifier.height(6.dp))
+                if (downloadable.isNotEmpty()) {
+                    item {
+                        ResultHeading(
+                            "Ready to download",
+                            "${downloadable.size}",
+                            Palette.Accent
+                        )
+                    }
+                    items(downloadable) { match ->
+                        MatchRow(
+                            match = match,
+                            target = target,
+                            onApply = { target?.let { controller.applyMatch(it, match) } },
+                            onDownload = { controller.downloadMatch(match) },
+                            onUseAsQuery = {
+                                controller.identifyTitle = match.title
+                                controller.identifyArtist = match.artist.orEmpty()
+                                controller.identifyMode = IdentifyMode.NAME
+                                controller.searchByFields()
+                            }
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+
+                if (detailsOnly.isNotEmpty()) {
+                    item {
+                        Spacer(Modifier.height(if (downloadable.isEmpty()) 0.dp else 10.dp))
+                        ResultHeading(
+                            "Details only — streaming services",
+                            "${detailsOnly.size}",
+                            Palette.TextFaint
+                        )
+                    }
+                    items(detailsOnly) { match ->
+                        MatchRow(
+                            match = match,
+                            target = target,
+                            onApply = { target?.let { controller.applyMatch(it, match) } },
+                            onDownload = { controller.downloadMatch(match) },
+                            onUseAsQuery = {
+                                controller.identifyTitle = match.title
+                                controller.identifyArtist = match.artist.orEmpty()
+                                controller.identifyMode = IdentifyMode.NAME
+                                controller.searchByFields()
+                            }
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
                 }
                 item { Spacer(Modifier.height(20.dp)) }
             }
         }
+    }
+}
+
+/** Section divider above a group of results. */
+@Composable
+private fun ResultHeading(label: String, count: String, colour: Color) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = colour
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(count, style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f).height(1.dp).background(Palette.Line))
     }
 }
 

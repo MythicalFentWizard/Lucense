@@ -5,6 +5,8 @@ import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -206,6 +208,13 @@ fun DesktopApp(
             )
         }
 
+        // Editing is driven off the controller rather than the local dialog
+        // state, because it is opened from the row context menu and from the
+        // Identify screen, and neither should have to know about the other.
+        controller.editTarget?.let { track ->
+            EditTrackDialog(controller, track) { controller.dismissEdit() }
+        }
+
         when (dialog) {
             DialogKind.BULK -> BulkToolsDialog(controller) { dialog = null }
             DialogKind.DUPLICATES -> DuplicatesDialog(controller) { dialog = null }
@@ -367,19 +376,30 @@ private fun ContentHeader(
                     .padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SegmentedRow(
-                    options = SortMode.entries,
-                    selected = controller.sort,
-                    label = { it.label },
-                    onSelect = { controller.sort = it }
-                )
-                Spacer(Modifier.width(10.dp))
-                FilterToggle(
-                    label = "Favourites",
-                    active = controller.favouritesOnly
-                ) { controller.favouritesOnly = !controller.favouritesOnly }
+                // Seven sort options, a filter and two buttons do not fit
+                // across the content pane once a side panel is open, and a Row
+                // resolves that by crushing its children - which turned "Bulk
+                // tools" into one letter per line. The sort chips scroll
+                // instead, and the buttons sit outside the weighted region so
+                // they keep their intrinsic width whatever else happens.
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SegmentedRow(
+                        options = SortMode.entries,
+                        selected = controller.sort,
+                        label = { it.label },
+                        onSelect = { controller.sort = it }
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    FilterToggle(
+                        label = "Favourites",
+                        active = controller.favouritesOnly
+                    ) { controller.favouritesOnly = !controller.favouritesOnly }
+                    Spacer(Modifier.width(10.dp))
+                }
 
-                Spacer(Modifier.weight(1f))
                 GhostButton("Bulk tools", icon = Icons.Default.Tune, onClick = onBulk)
                 Spacer(Modifier.width(8.dp))
                 GhostButton(
@@ -526,6 +546,7 @@ private fun TrackRow(
                 ) { controller.toggleFavourite(track) },
                 ContextMenuItem("Add to playlist...") { onAddToPlaylist() },
                 ContextMenuItem("Identify this track") { onIdentify() },
+                ContextMenuItem("Edit details...") { controller.editTarget = track },
                 ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) }
             )
         }

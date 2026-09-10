@@ -147,7 +147,15 @@ object Covers {
             .joinToString("") { "%02x".format(it) }
 }
 
-/** Writes identified metadata back into the file's tags. */
+/**
+ * Writes metadata back into a file's tags.
+ *
+ * Two callers with opposite needs, hence [clearBlanks]. Automatic
+ * identification must never wipe a field it has no opinion about, so a null or
+ * blank value there means "leave it alone". Hand editing must be able to empty
+ * a field, because correcting a wrong album name to nothing is a legitimate
+ * edit and a writer that silently ignored it would look broken.
+ */
 object TagWriter {
 
     fun write(
@@ -155,14 +163,24 @@ object TagWriter {
         title: String?,
         artist: String?,
         album: String?,
-        year: Int?
+        year: Int?,
+        clearBlanks: Boolean = false
     ): Result<Unit> = runCatching {
         val audio = AudioFileIO.read(file)
         val tag = audio.tagOrCreateAndSetDefault
-        title?.takeIf { it.isNotBlank() }?.let { tag.setField(FieldKey.TITLE, it) }
-        artist?.takeIf { it.isNotBlank() }?.let { tag.setField(FieldKey.ARTIST, it) }
-        album?.takeIf { it.isNotBlank() }?.let { tag.setField(FieldKey.ALBUM, it) }
-        year?.let { tag.setField(FieldKey.YEAR, it.toString()) }
+
+        fun apply(key: FieldKey, value: String?) {
+            val text = value?.trim()
+            when {
+                !text.isNullOrEmpty() -> tag.setField(key, text)
+                clearBlanks -> runCatching { tag.deleteField(key) }
+            }
+        }
+
+        apply(FieldKey.TITLE, title)
+        apply(FieldKey.ARTIST, artist)
+        apply(FieldKey.ALBUM, album)
+        apply(FieldKey.YEAR, year?.toString())
         audio.commit()
     }
 }

@@ -30,6 +30,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import com.exo.musicplayer.desktop.audio.SpectrumAnalyser
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.data.audio.EffectPreset
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.library.DesktopTrack
@@ -56,6 +65,31 @@ data class DesktopFxState(
 ) {
     val isDefault: Boolean
         get() = abs(speed - 1f) < 0.005f && abs(pitchSemitones) < 0.05f && !reverbEnabled
+
+    /**
+     * Maps a shared preset onto this platform's reverb model.
+     *
+     * The shared definition gives room size abstractly, 0..1; here that becomes
+     * the Schroeder decay coefficient, whose useful range stops at 0.94 because
+     * beyond that the comb filters ring rather than decay.
+     */
+    fun applying(preset: EffectPreset) = DesktopFxState(
+        speed = preset.speed,
+        pitchSemitones = preset.pitchSemitones,
+        reverbEnabled = preset.reverb,
+        reverbMix = preset.reverbAmount,
+        reverbDecay = 0.40f + preset.roomSize * 0.54f
+    )
+
+    /** Whether these settings are still the ones [preset] would set. */
+    fun matches(preset: EffectPreset): Boolean {
+        if (reverbEnabled != preset.reverb) return false
+        if (abs(speed - preset.speed) > 0.005f) return false
+        if (abs(pitchSemitones - preset.pitchSemitones) > 0.05f) return false
+        if (!reverbEnabled) return true
+        return abs(reverbMix - preset.reverbAmount) < 0.02f &&
+            abs(reverbDecay - (0.40f + preset.roomSize * 0.54f)) < 0.02f
+    }
 }
 
 /**
@@ -76,19 +110,10 @@ fun SidePanel(
 ) {
     Column(
         Modifier
-            .width(if (kind == SidePanelKind.LYRICS) 340.dp else 288.dp)
+            .width(if (kind == SidePanelKind.OUTPUT) 288.dp else 348.dp)
             .fillMaxHeight()
             .background(Palette.Sidebar)
             .padding(horizontal = 18.dp, vertical = 16.dp)
-            .then(
-                // The lyrics panel scrolls its own list; the others are short
-                // enough to scroll as one column.
-                if (kind == SidePanelKind.LYRICS) {
-                    Modifier
-                } else {
-                    Modifier.verticalScroll(rememberScrollState())
-                }
-            )
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -107,8 +132,25 @@ fun SidePanel(
         }
         Spacer(Modifier.height(10.dp))
 
+        // The title and close button sit outside the scroll region: the
+        // effects panel is taller than the window on a short display, and
+        // scrolling the header away takes the way out with it.
+        Column(
+            Modifier.then(
+                if (kind == SidePanelKind.LYRICS) {
+                    Modifier
+                } else {
+                    Modifier.verticalScroll(rememberScrollState())
+                }
+            )
+        ) {
         when (kind) {
-            SidePanelKind.EFFECTS -> EffectsControls(controller.fx) { controller.fx = it }
+            SidePanelKind.EFFECTS -> EffectsControls(
+                fx = controller.fx,
+                spectrum = controller.engine.spectrum,
+                playing = controller.engine.status.value.playing,
+                onFx = { controller.fx = it }
+            )
             SidePanelKind.OUTPUT -> OutputControls(
                 controller.outputs,
                 controller.selectedOutputs,
@@ -116,30 +158,48 @@ fun SidePanel(
             )
             SidePanelKind.LYRICS -> LyricsPanel(controller, track, positionMs)
         }
+        }
     }
 }
 
 @Composable
-private fun EffectsControls(fx: DesktopFxState, onFx: (DesktopFxState) -> Unit) {
-    Text(
-        "Speed, pitch and reverb are independent — stack them however you like.",
-        style = MaterialTheme.typography.bodySmall,
-        color = Palette.TextDim
-    )
-
-    Spacer(Modifier.height(14.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Preset("Normal", fx.isDefault) { onFx(DesktopFxState()) }
-        Preset("Slowed", abs(fx.speed - 0.85f) < 0.01f) {
-            onFx(fx.copy(speed = 0.85f, pitchSemitones = -1.5f))
-        }
-        Preset("Sped up", abs(fx.speed - 1.25f) < 0.01f) {
-            onFx(fx.copy(speed = 1.25f, pitchSemitones = 1.5f))
-        }
-    }
+private fun EffectsControls(
+    fx: DesktopFxState,
+    spectrum: SpectrumAnalyser,
+    playing: Boolean,
+    onFx: (DesktopFxState) -> Unit
+) {
+    Spectrum(spectrum, playing)
 
     Spacer(Modifier.height(18.dp))
-    Labelled("Speed", "%.2f×".format(fx.speed))
+    Text(
+        "PRESETS",
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = Palette.TextFaint
+    )
+    Spacer(Modifier.height(8.dp))
+    // Two rows: seven presets do not fit across the panel, and shrinking them
+    // to fit would make them unreadable rather than compact.
+    val presets = EffectPreset.entries
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        presets.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { preset ->
+                    Preset(preset.label, fx.matches(preset)) { onFx(fx.applying(preset)) }
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(
+        presets.firstOrNull { fx.matches(it) }?.note ?: "Custom",
+        style = MaterialTheme.typography.labelSmall,
+        color = Palette.TextFaint
+    )
+
+    Spacer(Modifier.height(20.dp))
+    Readout("Speed", "%.2f×".format(fx.speed), "this slider moves tempo alone")
     Slider(
         value = fx.speed,
         onValueChange = { onFx(fx.copy(speed = it)) },
@@ -147,14 +207,10 @@ private fun EffectsControls(fx: DesktopFxState, onFx: (DesktopFxState) -> Unit) 
         steps = 29,
         colors = sliderColours()
     )
-    Text(
-        "Tempo only — pitch stays where you set it.",
-        style = MaterialTheme.typography.labelSmall,
-        color = Palette.TextFaint
-    )
+    TickRow(listOf("0.5", "1.0", "1.5", "2.0"))
 
-    Spacer(Modifier.height(16.dp))
-    Labelled("Pitch", formatSemitones(fx.pitchSemitones))
+    Spacer(Modifier.height(18.dp))
+    Readout("Pitch", formatSemitones(fx.pitchSemitones), intervalName(fx.pitchSemitones, fx.speed))
     PitchBar(fx.pitchSemitones)
     Slider(
         value = fx.pitchSemitones,
@@ -163,16 +219,21 @@ private fun EffectsControls(fx: DesktopFxState, onFx: (DesktopFxState) -> Unit) 
         steps = 95,
         colors = sliderColours()
     )
+    TickRow(listOf("-12", "-6", "0", "+6", "+12"))
     Text(
-        "×%.3f frequency · tempo unaffected".format(2f.pow(fx.pitchSemitones / 12f)),
+        "×%.3f frequency".format(2f.pow(fx.pitchSemitones / 12f)),
         style = MaterialTheme.typography.labelSmall,
         color = Palette.TextFaint
     )
 
-    Spacer(Modifier.height(18.dp))
+    Spacer(Modifier.height(20.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Reverb", style = MaterialTheme.typography.titleMedium,
-            color = Palette.Text, modifier = Modifier.weight(1f))
+        Text(
+            "Reverb",
+            style = MaterialTheme.typography.titleMedium,
+            color = Palette.Text,
+            modifier = Modifier.weight(1f)
+        )
         Switch(
             checked = fx.reverbEnabled,
             onCheckedChange = { onFx(fx.copy(reverbEnabled = it)) },
@@ -184,15 +245,20 @@ private fun EffectsControls(fx: DesktopFxState, onFx: (DesktopFxState) -> Unit) 
         )
     }
     if (fx.reverbEnabled) {
-        Spacer(Modifier.height(6.dp))
-        Labelled("Amount", "${(fx.reverbMix * 100).roundToInt()}%")
+        Spacer(Modifier.height(8.dp))
+        Readout("Amount", "${(fx.reverbMix * 100).roundToInt()}%", "dry against wet")
         Slider(
             value = fx.reverbMix,
             onValueChange = { onFx(fx.copy(reverbMix = it)) },
             valueRange = 0f..1f,
             colors = sliderColours()
         )
-        Labelled("Room size", "${(fx.reverbDecay * 100).roundToInt()}%")
+        Spacer(Modifier.height(6.dp))
+        Readout(
+            "Room size",
+            "${(fx.reverbDecay * 100).roundToInt()}%",
+            if (fx.reverbDecay > 0.9f) "close to ringing" else "how long it takes to die away"
+        )
         Slider(
             value = fx.reverbDecay,
             onValueChange = { onFx(fx.copy(reverbDecay = it)) },
@@ -200,9 +266,150 @@ private fun EffectsControls(fx: DesktopFxState, onFx: (DesktopFxState) -> Unit) 
             valueRange = 0.4f..0.94f,
             colors = sliderColours()
         )
+        DecayCurve(fx.reverbDecay, fx.reverbMix)
+    } else {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Off. Speed and pitch still apply.",
+            style = MaterialTheme.typography.labelSmall,
+            color = Palette.TextFaint
+        )
     }
 
-    Spacer(Modifier.height(20.dp))
+    Spacer(Modifier.height(24.dp))
+}
+
+/**
+ * Band levels of what is currently playing.
+ *
+ * Measured after the effect chain, so slowing a track down or opening the
+ * reverb visibly changes the bars. Polled about sixteen times a second while
+ * this panel is on screen and not computed at all while it is not — the
+ * analyser is switched off on the way out.
+ */
+@Composable
+private fun Spectrum(spectrum: SpectrumAnalyser, playing: Boolean) {
+    var levels by remember { mutableStateOf(FloatArray(spectrum.bands())) }
+
+    DisposableEffect(spectrum) {
+        spectrum.enabled = true
+        onDispose { spectrum.enabled = false }
+    }
+
+    LaunchedEffect(spectrum) {
+        val buffer = FloatArray(spectrum.bands())
+        while (true) {
+            levels = spectrum.snapshot(buffer).copyOf()
+            withFrameNanos { }
+            kotlinx.coroutines.delay(60)
+        }
+    }
+
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "OUTPUT",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.TextFaint,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                if (playing) "live" else "idle",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (playing) Palette.Accent else Palette.TextFaint
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(84.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Palette.Content)
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            for (level in levels) {
+                val height = (4f + level * 66f).dp
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(height)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (level > 0.02f) Palette.Accent else Palette.Line)
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Text("40 Hz", style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
+            Spacer(Modifier.weight(1f))
+            Text("22 kHz", style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
+        }
+    }
+}
+
+/** Label, value and a line of explanation, on one row. */
+@Composable
+private fun Readout(label: String, value: String, note: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Text(note, style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
+        }
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Palette.Accent
+        )
+    }
+}
+
+/** Scale markings under a slider, so the range is legible without dragging it. */
+@Composable
+private fun TickRow(labels: List<String>) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+        labels.forEachIndexed { index, label ->
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint
+            )
+            if (index != labels.lastIndex) Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+/** Sketch of the reverb tail, so "room size" means something before you hear it. */
+@Composable
+private fun DecayCurve(decay: Float, mix: Float) {
+    Spacer(Modifier.height(8.dp))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(34.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Palette.Content)
+            .padding(horizontal = 6.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        // Each bar is one reflection, falling off at the decay coefficient.
+        var amplitude = mix.coerceIn(0.05f, 1f)
+        repeat(22) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height((2f + amplitude * 22f).dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(Palette.AccentSoft)
+            )
+            amplitude *= decay
+        }
+    }
 }
 
 @Composable
@@ -316,15 +523,6 @@ private fun PitchBar(semitones: Float) {
 }
 
 @Composable
-private fun Labelled(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodySmall,
-            color = Palette.TextDim, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodySmall, color = Palette.Accent)
-    }
-}
-
-@Composable
 private fun Preset(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
@@ -353,4 +551,31 @@ private fun formatSemitones(value: Float): String {
     val rounded = (value * 10).roundToInt() / 10f
     val text = if (rounded % 1f == 0f) rounded.toInt().toString() else rounded.toString()
     return if (rounded > 0f) "+$text st" else "$text st"
+}
+
+/**
+ * Names the interval a pitch shift amounts to.
+ *
+ * A number of semitones is precise and means nothing to most people; "a fifth
+ * up" is what they were actually reaching for. Only whole semitones get a name,
+ * because anything between them is not an interval.
+ */
+private fun intervalName(semitones: Float, speed: Float = 1f): String {
+    if (abs(semitones) < 0.05f) return "unchanged"
+
+    // A preset imitating a resample pairs pitch to tempo exactly, which lands
+    // between semitones by definition. Saying so beats calling it a near miss.
+    if (abs(semitones - EffectPreset.resamplePitch(speed)) < 0.1f) {
+        return "tracks the tempo exactly"
+    }
+
+    val rounded = semitones.roundToInt()
+    if (abs(semitones - rounded) > 0.06f) return "between semitones"
+    val names = listOf(
+        "unchanged", "a semitone", "a whole tone", "a minor third", "a major third",
+        "a fourth", "a tritone", "a fifth", "a minor sixth", "a major sixth",
+        "a minor seventh", "a major seventh", "an octave"
+    )
+    val name = names.getOrNull(abs(rounded)) ?: "$rounded semitones"
+    return if (rounded > 0) "$name up" else "$name down"
 }

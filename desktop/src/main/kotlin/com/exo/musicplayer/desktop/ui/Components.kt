@@ -114,7 +114,14 @@ fun GhostButton(
             Icon(icon, null, Modifier.size(14.dp), tint = tint)
             Spacer(Modifier.width(7.dp))
         }
-        Text(label, style = MaterialTheme.typography.bodySmall, color = tint)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = tint,
+            // A squeezed Row would otherwise break this one character per line.
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }
 

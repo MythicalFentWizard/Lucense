@@ -585,6 +585,10 @@ class DesktopController(private val scope: CoroutineScope) {
     var identifyTarget by mutableStateOf<DesktopTrack?>(null)
     var identifyMode by mutableStateOf(IdentifyMode.NAME)
 
+    /** Artist and title asked for separately, so each can be scored on its own field. */
+    var identifyArtist by mutableStateOf("")
+    var identifyTitle by mutableStateOf("")
+
     /** Set when the last attempt failed only because ffmpeg is missing. */
     var identifyNeedsFfmpeg by mutableStateOf(false)
         private set
@@ -731,6 +735,46 @@ class DesktopController(private val scope: CoroutineScope) {
         }
     }
 
+    /**
+     * Searches on the split artist/title fields.
+     *
+     * Splitting them is not cosmetic: knowing which half is the performer lets
+     * the ranker check each against the field it belongs to, which drops the
+     * covers and karaoke versions a single box scores almost as highly as the
+     * real recording.
+     */
+    fun searchByFields() {
+        val artist = identifyArtist.trim()
+        val title = identifyTitle.trim()
+        if (artist.isBlank() && title.isBlank()) return
+
+        identifyBusy = true
+        identifyNeedsFfmpeg = false
+        identifyStatus = "Searching seven catalogues..."
+        scope.launch {
+            // Providers take a single string, so the halves are joined for the
+            // lookup and separated again only for scoring.
+            val combined = listOf(artist, title).filter { it.isNotBlank() }.joinToString(" ")
+            val found = catalogue.searchAll(combined, limitPer = 8)
+            val results = MatchRanker.rankSplit(artist, title, found)
+            identifyResults = results
+            identifyQuery = combined
+
+            val dropped = found.size - results.size
+            val services = results.map { it.provider }.distinct().size
+            identifyStatus = when {
+                results.isEmpty() ->
+                    "Nothing came back. Try fewer words, or just the artist."
+                dropped > 0 ->
+                    "${results.size} matches from $services services " +
+                        "($dropped unrelated hidden)"
+                else ->
+                    "${results.size} matches from $services services"
+            }
+            identifyBusy = false
+        }
+    }
+
     fun searchCatalogues(text: String = identifyQuery) {
         if (text.isBlank()) return
         identifyBusy = true
@@ -800,6 +844,56 @@ class DesktopController(private val scope: CoroutineScope) {
             writeTagsState.value = value
             settings.writeTagsOnIdentify = value
         }
+
+    // ---- Editing a track by hand --------------------------------------------
+
+    /** The track whose details are open for editing, if any. */
+    var editTarget by mutableStateOf<DesktopTrack?>(null)
+    var editNote by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Writes edited details into the file's tags.
+     *
+     * Manual editing exists because automatic identification is right most of
+     * the time and not all of it — a live bootleg, a track nobody has catalogued,
+     * a name in a script the services transliterate differently. Fields left
+     * blank are cleared rather than ignored, because "remove the wrong album
+     * name" has to be expressible.
+     */
+    fun saveTrackDetails(
+        track: DesktopTrack,
+        title: String,
+        artist: String,
+        album: String,
+        year: String
+    ) {
+        scope.launch {
+            val result = io {
+                TagWriter.write(
+                    file = track.file,
+                    title = title.trim().ifBlank { track.file.nameWithoutExtension },
+                    artist = artist.trim(),
+                    album = album.trim(),
+                    year = year.trim().toIntOrNull(),
+                    clearBlanks = true
+                )
+            }
+            editNote = result.fold(
+                onSuccess = { "Saved." },
+                onFailure = { "Couldn't write those tags: ${it.message}" }
+            )
+            if (result.isSuccess) {
+                editTarget = null
+                rescan()
+            }
+        }
+    }
+
+    fun dismissEdit() {
+        editTarget = null
+        editNote = null
+    }
 
     // ---- Bulk tools ---------------------------------------------------------
 

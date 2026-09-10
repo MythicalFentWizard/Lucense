@@ -41,6 +41,9 @@ class PlaybackEngine {
 
     val effects = EffectChain()
 
+    /** Band levels for the mixer display; idle unless something is showing it. */
+    val spectrum = SpectrumAnalyser()
+
     private var worker: Thread? = null
     private var lines = listOf<SourceDataLine>()
     private var outputs = listOf<DesktopAudioOutput>()
@@ -68,6 +71,7 @@ class PlaybackEngine {
         framesPlayed = 0
         lastPublished = -1
         effects.reset()
+        spectrum.reset()
         _status.value = PlaybackStatus(track = track, playing = true, durationMs = track.durationMs)
 
         worker = thread(name = "resonate-playback", isDaemon = true) { run(track) }
@@ -84,6 +88,7 @@ class PlaybackEngine {
     fun stop() {
         stopRequested = true
         playing = false
+        spectrum.reset()
         worker?.join(600)
         worker = null
         closeLines()
@@ -136,6 +141,9 @@ class PlaybackEngine {
 
                 val processed = effects.process(raw)
                 if (processed.isEmpty()) continue
+                // After the chain, so speed, pitch and reverb are all visible
+                // in the meter rather than it showing the untouched source.
+                spectrum.feed(processed)
 
                 val bytes = toBytes(processed)
                 writeToAll(bytes)
