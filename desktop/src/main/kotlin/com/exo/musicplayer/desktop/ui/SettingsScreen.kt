@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.data.AppDirs
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.system.DuckKey
@@ -148,8 +149,9 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             SectionTitle("Appearance")
             Spacer(Modifier.height(4.dp))
             Hint(
-                "The window keeps its dark surfaces either way — only the accent moves. " +
-                    "Recolouring the whole shell is what makes a themed app look skinned."
+                "Recolours the whole window, not just the buttons. The surfaces take " +
+                    "the accent's hue and keep their brightness, so the layering reads " +
+                    "the same whichever you pick."
             )
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -255,7 +257,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = Palette.Text
                     )
-                    Hint("made by lucent")
+                    Hint("version ${AppVersion.name} · made by lucent")
                 }
                 GhostButton("Contact") { openLink("https://t.me/Eth4wn") }
             }
