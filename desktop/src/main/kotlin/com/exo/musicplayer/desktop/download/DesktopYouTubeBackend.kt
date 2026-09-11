@@ -38,6 +38,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                         add(YtDlpFlatSearch.target(query, limit))
                         addAll(YtDlpFlatSearch.ARGUMENTS)
                         addAll(NetworkProxy.ytDlpArgs())
+                        addAll(YT_DLP_NETWORK)
                     }
                 )
                     // Kept apart, unlike the download path: stderr carries
@@ -79,7 +80,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                 "--no-warnings",
                 "--no-playlist",
                 "--ignore-config",
-                *NetworkProxy.ytDlpArgs().toTypedArray()
+                *(NetworkProxy.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
 
             val out = process.inputStream.bufferedReader().use { it.readText() }
