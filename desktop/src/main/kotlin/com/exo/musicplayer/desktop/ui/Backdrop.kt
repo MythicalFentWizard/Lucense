@@ -6,6 +6,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import kotlin.math.exp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -97,19 +99,25 @@ internal class Pulse(bands: Int = REACTIVE_BANDS) {
     val rings = FloatArray(6) { -10f }
 
     private var slowBass = 0f
+    private var kickPeak = 0f
     private var lastRing = -10f
     private var lastTime = -1f
 
     fun update(snapshot: FloatArray, t: Float) {
-        val dt = if (lastTime < 0f) 0f else (t - lastTime).coerceIn(0f, 0.2f)
+        val dt = if (lastTime < 0f) 0f else (t - lastTime).coerceIn(0f, 0.1f)
         lastTime = t
+        // Eased by time rather than per call, so motion is the same at any frame
+        // rate, and it glides between the analyser's updates - about eleven a
+        // second - instead of jumping at each one.
+        val attack = 1f - exp(-dt / ATTACK_SECONDS)
+        val release = 1f - exp(-dt / RELEASE_SECONDS)
         for (i in levels.indices) {
             val value = if (snapshot.isEmpty()) {
                 0f
             } else {
                 snapshot[(i * snapshot.size / levels.size).coerceAtMost(snapshot.size - 1)].coerceIn(0f, 1f)
             }
-            levels[i] = if (value > levels[i]) value else levels[i] * 0.86f + value * 0.14f
+            levels[i] += (value - levels[i]) * (if (value > levels[i]) attack else release)
         }
         bass = average(0, 4)
         mid = average(4, 12)
@@ -120,11 +128,13 @@ internal class Pulse(bands: Int = REACTIVE_BANDS) {
         val low = (snapshot.size / 6).coerceAtLeast(1).coerceAtMost(snapshot.size)
         for (i in 0 until low) rawBass += snapshot[i].coerceIn(0f, 1f)
         rawBass /= low
-        kick = max(kick * 0.8f, ((rawBass - slowBass) * 4f).coerceIn(0f, 1f))
-        slowBass = slowBass * 0.92f + rawBass * 0.08f
+        val detected = ((rawBass - slowBass) * 4f).coerceIn(0f, 1f)
+        slowBass += (rawBass - slowBass) * (1f - exp(-dt / 0.6f))
+        kickPeak = max(kickPeak * exp(-dt / 0.15f), detected)
+        kick += (kickPeak - kick) * (1f - exp(-dt / 0.04f))
 
         travel += dt * (0.015f + energy * 0.1f)
-        if (kick > 0.45f && t - lastRing > 0.28f) {
+        if (detected > 0.45f && t - lastRing > 0.28f) {
             var oldest = 0
             for (s in rings.indices) if (rings[s] < rings[oldest]) oldest = s
             rings[oldest] = t
@@ -139,6 +149,12 @@ internal class Pulse(bands: Int = REACTIVE_BANDS) {
         var sum = 0f
         for (i in from until end) sum += levels[i]
         return sum / (end - from)
+    }
+
+    private companion object {
+        /** How quickly a level rises to a louder moment, and falls back after it. */
+        const val ATTACK_SECONDS = 0.07f
+        const val RELEASE_SECONDS = 0.30f
     }
 }
 
@@ -196,7 +212,18 @@ private fun Animated(
         if (!focused) return@LaunchedEffect
         val origin = System.nanoTime() - (seconds.floatValue * 1e9f).toLong()
         val raw = FloatArray(spectrum?.bands() ?: 1)
+        var lastTick = 0L
         while (isActive) {
+            if (listening) {
+                // Every display frame, up to about sixty a second: these move with
+                // the music, and at thirty updates a second their motion stepped.
+                withFrameNanos { }
+                val tick = System.nanoTime()
+                if (tick - lastTick < 15_000_000L) continue
+                lastTick = tick
+            } else {
+                delay(50L)
+            }
             val now = (System.nanoTime() - origin) / 1e9f
             if (listening && spectrum != null) {
                 // Re-asserted every tick: the effects panel's meter switches the
@@ -205,7 +232,6 @@ private fun Animated(
                 pulse.update(spectrum.snapshot(raw), now)
             }
             seconds.floatValue = now
-            delay(if (listening) 33L else 50L)
         }
     }
     DisposableEffect(listening) {
@@ -453,23 +479,26 @@ internal fun DrawScope.waves(t: Float, color: Color, pulse: Pulse?, place: Place
     val bass = pulse?.bass ?: 0f
     val energy = pulse?.energy ?: 0f
     val kick = pulse?.kick ?: 0f
-    val swell = h * (0.055f + bass * 0.09f + kick * 0.03f)
-    val spread = h * (0.034f + energy * 0.02f)
-    val frequency = TAU * 1.15f / windowWidth
-    val ripple = TAU * 3.1f / windowWidth
-    val drift = t * 0.28f + (pulse?.travel ?: 0f) * 7f
+    // A wide range: on a strong beat the ribbon rises and falls through about a
+    // third of the height, and without music it still drifts and breathes.
+    val swell = h * (0.08f + bass * 0.17f + kick * 0.05f)
+    val spread = h * (0.042f + energy * 0.035f)
+    val frequency = TAU * 1.0f / windowWidth
+    val ripple = TAU * 2.6f / windowWidth
+    val drift = t * 0.32f + (pulse?.travel ?: 0f) * 9f
+    val breathe = sin(t * 0.37f) * h * 0.035f
     for (k in 0 until lines) {
         val offset = k - half
         val level = pulse?.let { it.average(k * it.levels.size / lines, (k + 1) * it.levels.size / lines) } ?: 0f
-        val base = h * 0.64f + offset * spread
-        val twist = offset * 0.28f
+        val base = h * 0.60f + breathe + offset * spread
+        val twist = offset * 0.32f
         val path = Path()
         var x = -step
         var first = true
         while (x <= w + step) {
             val along = x + place.x
             val y = base + sin(along * frequency + drift + twist) * swell +
-                sin(along * ripple - t * 0.55f + k * 0.9f) * h * 0.010f * (1f + level * 2.5f)
+                sin(along * ripple - t * 0.55f + k * 0.9f) * h * 0.016f * (1f + level * 3.2f)
             if (first) {
                 path.moveTo(x, y)
                 first = false
