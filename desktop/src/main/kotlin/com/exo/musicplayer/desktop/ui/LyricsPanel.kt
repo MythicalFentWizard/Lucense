@@ -162,7 +162,11 @@ private fun SyncedLyrics(lrc: String, positionMs: Long) {
                 line.text.ifBlank { "·" },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (isActive) Palette.Accent else Palette.TextDim.copy(alpha = alpha),
+                color = if (isActive) {
+                    Palette.LyricsActive
+                } else {
+                    Palette.LyricsInactive.copy(alpha = Palette.LyricsInactive.alpha * alpha)
+                },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)
             )
         }

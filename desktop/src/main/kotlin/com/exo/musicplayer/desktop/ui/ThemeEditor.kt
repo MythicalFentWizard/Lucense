@@ -47,7 +47,9 @@ private enum class ColourField(val label: String, val note: String) {
     SECONDARY("Secondary", "Soft accents and meters."),
     TERTIARY("Tertiary", "Selected rows and chosen options."),
     BUTTON("Buttons", "The fill of the main buttons."),
-    BACKGROUND("Background effect", "Stars, aurora and the rest. Works with every theme.")
+    BACKGROUND("Background effect", "Stars, aurora and the rest. Works with every theme."),
+    LYRICS_ACTIVE("Lyrics: current line", "The line being sung. Works with every theme."),
+    LYRICS_INACTIVE("Lyrics: other lines", "Every other line. Works with every theme.")
 }
 
 /** The colour editor, in a window of its own so the app stays in view as it changes. */
@@ -56,7 +58,7 @@ fun ThemeEditorWindow(controller: DesktopController, onClose: () -> Unit) {
     DialogWindow(
         onCloseRequest = onClose,
         title = "Colours · Resonate",
-        state = rememberDialogState(size = DpSize(620.dp, 560.dp))
+        state = rememberDialogState(size = DpSize(640.dp, 700.dp))
     ) {
         ResonateDesktopTheme { ThemeEditor(controller, onClose) }
     }
@@ -76,12 +78,16 @@ private fun ThemeEditor(controller: DesktopController, onClose: () -> Unit) {
         ColourField.TERTIARY -> draft.selected
         ColourField.BUTTON -> draft.button
         ColourField.BACKGROUND -> Palette.Stars
+        ColourField.LYRICS_ACTIVE -> Palette.LyricsActive
+        ColourField.LYRICS_INACTIVE -> Palette.LyricsInactive
     }
 
     fun apply(f: ColourField, colour: Color) {
-        if (f == ColourField.BACKGROUND) {
-            controller.setBackdropColor(colour)
-            return
+        when (f) {
+            ColourField.BACKGROUND -> return controller.setBackdropColor(colour)
+            ColourField.LYRICS_ACTIVE -> return controller.setLyricsActiveColor(colour)
+            ColourField.LYRICS_INACTIVE -> return controller.setLyricsInactiveColor(colour)
+            else -> Unit
         }
         draft = ThemeColors.from(
             primary = if (f == ColourField.PRIMARY) colour else draft.accent,
@@ -97,7 +103,7 @@ private fun ThemeEditor(controller: DesktopController, onClose: () -> Unit) {
         Spacer(Modifier.height(4.dp))
         Hint(
             "Changing any of the first four switches to the Custom theme, and it shows at once. " +
-                "The background effect's colour works with every theme."
+                "The background effect and lyric colours work with every theme."
         )
         Spacer(Modifier.height(14.dp))
         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -107,6 +113,11 @@ private fun ThemeEditor(controller: DesktopController, onClose: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
                 GhostButton("Background follows theme") { controller.setBackdropColor(null) }
+                Spacer(Modifier.height(6.dp))
+                GhostButton("Lyrics follow theme") {
+                    controller.setLyricsActiveColor(null)
+                    controller.setLyricsInactiveColor(null)
+                }
             }
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {

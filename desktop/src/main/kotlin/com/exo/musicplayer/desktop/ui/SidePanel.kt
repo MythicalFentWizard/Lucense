@@ -270,7 +270,9 @@ private fun EffectsControls(
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Palette.Base,
                 checkedTrackColor = Palette.Accent,
-                uncheckedTrackColor = Palette.Hover
+                uncheckedTrackColor = Palette.Hover,
+                uncheckedThumbColor = Palette.TextDim,
+                uncheckedBorderColor = Palette.Line
             )
         )
     }
@@ -324,7 +326,9 @@ private fun EffectsControls(
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Palette.Base,
                 checkedTrackColor = Palette.Accent,
-                uncheckedTrackColor = Palette.Hover
+                uncheckedTrackColor = Palette.Hover,
+                uncheckedThumbColor = Palette.TextDim,
+                uncheckedBorderColor = Palette.Line
             )
         )
     }
@@ -612,7 +616,10 @@ private fun Preset(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun sliderColours() = SliderDefaults.colors(
     thumbColor = Palette.Accent,
     activeTrackColor = Palette.Accent,
-    inactiveTrackColor = Palette.Line
+    inactiveTrackColor = Palette.Line,
+    // The steps are still there to snap to; drawn, they filled the track with dots.
+    activeTickColor = Color.Transparent,
+    inactiveTickColor = Color.Transparent
 )
 
 private fun formatSemitones(value: Float): String {

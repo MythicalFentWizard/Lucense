@@ -111,6 +111,16 @@ class DesktopSettings {
         get() = prefs.getFloat(KEY_WALLPAPER_DIM, 0.55f)
         set(value) = prefs.putFloat(KEY_WALLPAPER_DIM, value)
 
+    /** ARGB hex for the lyric line being sung, or empty to follow the theme. */
+    var lyricsActiveColor: String
+        get() = prefs.get(KEY_LYRICS_ACTIVE, "")
+        set(value) = prefs.put(KEY_LYRICS_ACTIVE, value)
+
+    /** ARGB hex for the other lyric lines, or empty to follow the theme. */
+    var lyricsInactiveColor: String
+        get() = prefs.get(KEY_LYRICS_INACTIVE, "")
+        set(value) = prefs.put(KEY_LYRICS_INACTIVE, value)
+
     /** A ProxyMode name. System by default, which is how Resonate behaved before there was a choice. */
     var proxyMode: String
         get() = prefs.get(KEY_PROXY_MODE, "SYSTEM")
@@ -144,6 +154,8 @@ class DesktopSettings {
         const val KEY_BACKDROP_COLOR = "backdrop_color"
         const val KEY_WALLPAPER = "wallpaper"
         const val KEY_WALLPAPER_DIM = "wallpaper_dim"
+        const val KEY_LYRICS_ACTIVE = "lyrics_active_color"
+        const val KEY_LYRICS_INACTIVE = "lyrics_inactive_color"
         const val KEY_PROXY_MODE = "proxy_mode"
         const val KEY_PROXY_HOST = "proxy_host"
         const val KEY_PROXY_PORT = "proxy_port"

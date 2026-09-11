@@ -41,6 +41,8 @@ object Palette {
     private val scheme = mutableStateOf(AccentChoice.AMETHYST.colors)
     private val customScheme = mutableStateOf(AccentChoice.AMETHYST.colors)
     private val starsOverride = mutableStateOf<Color?>(null)
+    private val lyricsActiveOverride = mutableStateOf<Color?>(null)
+    private val lyricsInactiveOverride = mutableStateOf<Color?>(null)
 
     val choice: AccentChoice get() = chosen.value
 
@@ -92,6 +94,20 @@ object Palette {
 
     fun setStars(color: Color?) {
         starsOverride.value = color
+    }
+
+    /** The line being sung: the user's own colour, or the accent. */
+    val LyricsActive: Color get() = lyricsActiveOverride.value ?: scheme.value.accent
+
+    /** Every other line: the user's own colour, or the dimmed text colour. */
+    val LyricsInactive: Color get() = lyricsInactiveOverride.value ?: TextDim
+
+    fun setLyricsActive(color: Color?) {
+        lyricsActiveOverride.value = color
+    }
+
+    fun setLyricsInactive(color: Color?) {
+        lyricsInactiveOverride.value = color
     }
 }
 

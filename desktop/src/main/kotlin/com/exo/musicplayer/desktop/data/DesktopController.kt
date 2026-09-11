@@ -145,6 +145,8 @@ class DesktopController(private val scope: CoroutineScope) {
     init {
         ThemeColors.decode(settings.customTheme)?.let(Palette::setCustom)
         Palette.setStars(ThemeColors.parse(settings.backdropColor))
+        Palette.setLyricsActive(ThemeColors.parse(settings.lyricsActiveColor))
+        Palette.setLyricsInactive(ThemeColors.parse(settings.lyricsInactiveColor))
         Palette.use(AccentChoice.fromName(settings.accentName))
     }
 
@@ -489,6 +491,18 @@ class DesktopController(private val scope: CoroutineScope) {
     fun setBackdropColor(color: Color?) {
         Palette.setStars(color)
         settings.backdropColor = color?.let { ThemeColors.hex(it) }.orEmpty()
+    }
+
+    /** The lyric line being sung, or null to follow the theme. */
+    fun setLyricsActiveColor(color: Color?) {
+        Palette.setLyricsActive(color)
+        settings.lyricsActiveColor = color?.let { ThemeColors.hex(it) }.orEmpty()
+    }
+
+    /** The other lyric lines, or null to follow the theme. */
+    fun setLyricsInactiveColor(color: Color?) {
+        Palette.setLyricsInactive(color)
+        settings.lyricsInactiveColor = color?.let { ThemeColors.hex(it) }.orEmpty()
     }
 
     // ---- Wallpaper ----------------------------------------------------------

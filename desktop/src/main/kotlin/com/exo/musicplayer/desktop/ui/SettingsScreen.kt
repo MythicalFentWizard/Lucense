@@ -179,6 +179,8 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             }
             Spacer(Modifier.height(12.dp))
             GhostButton("Edit colours", icon = Icons.Default.ColorLens) { editingColours = true }
+            Spacer(Modifier.height(6.dp))
+            Hint("Theme colours, the background effect's colour, and the lyrics' current and other lines.")
             if (editingColours) ThemeEditorWindow(controller) { editingColours = false }
 
             Spacer(Modifier.height(18.dp))

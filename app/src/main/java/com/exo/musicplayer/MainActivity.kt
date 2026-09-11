@@ -87,7 +87,9 @@ import com.exo.musicplayer.ui.settings.SettingsScreen
 import com.exo.musicplayer.ui.settings.SoundScreen
 import com.exo.musicplayer.ui.splash.SplashScreen
 import com.exo.musicplayer.ui.theme.LocalStarfieldActive
+import com.exo.musicplayer.ui.theme.LocalStarsVisible
 import com.exo.musicplayer.ui.theme.MusicPlayerTheme
+import com.exo.musicplayer.ui.theme.ScreenBackdrop
 import com.exo.musicplayer.ui.theme.Starfield
 import kotlinx.coroutines.delay
 import com.exo.musicplayer.ui.theme.ThemeSettings
@@ -763,7 +765,7 @@ private fun AppScaffold(
             modifier = Modifier.fillMaxSize()
         ) {
             Box(Modifier.fillMaxSize()) {
-                if (starry) Starfield(starColor = MaterialTheme.colorScheme.primary)
+                if (starry) ScreenBackdrop()
                 Box(Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
             DownloadScreen(
                 state = dlState,
@@ -792,7 +794,7 @@ private fun AppScaffold(
             modifier = Modifier.fillMaxSize()
         ) {
             Box(Modifier.fillMaxSize()) {
-                if (starry) Starfield(starColor = MaterialTheme.colorScheme.primary)
+                if (starry) ScreenBackdrop()
                 Box(Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
                     when (settingsRoute) {
                         SettingsRoute.APPEARANCE -> AppearanceScreen(
@@ -801,7 +803,12 @@ private fun AppScaffold(
                             onPalette = themeSettings::setPalette,
                             onMode = themeSettings::setMode,
                             onDynamic = themeSettings::setDynamicColor,
-                            onStars = themeSettings::setStars
+                            onStars = themeSettings::setStars,
+                            onWallpaper = themeSettings::setWallpaper,
+                            onClearWallpaper = themeSettings::clearWallpaper,
+                            onWallpaperDim = themeSettings::setWallpaperDim,
+                            onLyricsActive = themeSettings::setLyricsActive,
+                            onLyricsInactive = themeSettings::setLyricsInactive
                         )
 
                         SettingsRoute.SOUND -> SoundScreen(
@@ -876,7 +883,7 @@ private fun AppScaffold(
     }
 
     AnimatedVisibility(visible = showSplash, exit = fadeOut()) {
-        SplashScreen(showStars = starry)
+        SplashScreen(showStars = LocalStarsVisible.current)
     }
 
     BackHandler(enabled = showDownload) { showDownload = false }
