@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -14,8 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,27 +54,28 @@ import com.exo.musicplayer.data.youtube.YouTubeVideo
  * duration says whether it is the song or a two-hour mix. Reducing that to a
  * line of text throws away the information the choice actually rests on.
  *
+ * Emitted into the Identify screen's own list rather than being a list of its
+ * own, so the results scroll together with the header instead of being
+ * squeezed into whatever height the header leaves.
+ *
  * Tapping the thumbnail previews the audio; the buttons underneath spell the
  * same thing out, because a tappable image with no label is a guess.
  */
-@Composable
-fun YouTubeResultList(
+fun LazyListScope.youTubeResults(
     videos: List<YouTubeVideo>,
     preview: PreviewState,
     onPreview: (YouTubeVideo) -> Unit,
-    onDownload: (YouTubeVideo) -> Unit,
-    modifier: Modifier = Modifier
+    onDownload: (YouTubeVideo) -> Unit
 ) {
-    LazyColumn(modifier.fillMaxSize()) {
-        items(videos, key = { it.id }) { video ->
-            YouTubeRow(
-                video = video,
-                preview = preview,
-                onPreview = { onPreview(video) },
-                onDownload = { onDownload(video) }
-            )
-        }
-        item { Spacer(Modifier.height(20.dp)) }
+    // Keyed by position as well as id: a search can return the same video
+    // twice, and a duplicate key crashes a lazy list.
+    itemsIndexed(videos, key = { index, video -> "youtube-$index-${video.id}" }) { _, video ->
+        YouTubeRow(
+            video = video,
+            preview = preview,
+            onPreview = { onPreview(video) },
+            onDownload = { onDownload(video) }
+        )
     }
 }
 
@@ -93,25 +95,25 @@ private fun YouTubeRow(
         } else {
             MaterialTheme.colorScheme.surfaceVariant
         },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 5.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
     ) {
-        Column(Modifier.padding(10.dp)) {
+        Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp)) {
             Row {
                 Box(
                     Modifier
-                        .width(150.dp)
+                        .width(140.dp)
                         .aspectRatio(16f / 9f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surface)
                         .clickable(onClick = onPreview)
                 ) {
                     AsyncImage(
-                        // The small rendition on purpose: at 150dp the large
-                        // one is four times the bytes for no visible gain, and
-                        // a result list loads twenty of them at once.
+                        // The small rendition on purpose: at this size the large
+                        // one is four times the bytes for no visible gain, and a
+                        // result list loads twenty of them at once.
                         model = video.thumbnail(YouTubeVideo.ThumbSize.SMALL),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
@@ -124,7 +126,7 @@ private fun YouTubeRow(
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator(
-                                Modifier.size(24.dp),
+                                Modifier.size(22.dp),
                                 strokeWidth = 2.dp,
                                 color = Color.White
                             )
@@ -134,23 +136,18 @@ private fun YouTubeRow(
                             Modifier.fillMaxSize().background(Color(0x55000000)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.Stop,
-                                null,
-                                Modifier.size(30.dp),
-                                tint = Color.White
-                            )
+                            Icon(Icons.Default.Stop, null, Modifier.size(28.dp), tint = Color.White)
                         }
                     }
 
                     // Duration, or how far the preview has got: while it plays
-                    // that is the more useful number, and it is the same corner
+                    // that is the more useful number, and it sits in the corner
                     // people already look at for length.
                     video.durationSeconds?.let { seconds ->
                         Box(
                             Modifier
                                 .align(Alignment.BottomEnd)
-                                .padding(5.dp)
+                                .padding(4.dp)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(Color(0xCC000000))
                                 .padding(horizontal = 4.dp, vertical = 1.dp)
@@ -177,16 +174,16 @@ private fun YouTubeRow(
                         video.title,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         video.subtitle.ifBlank { "view count not reported" },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(3.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         video.channelAvatarUrl?.let { avatar ->
                             AsyncImage(
@@ -218,19 +215,8 @@ private fun YouTubeRow(
                 }
             }
 
-            video.description?.let { text ->
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
             preview.error?.takeIf { isPreviewing }?.let { message ->
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
                     message,
                     style = MaterialTheme.typography.labelSmall,
@@ -239,21 +225,29 @@ private fun YouTubeRow(
             }
 
             Row(
-                Modifier.fillMaxWidth().padding(top = 4.dp),
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onPreview) {
+                TextButton(
+                    onClick = onPreview,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
                     Icon(
                         if (isPreviewing) Icons.Default.Stop else Icons.Default.PlayArrow,
                         null,
                         Modifier.size(16.dp)
                     )
-                    Spacer(Modifier.width(5.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(if (isPreviewing) "Stop" else "Preview")
                 }
-                Spacer(Modifier.width(6.dp))
-                FilledTonalButton(onClick = onDownload) {
+                Spacer(Modifier.width(4.dp))
+                FilledTonalButton(
+                    onClick = onDownload,
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
                     Icon(Icons.Default.Download, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Download mp3")

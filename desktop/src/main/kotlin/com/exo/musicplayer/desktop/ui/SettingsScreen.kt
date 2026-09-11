@@ -161,6 +161,13 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     }
                 }
             }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Starry background",
+                checked = controller.starry,
+                note = "A slow twinkle behind the sidebar and the library, as on the phone. " +
+                    "It stops while the window isn't focused."
+            ) { controller.starry = it }
         }
 
         Spacer(Modifier.height(14.dp))

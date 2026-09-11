@@ -45,6 +45,8 @@ import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.audio.MediaAudio
 import com.exo.musicplayer.desktop.audio.SampleOutcome
 import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
+import com.exo.musicplayer.data.youtube.YouTubeFormat
+import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
@@ -250,8 +252,32 @@ class DesktopController(private val scope: CoroutineScope) {
         rescan()
     }
 
+    /**
+     * Adds freshly downloaded files to the library straight away.
+     *
+     * Downloads used to appear only when the download folder happened to sit
+     * inside a library folder, which by default it does not. Reading just the new
+     * files also spares re-reading every tag in the library after each download.
+     */
+    private fun addToLibrary(files: List<File>) {
+        if (files.isEmpty()) return
+        scope.launch {
+            val added = FolderLibrary.readFiles(files)
+            if (added.isEmpty()) return@launch
+            val paths = added.map { it.file.absolutePath }.toSet()
+            tracks = (tracks.filterNot { it.file.absolutePath in paths } + added)
+                .sortedWith(compareBy({ it.displayArtist.lowercase() }, { it.title.lowercase() }))
+            refreshAggregates()
+        }
+    }
+
     fun rescan() {
-        val roots = folders.map(::File).filter { it.isDirectory }
+        // The download folder always counts, so anything downloaded is in the
+        // library whether or not that folder was ever added by hand.
+        val roots = (folders + settings.downloadDir)
+            .map(::File)
+            .filter { it.isDirectory }
+            .distinctBy { it.absoluteFile.normalize().path.lowercase() }
         if (roots.isEmpty()) {
             tracks = emptyList()
             scanning = false
@@ -407,6 +433,16 @@ class DesktopController(private val scope: CoroutineScope) {
         set(value) {
             Palette.use(value)
             settings.accentName = value.name
+        }
+
+    private val starryState = mutableStateOf(settings.starryBackground)
+
+    /** The twinkling starfield behind the sidebar and content, as on the phone. */
+    var starry: Boolean
+        get() = starryState.value
+        set(value) {
+            starryState.value = value
+            settings.starryBackground = value
         }
 
     fun togglePanel(kind: SidePanelKind) {
@@ -614,6 +650,15 @@ class DesktopController(private val scope: CoroutineScope) {
         listOf(PipedYouTubeBackend(), youtubeBackend)
     )
 
+    /**
+     * Resolves song names to links for the downloader. yt-dlp is never handed a
+     * search: see YouTubeLinkFinder for what "first result" turned out to mean.
+     */
+    private val linkFinder = YouTubeLinkFinder(youtube)
+
+    /** A `ytsearch1:` prefix left over from before, accepted and ignored. */
+    private val searchPrefix = Regex("""^ytsearch\d*:""", RegexOption.IGNORE_CASE)
+
     val preview = PreviewPlayer { ToolPaths.ffmpeg }
 
     var youtubeResults by mutableStateOf<List<YouTubeVideo>>(emptyList())
@@ -740,7 +785,17 @@ class DesktopController(private val scope: CoroutineScope) {
                 val resolved = io { LinkResolver.resolve(target) }
                 val fetchTarget = when (resolved) {
                     is ResolvedLink.Direct -> resolved.url
-                    is ResolvedLink.Search -> LinkResolver.searchTarget(resolved.query)
+                    is ResolvedLink.Search -> {
+                        identifyStatus = "Finding that track on YouTube..."
+                        when (val found = linkFinder.find(YouTubeLinkFinder.Wanted(title = resolved.query))) {
+                            is YouTubeLinkFinder.Outcome.Found -> found.pick.video.watchUrl
+                            is YouTubeLinkFinder.Outcome.NothingSuitable -> {
+                                identifyStatus = found.message
+                                identifyBusy = false
+                                return@launch
+                            }
+                        }
+                    }
                     is ResolvedLink.Unsupported -> {
                         identifyStatus = resolved.reason
                         identifyBusy = false
@@ -1364,6 +1419,22 @@ class DesktopController(private val scope: CoroutineScope) {
             qualityState.value = value
             settings.downloadQualityName = value.name
         }
+    /** Finished downloads the Download page has already shown. */
+    private var acknowledgedDownloads by mutableStateOf<Set<Long>>(emptySet())
+
+    /** Downloads that finished since the Download page was last looked at. */
+    val unseenFinishedDownloads: Int
+        get() = downloads.count { it.done && !it.failed && it.id !in acknowledgedDownloads }
+
+    fun acknowledgeDownloads() {
+        val finished = downloads.filter { it.done }.map { it.id }.toSet()
+        // Written only on change: this runs from an effect keyed on the list, and
+        // an unconditional write would keep re-triggering it.
+        if (!acknowledgedDownloads.containsAll(finished)) {
+            acknowledgedDownloads = acknowledgedDownloads + finished
+        }
+    }
+
     var downloads by mutableStateOf<List<DownloadEntry>>(emptyList())
         private set
     var downloadLog by mutableStateOf<List<String>>(emptyList())
@@ -1411,8 +1482,14 @@ class DesktopController(private val scope: CoroutineScope) {
                 return@launch
             }
 
-            val resolved = io { LinkResolver.resolve(url) }
-            val target = when (resolved) {
+            // A song name rather than a link: found on YouTube first, and the
+            // link that was found is what yt-dlp is given.
+            val target = if (!url.startsWith("http", ignoreCase = true)) {
+                val text = url.replace(searchPrefix, "").trim()
+                update(entry.id) { it.status = "Finding it on YouTube…" }
+                findYouTubeLink(entry.id, YouTubeLinkFinder.Wanted(title = text))
+                    ?: return@launch
+            } else when (val resolved = io { LinkResolver.resolve(url) }) {
                 is ResolvedLink.Direct -> {
                     update(entry.id) { it.display = "${resolved.service} · $url" }
                     resolved.url
@@ -1422,7 +1499,8 @@ class DesktopController(private val scope: CoroutineScope) {
                         it.display = resolved.display
                         it.note = resolved.note
                     }
-                    LinkResolver.searchTarget(resolved.query)
+                    findYouTubeLink(entry.id, YouTubeLinkFinder.Wanted(title = resolved.query))
+                        ?: return@launch
                 }
                 is ResolvedLink.Unsupported -> {
                     update(entry.id) {
@@ -1458,9 +1536,8 @@ class DesktopController(private val scope: CoroutineScope) {
                             "Saved ${files.size} file${if (files.size == 1) "" else "s"}"
                         }
                     }
-                    // If the download folder is in the library, the new files
-                    // should appear without the user having to press rescan.
-                    if (folders.any { destination.absolutePath.startsWith(it) }) rescan()
+                    // Straight into the library, wherever the download folder is.
+                    addToLibrary(files)
                 },
                 onFailure = { error ->
                     update(entry.id) {
@@ -1481,6 +1558,42 @@ class DesktopController(private val scope: CoroutineScope) {
      * do not, so the artist and title are handed to yt-dlp as a search instead,
      * which is the same fallback a Spotify link takes.
      */
+    /**
+     * Finds the YouTube video that is the song and returns its link.
+     *
+     * When nothing suitable turns up the entry fails with the reason, rather
+     * than saving an edit or a cover that would look like success.
+     */
+    private suspend fun findYouTubeLink(id: Long, wanted: YouTubeLinkFinder.Wanted): String? =
+        when (val outcome = linkFinder.find(wanted)) {
+            is YouTubeLinkFinder.Outcome.Found -> {
+                val video = outcome.pick.video
+                update(id) { entry ->
+                    entry.display = "YouTube · ${video.title}"
+                    entry.note = listOfNotNull(
+                        entry.note,
+                        buildString {
+                            append("Found: ${video.channel}")
+                            video.durationSeconds?.let { append(" · ${YouTubeFormat.duration(it)}") }
+                            video.viewCount?.let { append(" · ${YouTubeFormat.views(it)}") }
+                            append(" · ${video.watchUrl}")
+                        }
+                    ).joinToString("\n")
+                    entry.status = "Starting…"
+                }
+                video.watchUrl
+            }
+
+            is YouTubeLinkFinder.Outcome.NothingSuitable -> {
+                update(id) { entry ->
+                    entry.done = true
+                    entry.failed = true
+                    entry.status = outcome.message
+                }
+                null
+            }
+        }
+
     fun downloadMatch(match: MusicMatch) {
         if (match.drmProtected) {
             toolNote = "${match.provider} streams DRM-protected audio - there is no file " +
@@ -1501,14 +1614,24 @@ class DesktopController(private val scope: CoroutineScope) {
             id = System.nanoTime(),
             target = match.display,
             display = match.display,
-            note = "${match.provider} has no downloadable file, so this searches " +
-                "YouTube for the same track."
+            note = "${match.provider} has no downloadable file, so the same track is " +
+                "found on YouTube first and that link is downloaded."
         )
         downloads = downloads + entry
         scope.launch {
-            update(entry.id) { it.status = "Searching…" }
+            update(entry.id) { it.status = "Finding it on YouTube…" }
+            // The match's own title, artist and length, so the finder can refuse
+            // an edit that happens to share the name.
+            val link = findYouTubeLink(
+                entry.id,
+                YouTubeLinkFinder.Wanted(
+                    title = match.title,
+                    artist = match.artist,
+                    durationMs = match.durationMs
+                )
+            ) ?: return@launch
             val result = YtDlp.download(
-                target = LinkResolver.searchTarget(match.display),
+                target = link,
                 destination = File(settings.downloadDir),
                 toMp3 = downloadToMp3 && tools.ffmpeg,
                 embedThumbnail = downloadEmbedArt,
@@ -1524,7 +1647,7 @@ class DesktopController(private val scope: CoroutineScope) {
                         it.files = files
                         it.status = "Saved ${files.size} file${if (files.size == 1) "" else "s"}"
                     }
-                    rescan()
+                    addToLibrary(files)
                 },
                 onFailure = { error ->
                     update(entry.id) {
@@ -1727,9 +1850,25 @@ class DesktopController(private val scope: CoroutineScope) {
         val chosen = selectedTracks(visible)
         if (chosen.isEmpty()) return
         clearSelection()
+        deleteTracks(chosen)
+    }
+
+    /**
+     * Moves tracks to the Recycle Bin and takes them out of the library.
+     *
+     * Not [java.io.File.delete]: these are the user's own files in their own
+     * folders, and a mis-click has to be recoverable. If the song that is playing
+     * is among them, playback stops first, because Windows will not move a file
+     * that is still open and the delete would otherwise fail without a word.
+     */
+    fun deleteTracks(chosen: List<DesktopTrack>) {
+        if (chosen.isEmpty()) return
+        val paths = chosen.map { it.file.absolutePath }.toSet()
+        if (engine.status.value.track?.file?.absolutePath in paths) engine.stop()
+
         scope.launch {
-            val removed = io {
-                chosen.count { track ->
+            val failed = io {
+                chosen.filterNot { track ->
                     runCatching {
                         val desktop = java.awt.Desktop.getDesktop()
                         if (desktop.isSupported(java.awt.Desktop.Action.MOVE_TO_TRASH)) {
@@ -1740,10 +1879,30 @@ class DesktopController(private val scope: CoroutineScope) {
                     }.getOrDefault(false)
                 }
             }
-            io { store.forgetPaths(chosen.map { it.file.absolutePath }) }
+            val removed = chosen.filterNot { it in failed }
+            if (removed.isNotEmpty()) {
+                val gone = removed.map { it.file.absolutePath }
+                io { store.forgetPaths(gone) }
+                // Taken out of the list directly: a rescan would re-read every tag
+                // in the library to remove one file.
+                val goneSet = gone.toSet()
+                tracks = tracks.filterNot { it.file.absolutePath in goneSet }
+                favourites = favourites - goneSet
+            }
             archiveNote = null
-            rescan()
-            selectionNote = "Moved $removed file${if (removed == 1) "" else "s"} to the Recycle Bin."
+            selectionNote = buildString {
+                if (removed.isNotEmpty()) {
+                    append("Moved ${removed.size} file${if (removed.size == 1) "" else "s"} to the Recycle Bin.")
+                }
+                if (failed.isNotEmpty()) {
+                    if (isNotEmpty()) append(" ")
+                    append(
+                        "Couldn't move ${failed.first().file.name}" +
+                            (if (failed.size > 1) " and ${failed.size - 1} more" else "") +
+                            ". It may be open in another program."
+                    )
+                }
+            }
         }
     }
 

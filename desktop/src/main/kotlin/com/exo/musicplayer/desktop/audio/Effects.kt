@@ -1,6 +1,5 @@
 package com.exo.musicplayer.desktop.audio
 
-import com.exo.musicplayer.data.recognition.Dsp
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.pow
@@ -17,6 +16,11 @@ import kotlin.math.pow
  *
  * Operates on interleaved stereo; the search runs on the summed channels so both
  * stay locked together.
+ *
+ * Its buffers are kept and reused. An earlier version collected output in an
+ * ArrayList of boxed floats and concatenated arrays on every call: tens of
+ * thousands of small objects a second on the playback thread whenever a speed
+ * effect was on, which is garbage the collector has to stop for.
  */
 class TimeStretcher {
 
@@ -27,17 +31,20 @@ class TimeStretcher {
     private val synthesisHop = window / 4
     private val searchRadius = 256
 
-    private var pending = FloatArray(0)   // interleaved stereo residue
-    private var tail = FloatArray(window * 2)
+    /** Input not yet consumed, interleaved stereo, and how much of it is valid. */
+    private var pending = FloatArray(0)
+    private var pendingLength = 0
+    private val tail = FloatArray(window * 2)
     private var primed = false
+    private var output = FloatArray(0)
 
     private val fade = FloatArray(window) { i ->
         (0.5 - 0.5 * cos(2.0 * PI * i / (window - 1))).toFloat()
     }
 
     fun reset() {
-        pending = FloatArray(0)
-        tail = FloatArray(window * 2)
+        pendingLength = 0
+        tail.fill(0f)
         primed = false
     }
 
@@ -45,29 +52,39 @@ class TimeStretcher {
         val f = factor
         if (f in 0.999f..1.001f) return input
 
-        pending = pending + input
-        val analysisHop = (synthesisHop * f).toInt().coerceAtLeast(1)
-        val out = ArrayList<Float>(input.size)
+        if (pending.size < pendingLength + input.size) {
+            pending = pending.copyOf(maxOf(pendingLength + input.size, pending.size * 2))
+        }
+        System.arraycopy(input, 0, pending, pendingLength, input.size)
+        pendingLength += input.size
 
+        val analysisHop = (synthesisHop * f).toInt().coerceAtLeast(1)
+        val windows = ((pendingLength / 2 - searchRadius - window) / analysisHop + 1).coerceAtLeast(0)
+        if (output.size < windows * synthesisHop * 2) output = FloatArray(windows * synthesisHop * 2)
+
+        var written = 0
         var read = 0
         while (true) {
             val need = (read + searchRadius + window) * 2
-            if (need > pending.size) break
+            if (need > pendingLength) break
 
             val offset = if (primed) bestOffset(read) else 0
             val start = (read + offset).coerceAtLeast(0)
-            if ((start + window) * 2 > pending.size) break
+            if ((start + window) * 2 > pendingLength) break
+            if (written + synthesisHop * 2 > output.size) {
+                output = output.copyOf(output.size * 2 + synthesisHop * 2)
+            }
 
             // Overlap-add the new window against the previous one's tail.
             for (i in 0 until synthesisHop) {
                 val w = fade[i]
-                out.add(tail[i * 2] * (1f - w) + pending[(start + i) * 2] * w)
-                out.add(tail[i * 2 + 1] * (1f - w) + pending[(start + i) * 2 + 1] * w)
+                output[written++] = tail[i * 2] * (1f - w) + pending[(start + i) * 2] * w
+                output[written++] = tail[i * 2 + 1] * (1f - w) + pending[(start + i) * 2 + 1] * w
             }
             // Keep the remainder as the next overlap source.
             for (i in 0 until window - synthesisHop) {
                 val src = (start + synthesisHop + i) * 2
-                if (src + 1 >= pending.size) break
+                if (src + 1 >= pendingLength) break
                 tail[i * 2] = pending[src]
                 tail[i * 2 + 1] = pending[src + 1]
             }
@@ -76,10 +93,11 @@ class TimeStretcher {
         }
 
         if (read > 0) {
-            val keepFrom = (read * 2).coerceAtMost(pending.size)
-            pending = pending.copyOfRange(keepFrom, pending.size)
+            val keepFrom = (read * 2).coerceAtMost(pendingLength)
+            System.arraycopy(pending, keepFrom, pending, 0, pendingLength - keepFrom)
+            pendingLength -= keepFrom
         }
-        return FloatArray(out.size) { out[it] }
+        return output.copyOf(written)
     }
 
     /** Offset within the search window whose waveform best matches the tail. */
@@ -91,7 +109,7 @@ class TimeStretcher {
         var offset = -searchRadius
         while (offset <= searchRadius) {
             val start = read + offset
-            if (start < 0 || (start + compare) * 2 > pending.size) {
+            if (start < 0 || (start + compare) * 2 > pendingLength) {
                 offset += 32
                 continue
             }
@@ -215,6 +233,14 @@ class EffectChain {
     val stretcher = TimeStretcher()
     val reverb = Reverb()
 
+    /**
+     * Continuous across buffers. The pitch shift used to resample each buffer on
+     * its own with the fingerprinting filter, which was both slow and seamed at
+     * every buffer boundary.
+     */
+    private val pitchResampler = StreamingResampler(2)
+    private var pitchActive = false
+
     @Volatile
     var speed: Float = 1f
 
@@ -227,6 +253,8 @@ class EffectChain {
     fun reset() {
         stretcher.reset()
         reverb.reset()
+        pitchResampler.reset()
+        pitchActive = false
     }
 
     fun process(input: FloatArray): FloatArray {
@@ -234,7 +262,14 @@ class EffectChain {
         var buffer = input
 
         if (pitch !in 0.999f..1.001f) {
-            buffer = resampleStereo(buffer, pitch)
+            // History from an earlier stretch of pitched audio is stale by now.
+            if (!pitchActive) {
+                pitchResampler.reset()
+                pitchActive = true
+            }
+            buffer = pitchResampler.process(buffer, buffer.size / 2, pitch.toDouble())
+        } else {
+            pitchActive = false
         }
         stretcher.factor = speed / pitch
         buffer = stretcher.process(buffer)
@@ -245,18 +280,5 @@ class EffectChain {
             for (i in buffer.indices) buffer[i] *= volume
         }
         return buffer
-    }
-
-    /** Resamples each channel independently, then re-interleaves. */
-    private fun resampleStereo(input: FloatArray, ratio: Float): FloatArray {
-        val frames = input.size / 2
-        val left = FloatArray(frames) { input[it * 2] }
-        val right = FloatArray(frames) { input[it * 2 + 1] }
-        val rate = AudioDevices.FORMAT.sampleRate.toInt()
-        val target = (rate / ratio).toInt().coerceAtLeast(8000)
-        val outL = Dsp.resample(left, rate, target)
-        val outR = Dsp.resample(right, rate, target)
-        val n = minOf(outL.size, outR.size)
-        return FloatArray(n * 2) { if (it % 2 == 0) outL[it / 2] else outR[it / 2] }
     }
 }

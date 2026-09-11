@@ -81,9 +81,10 @@ fun DownloadScreen(
         }
 
         Text(
-            text = "Paste a YouTube, SoundCloud or Bandcamp link and Resonate pulls " +
-                "the audio out as an mp3, tags it, and adds it to your library. " +
-                "Spotify links work too, by matching the track elsewhere.",
+            text = "Paste a YouTube, SoundCloud or Bandcamp link, or just type an artist " +
+                "and song name and Resonate finds the song on YouTube first. Either way " +
+                "the audio arrives as an mp3, tagged and added to your library. Spotify " +
+                "links work too, by finding the same track.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
@@ -98,7 +99,7 @@ fun DownloadScreen(
             OutlinedTextField(
                 value = url,
                 onValueChange = onUrlChange,
-                placeholder = { Text("https://…") },
+                placeholder = { Text("Link, or artist and song name") },
                 singleLine = true,
                 enabled = !state.busy,
                 shape = MaterialTheme.shapes.large,
@@ -198,22 +199,22 @@ fun DownloadScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    state.note?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
                     state.title?.let {
                         Spacer(Modifier.height(8.dp))
                         Text(
                             text = it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    state.note?.let {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -242,7 +243,7 @@ fun DownloadScreen(
                             MaterialTheme.colorScheme.onPrimaryContainer
                         }
                     )
-                    if (state.isError) {
+                    if (state.isError && state.offerUpdate) {
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = onUpdate) {
                             Icon(Icons.Default.Update, null, Modifier.size(16.dp))
@@ -256,9 +257,11 @@ fun DownloadScreen(
 
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "Spotify itself can't be downloaded from: its audio is DRM " +
-                "protected, so a Spotify link is matched by name instead — check the " +
-                "result is the version you wanted.\n\n" +
+            text = "A song name is found on YouTube before anything downloads: the " +
+                "original upload is picked over sped-up, slowed, cover and live " +
+                "versions, and if none of the results is the song, nothing is saved. " +
+                "Spotify links are matched the same way, since Spotify's own audio is " +
+                "DRM protected.\n\n" +
                 "yt-dlp is bundled and runs entirely on your phone — nothing is " +
                 "sent to a server. YouTube changes often break it; the update button " +
                 "above fetches a newer yt-dlp without reinstalling the app.",

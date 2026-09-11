@@ -152,6 +152,16 @@ object MatchRanker {
         return wanted.sumOf { tokenScore(it, fields) } / wanted.size
     }
 
+    /**
+     * Fuzzy coverage of one token list by another, from 0 to 1.
+     *
+     * The same per-word matching the ranker uses, forgiving typos and prefixes,
+     * exposed so the YouTube link finder scores titles with this implementation
+     * instead of growing a second one that would drift from it.
+     */
+    fun coverage(wanted: List<String>, fields: List<String>): Double =
+        coverageOf(wanted, fields)
+
     fun score(query: String, match: MusicMatch): Double =
         score(query, match.artist, match.title, match.album)
 

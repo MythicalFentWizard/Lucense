@@ -82,6 +82,11 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_WRITE_TAGS, true)
         set(value) = prefs.putBoolean(KEY_WRITE_TAGS, value)
 
+    /** On by default, as it is on the phone. */
+    var starryBackground: Boolean
+        get() = prefs.getBoolean(KEY_STARS, true)
+        set(value) = prefs.putBoolean(KEY_STARS, value)
+
     private companion object {
         const val KEY_FOLDERS = "library_folders"
         const val KEY_OUTPUTS = "audio_outputs"
@@ -96,5 +101,6 @@ class DesktopSettings {
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"
+        const val KEY_STARS = "starry_background"
     }
 }

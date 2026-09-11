@@ -51,12 +51,24 @@ object FolderLibrary {
         val files = mutableListOf<File>()
         roots.filter { it.isDirectory }.forEach { collect(it, files, 0) }
 
-        files.mapIndexedNotNull { index, file ->
+        // A download folder inside a music folder is scanned from both roots, so
+        // the same file would otherwise appear twice.
+        files.distinctBy { it.absolutePath.lowercase() }.mapIndexedNotNull { index, file ->
             onProgress(index + 1, file.name)
             read(file)
         }.sortedWith(
             compareBy({ it.displayArtist.lowercase() }, { it.title.lowercase() })
         )
+    }
+
+    /**
+     * Reads particular files, so a finished download can join the library without
+     * re-reading every tag in it. Anything that is not audio is skipped, by the
+     * same test a scan applies.
+     */
+    suspend fun readFiles(files: List<File>): List<DesktopTrack> = withContext(Dispatchers.IO) {
+        files.filter { it.isFile && AudioTypes.isProbablyAudio(null, it.name) }
+            .mapNotNull { read(it) }
     }
 
     private fun collect(dir: File, into: MutableList<File>, depth: Int) {

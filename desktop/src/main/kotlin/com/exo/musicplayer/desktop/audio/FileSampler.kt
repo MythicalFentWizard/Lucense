@@ -35,11 +35,9 @@ object FileSampler {
                 0L
             }
 
-            var skipped = 0L
-            while (skipped < startFrame) {
-                val chunk = decoder.read(minOf(16384L, startFrame - skipped).toInt()) ?: break
-                skipped += chunk.size / 2
-            }
+            // Skipped rather than read: reading converted and resampled every frame
+            // on the way to the middle of the track, only to throw it away.
+            decoder.skip(startFrame)
 
             val mono = FloatArray(wantedFrames)
             var filled = 0

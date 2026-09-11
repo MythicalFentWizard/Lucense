@@ -473,10 +473,14 @@ private fun AppScaffold(
                             tab = Tab.LIBRARY
                         },
                         onDownload = { match ->
+                            // The match's own fields rather than a joined-up
+                            // string, so the YouTube finder can check the title,
+                            // the artist and the length separately.
                             download.downloadMatch(
                                 downloadUrl = match.downloadUrl,
-                                query = listOfNotNull(match.artist, match.title)
-                                    .joinToString(" ")
+                                artist = match.artist,
+                                title = match.title,
+                                durationMs = match.durationMs
                             )
                             showDownload = true
                         },
@@ -489,7 +493,9 @@ private fun AppScaffold(
                             // rather than the search-by-name fallback.
                             download.downloadMatch(
                                 downloadUrl = video.watchUrl,
-                                query = video.title
+                                artist = null,
+                                title = video.title,
+                                durationMs = null
                             )
                             // The preview would otherwise keep playing over the
                             // download screen it just opened.

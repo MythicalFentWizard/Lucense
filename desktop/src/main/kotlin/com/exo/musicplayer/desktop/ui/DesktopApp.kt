@@ -1,8 +1,14 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -37,6 +43,12 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -81,6 +93,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.desktop.data.DesktopController
+import com.exo.musicplayer.desktop.data.DownloadEntry
 import com.exo.musicplayer.desktop.data.SortMode
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
@@ -123,74 +136,89 @@ fun DesktopApp(
     val status by controller.engine.status.collectAsState()
     val visible = controller.visibleTracks
 
+    // Being on the Download page counts as having seen what finished, so the
+    // Download item stops shining once you have been there.
+    val onDownloadPage = !showSettings && destination == Destination.DOWNLOAD
+    LaunchedEffect(onDownloadPage, controller.downloads) {
+        if (onDownloadPage) controller.acknowledgeDownloads()
+    }
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(Palette.Base)) {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 NavigationRail(
+                    controller = controller,
                     current = if (showSettings) null else destination,
                     settingsOpen = showSettings,
                     onSelect = { destination = it; showSettings = false },
                     onSettings = { showSettings = !showSettings }
                 )
 
-                Column(
+                Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
                         .background(Palette.Content)
                 ) {
-                    ContentHeader(
-                        controller = controller,
-                        title = if (showSettings) "Settings" else destination.label,
-                        destination = destination,
-                        showSettings = showSettings,
-                        shownCount = visible.size,
-                        onAddFolder = { onChooseFolder()?.let(controller::addFolder) },
-                        onBulk = { dialog = DialogKind.BULK },
-                        onDuplicates = {
-                            controller.findDuplicates()
-                            dialog = DialogKind.DUPLICATES
-                        }
+                    Starfield(
+                        enabled = controller.starry,
+                        color = Palette.Accent,
+                        modifier = Modifier.matchParentSize()
                     )
-
-                    ArchiveStrip(controller)
-
-                    if (controller.scanning) {
-                        LinearProgressIndicator(
-                            Modifier.fillMaxWidth().height(2.dp),
-                            color = Palette.Accent,
-                            trackColor = Palette.Line
+                    Column(Modifier.fillMaxSize()) {
+                        ContentHeader(
+                            controller = controller,
+                            title = if (showSettings) "Settings" else destination.label,
+                            destination = destination,
+                            showSettings = showSettings,
+                            shownCount = visible.size,
+                            onAddFolder = { onChooseFolder()?.let(controller::addFolder) },
+                            onBulk = { dialog = DialogKind.BULK },
+                            onDuplicates = {
+                                controller.findDuplicates()
+                                dialog = DialogKind.DUPLICATES
+                            }
                         )
-                    }
 
-                    when {
-                        showSettings -> SettingsScreen(controller, onChooseFolder)
-                        destination == Destination.LIBRARY ->
-                            LibraryPane(
-                                controller = controller,
-                                tracks = visible,
-                                nowPlaying = status.track,
-                                onAddFolder = { onChooseFolder()?.let(controller::addFolder) },
-                                onAddToPlaylist = { items ->
-                                    playlistTargets = items
-                                    controller.refreshPlaylists()
-                                    dialog = DialogKind.ADD_TO_PLAYLIST
-                                },
-                                onIdentify = { track ->
-                                    controller.identifyTarget = track
-                                    destination = Destination.IDENTIFY
-                                    controller.identifyFile(track)
-                                }
+                        ArchiveStrip(controller)
+
+                        if (controller.scanning) {
+                            LinearProgressIndicator(
+                                Modifier.fillMaxWidth().height(2.dp),
+                                color = Palette.Accent,
+                                trackColor = Palette.Line
                             )
-                        destination == Destination.ALBUMS -> AlbumsScreen(controller)
-                        destination == Destination.PLAYLISTS ->
-                            PlaylistsScreen(controller, onPickPlaylistFile)
-                        destination == Destination.IDENTIFY ->
-                            IdentifyScreen(controller, onChooseMedia)
-                        destination == Destination.MOODS -> MoodsScreen(controller)
-                        destination == Destination.STATS -> StatsScreen(controller)
-                        destination == Destination.DOWNLOAD ->
-                            DownloadScreen(controller, onChooseFolder)
+                        }
+
+                        when {
+                            showSettings -> SettingsScreen(controller, onChooseFolder)
+                            destination == Destination.LIBRARY ->
+                                LibraryPane(
+                                    controller = controller,
+                                    tracks = visible,
+                                    nowPlaying = status.track,
+                                    onAddFolder = { onChooseFolder()?.let(controller::addFolder) },
+                                    onAddToPlaylist = { items ->
+                                        playlistTargets = items
+                                        controller.refreshPlaylists()
+                                        dialog = DialogKind.ADD_TO_PLAYLIST
+                                    },
+                                    onIdentify = { track ->
+                                        controller.identifyTarget = track
+                                        destination = Destination.IDENTIFY
+                                        controller.identifyFile(track)
+                                    }
+                                )
+                            destination == Destination.ALBUMS -> AlbumsScreen(controller)
+                            destination == Destination.PLAYLISTS ->
+                                PlaylistsScreen(controller, onPickPlaylistFile)
+                            destination == Destination.IDENTIFY ->
+                                IdentifyScreen(controller, onChooseMedia)
+                            destination == Destination.MOODS -> MoodsScreen(controller)
+                            destination == Destination.STATS -> StatsScreen(controller)
+                            destination == Destination.DOWNLOAD ->
+                                DownloadScreen(controller, onChooseFolder)
+                        }
                     }
                 }
 
@@ -235,40 +263,60 @@ fun DesktopApp(
 
 @Composable
 private fun NavigationRail(
+    controller: DesktopController,
     current: Destination?,
     settingsOpen: Boolean,
     onSelect: (Destination) -> Unit,
     onSettings: () -> Unit
 ) {
-    Column(
+    Box(
         Modifier
             .width(212.dp)
             .fillMaxHeight()
             .background(Palette.Sidebar)
-            .padding(vertical = 14.dp)
     ) {
-        Row(
-            Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(9.dp).clip(CircleShape).background(Palette.Accent))
-            Spacer(Modifier.width(10.dp))
-            Text("Resonate", style = MaterialTheme.typography.titleLarge, color = Palette.Text)
-        }
-
-        Spacer(Modifier.height(14.dp))
-        Destination.entries.forEach { entry ->
-            RailItem(entry.label, entry.icon, entry == current) { onSelect(entry) }
-        }
-
-        Spacer(Modifier.weight(1f))
-        RailItem("Settings", Icons.Default.Settings, settingsOpen, onSettings)
-        Text(
-            "made by lucent",
-            style = MaterialTheme.typography.labelSmall,
-            color = Palette.TextFaint,
-            modifier = Modifier.padding(start = 20.dp, top = 10.dp)
+        Starfield(
+            enabled = controller.starry,
+            color = Palette.Accent,
+            count = 40,
+            modifier = Modifier.matchParentSize()
         )
+        Column(Modifier.fillMaxSize().padding(vertical = 14.dp)) {
+            Row(
+                Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(9.dp).clip(CircleShape).background(Palette.Accent))
+                Spacer(Modifier.width(10.dp))
+                Text("Resonate", style = MaterialTheme.typography.titleLarge, color = Palette.Text)
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Destination.entries.forEach { entry ->
+                if (entry == Destination.DOWNLOAD) {
+                    val downloads = controller.downloads
+                    RailItem(
+                        label = entry.label,
+                        icon = entry.icon,
+                        selected = entry == current,
+                        badge = downloads.count { !it.done },
+                        shine = controller.unseenFinishedDownloads > 0
+                    ) { onSelect(entry) }
+                    RailDownloads(downloads) { onSelect(Destination.DOWNLOAD) }
+                } else {
+                    RailItem(entry.label, entry.icon, entry == current) { onSelect(entry) }
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+            RailItem("Settings", Icons.Default.Settings, settingsOpen, onClick = onSettings)
+            Text(
+                "made by lucent",
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint,
+                modifier = Modifier.padding(start = 20.dp, top = 10.dp)
+            )
+        }
     }
 }
 
@@ -277,6 +325,10 @@ private fun RailItem(
     label: String,
     icon: ImageVector,
     selected: Boolean,
+    /** A count at the top right; for the Download item, how many are running. */
+    badge: Int = 0,
+    /** A band of light sweeping across, while there is something new to look at. */
+    shine: Boolean = false,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -286,31 +338,163 @@ private fun RailItem(
         hovered -> Palette.Hover
         else -> Color.Transparent
     }
+    // Only animated while shining, so an idle rail costs no frames. The sweep is
+    // read inside the draw call, which repaints the item without recomposing it.
+    val sweep = if (shine) {
+        rememberInfiniteTransition(label = "rail-shine").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing)),
+            label = "sweep"
+        )
+    } else {
+        null
+    }
+    val shape = RoundedCornerShape(7.dp)
 
-    Row(
+    Box(
         Modifier
             .padding(horizontal = 10.dp, vertical = 1.dp)
             .fillMaxWidth()
-            .clip(RoundedCornerShape(7.dp))
-            .background(background)
-            .hoverable(interaction)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (selected) Palette.Accent else Palette.TextDim,
-            modifier = Modifier.size(17.dp)
-        )
-        Spacer(Modifier.width(11.dp))
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) Palette.Text else Palette.TextDim
-        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(background)
+                .then(
+                    if (shine) Modifier.border(1.dp, Palette.Accent.copy(alpha = 0.55f), shape)
+                    else Modifier
+                )
+                .drawWithContent {
+                    drawContent()
+                    val progress = sweep?.value ?: return@drawWithContent
+                    val band = size.width * 0.45f
+                    val x = -band + (size.width + band) * progress
+                    drawRect(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Palette.Accent.copy(alpha = 0.30f),
+                                Color.Transparent
+                            ),
+                            startX = x,
+                            endX = x + band
+                        )
+                    )
+                }
+                .hoverable(interaction)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected || shine) Palette.Accent else Palette.TextDim,
+                modifier = Modifier.size(17.dp)
+            )
+            Spacer(Modifier.width(11.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) Palette.Text else Palette.TextDim
+            )
+        }
+        if (badge > 0) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 3.dp, end = 6.dp)
+                    .clip(CircleShape)
+                    .background(Palette.Accent)
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    badge.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.OnAccent
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The latest few downloads, under the Download item.
+ *
+ * A glance rather than the list: newest first, four at most, each one a click
+ * away from the full Download page.
+ */
+@Composable
+private fun RailDownloads(downloads: List<DownloadEntry>, onOpen: () -> Unit) {
+    if (downloads.isEmpty()) return
+    val recent = downloads.asReversed().take(4)
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 26.dp, end = 12.dp, top = 2.dp, bottom = 6.dp)
+    ) {
+        recent.forEach { entry ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(5.dp))
+                    .clickable(onClick = onOpen)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(12.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        entry.failed -> Icon(
+                            Icons.Default.ErrorOutline, "Failed",
+                            Modifier.size(12.dp), tint = Palette.TextFaint
+                        )
+                        entry.done -> Icon(
+                            Icons.Default.Check, "Done",
+                            Modifier.size(12.dp), tint = Palette.Accent
+                        )
+                        else -> CircularProgressIndicator(
+                            Modifier.size(10.dp),
+                            color = Palette.Accent,
+                            strokeWidth = 1.5.dp,
+                            trackColor = Palette.Line
+                        )
+                    }
+                }
+                Spacer(Modifier.width(7.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        entry.display,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (entry.done) Palette.TextFaint else Palette.TextDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!entry.done) {
+                        Spacer(Modifier.height(3.dp))
+                        LinearProgressIndicator(
+                            progress = { entry.percent.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(2.dp),
+                            color = Palette.Accent,
+                            trackColor = Palette.Line
+                        )
+                    }
+                }
+            }
+        }
+        if (downloads.size > recent.size) {
+            Text(
+                "+${downloads.size - recent.size} more",
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint,
+                modifier = Modifier.padding(start = 25.dp, top = 2.dp)
+            )
+        }
     }
 }
 
@@ -515,7 +699,7 @@ private fun LibraryPane(
             HeaderCell("Title", Modifier.weight(2.2f))
             HeaderCell("Artist", Modifier.weight(1.4f))
             HeaderCell("Album", Modifier.weight(1.4f))
-            HeaderCell(controller.sort.trailingColumn, Modifier.width(76.dp))
+            HeaderCell(controller.sort.trailingColumn, Modifier.width(100.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
 
@@ -597,7 +781,10 @@ private fun TrackRow(
                 ContextMenuItem("Add to playlist...") { onAddToPlaylist() },
                 ContextMenuItem("Identify this track") { onIdentify() },
                 ContextMenuItem("Edit details...") { controller.editTarget = track },
-                ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) }
+                ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) },
+                ContextMenuItem("Delete (move to Recycle Bin)") {
+                    controller.deleteTracks(listOf(track))
+                }
             )
         }
     ) {
@@ -650,7 +837,7 @@ private fun TrackRow(
             Cell(track.displayAlbum, Modifier.weight(1.4f), Palette.TextDim)
 
             Row(
-                Modifier.width(76.dp),
+                Modifier.width(100.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (hovered || isFavourite) {
@@ -670,6 +857,25 @@ private fun TrackRow(
                             "Favourite",
                             Modifier.size(13.dp),
                             tint = if (isFavourite) Palette.Accent else Palette.TextFaint
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (hovered) {
+                    // On hover only: a delete button showing on every row would be
+                    // a hazard in a long list. It goes to the Recycle Bin anyway.
+                    Box(
+                        Modifier
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .clickable { controller.deleteTracks(listOf(track)) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.DeleteOutline,
+                            "Move to Recycle Bin",
+                            Modifier.size(14.dp),
+                            tint = Palette.TextFaint
                         )
                     }
                     Spacer(Modifier.width(6.dp))
