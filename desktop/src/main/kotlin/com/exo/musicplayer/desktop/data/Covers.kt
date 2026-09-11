@@ -1,5 +1,8 @@
 package com.exo.musicplayer.desktop.data
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +33,13 @@ object Covers {
 
     /** Paths already checked and found to have no art, so they aren't re-read. */
     private val misses = Thumbnails.BoundedKeySet()
+
+    /**
+     * Goes up whenever a cover is fetched, so covers already on screen swap in
+     * while a bulk run is still going rather than only after they scroll away.
+     */
+    var revision by mutableStateOf(0)
+        private set
 
     private val sidecarNames = listOf(
         "cover.jpg", "cover.png", "folder.jpg", "folder.png",
@@ -71,7 +81,7 @@ object Covers {
         url: String,
         embedInFile: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
-        val bytes = download(url) ?: return@withContext false
+        val bytes = download(url)?.let(Thumbnails::squared) ?: return@withContext false
         // Decoded once to prove it is a real image, and that same result is
         // what goes in the cache rather than decoding a second time.
         val bitmap = Thumbnails.decodeScaled(bytes) ?: return@withContext false
@@ -82,6 +92,7 @@ object Covers {
         val key = track.file.absolutePath
         misses -= key
         memory[key] = bitmap
+        revision++
         true
     }
 

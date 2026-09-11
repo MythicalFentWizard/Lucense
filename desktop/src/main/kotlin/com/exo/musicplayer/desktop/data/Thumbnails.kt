@@ -2,6 +2,8 @@ package com.exo.musicplayer.desktop.data
 
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import kotlin.math.min
+import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
@@ -61,6 +63,44 @@ object Thumbnails {
             source.close()
         }
     }.getOrNull()
+
+    /**
+     * [bytes] cropped to its centre square and re-encoded as JPEG, when the image
+     * is clearly not square; otherwise [bytes] untouched.
+     *
+     * For YouTube thumbnails, which are 16:9 with the cover art in the middle,
+     * so what gets stored and embedded looks like cover art everywhere.
+     */
+    fun squared(bytes: ByteArray): ByteArray = runCatching {
+        val source = Image.makeFromEncoded(bytes)
+        try {
+            val side = min(source.width, source.height)
+            if (max(source.width, source.height) <= side * 1.1f) return@runCatching bytes
+            val surface = Surface.makeRasterN32Premul(side, side)
+            try {
+                surface.canvas.drawImageRect(
+                    source,
+                    Rect.makeXYWH(
+                        ((source.width - side) / 2).toFloat(),
+                        ((source.height - side) / 2).toFloat(),
+                        side.toFloat(),
+                        side.toFloat()
+                    ),
+                    Rect.makeWH(side.toFloat(), side.toFloat())
+                )
+                val snapshot = surface.makeImageSnapshot()
+                try {
+                    snapshot.encodeToData(EncodedImageFormat.JPEG, 92)?.bytes ?: bytes
+                } finally {
+                    snapshot.close()
+                }
+            } finally {
+                surface.close()
+            }
+        } finally {
+            source.close()
+        }
+    }.getOrDefault(bytes)
 
     /** Four bytes a pixel, which is what N32 premultiplied costs. */
     fun sizeOf(bitmap: ImageBitmap): Long = bitmap.width.toLong() * bitmap.height * 4

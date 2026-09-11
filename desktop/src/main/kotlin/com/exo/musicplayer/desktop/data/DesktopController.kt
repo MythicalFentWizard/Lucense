@@ -64,10 +64,13 @@ import com.exo.musicplayer.desktop.ui.DesktopFxState
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.SidePanelKind
 import com.exo.musicplayer.util.AudioTypes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -91,6 +94,7 @@ data class BulkJob(
     val total: Int = 0,
     val done: Int = 0,
     val updated: Int = 0,
+    val alreadyHad: Int = 0,
     val skipped: Int = 0,
     val failed: Int = 0,
     val current: String = "",
@@ -153,6 +157,23 @@ class DesktopController(private val scope: CoroutineScope) {
             InternetArchiveProvider(),
             YouTubeSearchProvider(),
             GeniusMetadataProvider()
+        )
+    )
+
+    /**
+     * Where the bulk cover and tag tools look, best first: YouTube, then the
+     * stores and the other free catalogues, and MusicBrainz last - its search
+     * answers loosely and most of its cover links are dead. Internet Archive is
+     * left out, since its results carry neither art nor an album.
+     */
+    private val libraryLookup = MetadataProviderChain(
+        listOf(
+            YouTubeSearchProvider(),
+            ITunesProvider(),
+            DeezerProvider(),
+            AudiusProvider(),
+            GeniusMetadataProvider(),
+            MusicBrainzProvider()
         )
     )
 
@@ -1175,6 +1196,10 @@ class DesktopController(private val scope: CoroutineScope) {
         private set
     private var bulkJob: Job? = null
 
+    private enum class BulkOutcome { UPDATED, ALREADY_HAD, NOTHING_FOUND }
+
+    private fun Boolean.asOutcome() = if (this) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
+
     fun cancelBulk() {
         bulkJob?.cancel()
         bulkJob = null
@@ -1201,21 +1226,57 @@ class DesktopController(private val scope: CoroutineScope) {
                 skipped = skipped
             )
 
+            var done = 0
             var updated = 0
+            var alreadyHad = 0
             var failed = 0
-            for ((index, track) in queue.withIndex()) {
-                bulk = bulk.copy(done = index, current = track.title)
-                val ok = runCatching {
-                    when (kind) {
-                        BulkKind.COVERS -> bulkCover(track)
-                        BulkKind.TAGS -> bulkTags(track)
-                        BulkKind.LYRICS -> bulkLyrics(track)
-                        BulkKind.IDENTIFY -> bulkIdentify(track)
+            val inFlight = mutableListOf<String>()
+            val work = Channel<DesktopTrack>(Channel.UNLIMITED)
+            queue.forEach { work.trySend(it) }
+            work.close()
+
+            // Cover and tag lookups mostly wait on the network, so several songs
+            // go at once. Lyrics and identification stay one at a time:
+            // identifying decodes audio, and the lyric services are the likeliest
+            // to rate-limit. Workers share the UI thread between suspensions, so
+            // the counters need no locking.
+            val workers = if (kind == BulkKind.COVERS || kind == BulkKind.TAGS) SONGS_AT_ONCE else 1
+            coroutineScope {
+                repeat(workers) {
+                    launch {
+                        for (track in work) {
+                            inFlight += track.title
+                            bulk = bulk.copy(current = inFlight.joinToString("  ·  "))
+                            val outcome = try {
+                                when (kind) {
+                                    BulkKind.COVERS -> bulkCover(track)
+                                    BulkKind.TAGS -> bulkTags(track).asOutcome()
+                                    BulkKind.LYRICS -> bulkLyrics(track).asOutcome()
+                                    BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                BulkOutcome.NOTHING_FOUND
+                            }
+                            when (outcome) {
+                                BulkOutcome.UPDATED -> updated++
+                                BulkOutcome.ALREADY_HAD -> alreadyHad++
+                                BulkOutcome.NOTHING_FOUND -> failed++
+                            }
+                            io { store.mark(track.file.absolutePath, column) }
+                            done++
+                            inFlight -= track.title
+                            bulk = bulk.copy(
+                                done = done,
+                                updated = updated,
+                                alreadyHad = alreadyHad,
+                                failed = failed,
+                                current = inFlight.joinToString("  ·  ")
+                            )
+                        }
                     }
-                }.getOrDefault(false)
-                if (ok) updated++ else failed++
-                io { store.mark(track.file.absolutePath, column) }
-                bulk = bulk.copy(updated = updated, failed = failed)
+                }
             }
 
             bulk = bulk.copy(
@@ -1224,27 +1285,32 @@ class DesktopController(private val scope: CoroutineScope) {
                 current = "",
                 finishedNote = buildString {
                     append("$updated updated")
+                    if (alreadyHad > 0) append(", $alreadyHad already had art")
                     if (failed > 0) append(", $failed with nothing found")
                     if (skipped > 0) append(", $skipped skipped as already done")
                     append(".")
                 }
             )
             bulkJob = null
-            rescan()
+            // Fetched covers are already in place and on screen, so only the tools
+            // that rewrite tags need the library read again.
+            if (kind != BulkKind.COVERS) rescan()
         }
     }
 
-    private suspend fun bulkCover(track: DesktopTrack): Boolean {
-        if (io { Covers.hasLocalArt(track) }) return false
-        val url = catalogue.searchForArtwork(track.searchQuery) ?: return false
-        return Covers.fetchAndStore(track, url, writeTags)
+    private suspend fun bulkCover(track: DesktopTrack): BulkOutcome {
+        if (io { Covers.hasLocalArt(track) }) return BulkOutcome.ALREADY_HAD
+        val stored = libraryLookup.findArtwork(track.searchQuery) { url ->
+            Covers.fetchAndStore(track, url, writeTags).takeIf { it }
+        }
+        return if (stored != null) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
     }
 
     private suspend fun bulkTags(track: DesktopTrack): Boolean {
-        val (matches, _) = catalogue.search(track.searchQuery, limit = 1)
-        val match = matches.firstOrNull() ?: return false
+        val details = libraryLookup.findDetails(track.artist, track.title, giveUpMs = TAGS_GIVE_UP_MS)
+            ?: return false
         return io {
-            TagWriter.write(track.file, match.title, match.artist, match.album, match.releaseYear)
+            TagWriter.write(track.file, details.title, details.artist, details.album, details.year)
                 .isSuccess
         }
     }
@@ -2269,6 +2335,16 @@ enum class IdentifyMode(val label: String, val placeholder: String) {
 }
 
 /** The four bulk tools, and the mark each one records so reruns can skip. */
+/** How many songs the cover and tag tools look up at once. */
+private const val SONGS_AT_ONCE = 5
+
+/**
+ * How long one song's tag lookup may take. Every track goes through the tag
+ * tool, not only the ones missing something, so a slow service is cut off
+ * sooner than for covers.
+ */
+private const val TAGS_GIVE_UP_MS = 10_000L
+
 enum class BulkKind(val label: String, val markColumn: String) {
     COVERS("Covers", "artCheckedAt"),
     TAGS("Names & tags", "identifiedAt"),

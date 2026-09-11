@@ -45,7 +45,9 @@ fun Artwork(
     val cached = track?.let { Covers.cached(it) }
     var bitmap by remember(track?.file?.absolutePath) { mutableStateOf(cached) }
 
-    LaunchedEffect(track?.file?.absolutePath) {
+    // Keyed on the revision too, so a cover fetched while this is on screen
+    // replaces the placeholder. A cover already showing is never reloaded.
+    LaunchedEffect(track?.file?.absolutePath, Covers.revision) {
         if (track != null && bitmap == null && !Covers.knownMissing(track)) {
             bitmap = Covers.load(track)
         }

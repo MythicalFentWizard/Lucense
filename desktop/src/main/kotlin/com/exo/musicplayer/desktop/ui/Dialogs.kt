@@ -152,16 +152,16 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
             BulkOption(
                 kind = BulkKind.COVERS,
                 icon = Icons.Default.Album,
-                description = "Finds missing cover art across seven catalogues. " +
-                    "Tracks that already have art are left alone.",
+                description = "Finds missing cover art, five songs at a time, asking six " +
+                    "sources at once, YouTube first. Tracks that already have art are left alone.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.COVERS, redo) }
 
             BulkOption(
                 kind = BulkKind.TAGS,
                 icon = Icons.AutoMirrored.Filled.Label,
-                description = "Looks each track up by name and fills in artist, " +
-                    "album and year.",
+                description = "Looks songs up by name, five at a time, and fills in artist, " +
+                    "album and year, each from the best source that has it.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.TAGS, redo) }
 

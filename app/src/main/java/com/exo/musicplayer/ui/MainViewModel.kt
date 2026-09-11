@@ -23,6 +23,7 @@ import com.exo.musicplayer.data.lyrics.LyricLine
 import com.exo.musicplayer.data.lyrics.LyricsFetch
 import com.exo.musicplayer.data.ingest.ImportResult
 import com.exo.musicplayer.data.recognition.AudioSampler
+import com.exo.musicplayer.data.recognition.AudiusProvider
 import com.exo.musicplayer.data.recognition.DeezerProvider
 import com.exo.musicplayer.data.recognition.GeniusMetadataProvider
 import com.exo.musicplayer.data.recognition.ITunesProvider
@@ -30,6 +31,7 @@ import com.exo.musicplayer.data.recognition.MetadataProviderChain
 import com.exo.musicplayer.data.recognition.MusicBrainzProvider
 import com.exo.musicplayer.data.recognition.MusicMatch
 import com.exo.musicplayer.data.recognition.RecognitionResult
+import com.exo.musicplayer.data.recognition.YouTubeSearchProvider
 import com.exo.musicplayer.data.repo.SortMode
 import com.exo.musicplayer.data.weather.Affinity
 import com.exo.musicplayer.data.weather.WeatherAffinity
@@ -45,6 +47,8 @@ import com.exo.musicplayer.playback.ReverbRoom
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,12 +91,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val started = SharingStarted.WhileSubscribed(5_000)
 
+    // The same sources and order as the Windows cover tool: YouTube first, then
+    // the stores and free catalogues, MusicBrainz last.
     private val coverSearch = MetadataProviderChain(
         listOf(
+            YouTubeSearchProvider(),
             ITunesProvider(),
             DeezerProvider(),
-            MusicBrainzProvider(),
-            GeniusMetadataProvider()
+            AudiusProvider(),
+            GeniusMetadataProvider(),
+            MusicBrainzProvider()
         )
     )
 
@@ -369,15 +377,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * fingerprinting: a fingerprint costs a decode plus a network round trip per
      * song, which on a large library is minutes of work for art a title lookup
      * already finds.
+     *
+     * Five songs at a time, each asking every catalogue at once, as on Windows;
+     * a dead image link moves on to the next catalogue's picture.
      */
-    fun updateAllCovers(redo: Boolean = false) = runBulk("cover") { track ->
-        val query = listOfNotNull(track.artist, track.title).joinToString(" ")
-        val art = runCatching { coverSearch.searchForArtwork(query) }.getOrNull()
-        val ok = art != null &&
-            runCatching { library.updateArtwork(track, art) }.getOrDefault(false)
-        library.markArtChecked(track.id)
-        ok
-    }
+    fun updateAllCovers(redo: Boolean = false) =
+        runBulk("cover", redo, parallel = 5) { track ->
+            val query = listOfNotNull(track.artist, track.title).joinToString(" ")
+            val ok = runCatching {
+                coverSearch.findArtwork(query) { url ->
+                    library.updateArtwork(track, url).takeIf { it }
+                }
+            }.getOrNull() == true
+            library.markArtChecked(track.id)
+            ok
+        }
 
     /**
      * Fingerprints every track and rewrites its tags from what comes back.
@@ -419,6 +433,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun runBulk(
         kind: String,
         redo: Boolean = false,
+        parallel: Int = 1,
         work: suspend (Track) -> Boolean
     ) {
         bulkJob?.cancel()
@@ -436,19 +451,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
+            var finished = 0
             var done = 0
             var failed = 0
+            val queue = Channel<Track>(Channel.UNLIMITED)
+            targets.forEach { queue.trySend(it) }
+            queue.close()
             _bulk.value = BulkProgress(total = targets.size)
-            for ((index, track) in targets.withIndex()) {
-                if (!isActive) return@launch
-                _bulk.value = BulkProgress(
-                    done = index,
-                    total = targets.size,
-                    added = done,
-                    failed = failed,
-                    currentName = track.title
-                )
-                if (runCatching { work(track) }.getOrDefault(false)) done++ else failed++
+            // Workers share the main thread between suspensions, so the counters
+            // need no locking.
+            coroutineScope {
+                repeat(parallel) {
+                    launch {
+                        for (track in queue) {
+                            _bulk.value = BulkProgress(
+                                done = finished,
+                                total = targets.size,
+                                added = done,
+                                failed = failed,
+                                currentName = track.title
+                            )
+                            if (runCatching { work(track) }.getOrDefault(false)) done++ else failed++
+                            finished++
+                        }
+                    }
+                }
             }
 
             _bulk.value = null
