@@ -51,6 +51,9 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
     override val active: Boolean get() = trackPath != null
 
     @Volatile private var trackPath: String? = null
+
+    /** Bumped per track read, so a reader being replaced stops publishing to a graph that has moved on. */
+    @Volatile private var generation = 0
     private var reader: Thread? = null
     private var lastStatus: PlaybackStatus? = null
 
@@ -126,6 +129,7 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
             return
         }
         val target = FloatArray(size)
+        val mine = ++generation
         slices = target
         filled = 0
         loudest = 0f
@@ -135,7 +139,8 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
                     var slice = 0
                     var sum = 0.0
                     var count = 0
-                    while (slice < target.size && !Thread.currentThread().isInterrupted) {
+                    var peak = 0f
+                    while (slice < target.size && generation == mine && !Thread.currentThread().isInterrupted) {
                         val chunk = decoder.read(FRAMES_PER_SLICE * 10) ?: break
                         var i = 0
                         while (i + 1 < chunk.size) {
@@ -145,7 +150,7 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
                                 if (slice < target.size) {
                                     val value = sqrt(sum / count).toFloat()
                                     target[slice] = value
-                                    if (value > loudest) loudest = value
+                                    if (value > peak) peak = value
                                 }
                                 slice++
                                 sum = 0.0
@@ -153,6 +158,10 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
                             }
                             i += 2
                         }
+                        // An interrupted read can be most of a chunk behind, and
+                        // publishing then would describe the song just left.
+                        if (generation != mine) break
+                        loudest = peak
                         filled = slice.coerceAtMost(target.size)
                     }
                 }

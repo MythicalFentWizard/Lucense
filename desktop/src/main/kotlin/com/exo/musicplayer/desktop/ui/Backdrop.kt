@@ -327,7 +327,9 @@ private fun Animated(
     val place = remember { Placement() }
     val focused = LocalWindowInfo.current.isWindowFocused || !pauseWhenUnfocused
     val moving = style == BackdropStyle.REACTIVE || style == BackdropStyle.WAVES
-    val listening = moving && spectrum != null
+    // Null unless this style listens, so the tick has one thing to test.
+    val analyser = if (moving) spectrum else null
+    val listening = analyser != null
 
     LaunchedEffect(focused, style) {
         if (!focused) return@LaunchedEffect
@@ -347,13 +349,13 @@ private fun Animated(
             }
             val nanos = System.nanoTime()
             val now = (nanos - origin) / 1e9f
-            if (listening && spectrum != null) {
+            if (analyser != null) {
                 // Re-asserted every tick: the effects panel's meter switches the
                 // analyser off when it closes, and this still needs it.
-                spectrum.enabled = true
+                analyser.enabled = true
                 beat?.enabled = true
                 pulse.update(
-                    spectrum.snapshot(raw),
+                    analyser.snapshot(raw),
                     now,
                     aheadSeconds = (beat?.delayNanos ?: 0L) / 1e9f,
                     heardBass = if (beat == null) -1f else beat.bassAt(nanos)
@@ -363,10 +365,10 @@ private fun Animated(
             seconds.floatValue = now
         }
     }
-    DisposableEffect(listening) {
+    DisposableEffect(analyser) {
         onDispose {
-            if (listening) {
-                spectrum?.enabled = false
+            if (analyser != null) {
+                analyser.enabled = false
                 beat?.enabled = false
             }
         }
@@ -449,7 +451,7 @@ private fun DrawScope.glowPath(path: Path, color: Color, width: Float, blur: Flo
 private fun smoothThrough(path: Path, xs: FloatArray, ys: FloatArray, moveFirst: Boolean) {
     if (moveFirst) path.moveTo(xs[0], ys[0])
     for (i in 1 until xs.size) {
-        path.quadraticBezierTo(xs[i - 1], ys[i - 1], (xs[i - 1] + xs[i]) / 2f, (ys[i - 1] + ys[i]) / 2f)
+        path.quadraticTo(xs[i - 1], ys[i - 1], (xs[i - 1] + xs[i]) / 2f, (ys[i - 1] + ys[i]) / 2f)
     }
     path.lineTo(xs[xs.size - 1], ys[ys.size - 1])
 }

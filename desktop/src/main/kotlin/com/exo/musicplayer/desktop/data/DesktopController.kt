@@ -72,10 +72,12 @@ import com.exo.musicplayer.desktop.ui.SidePanelKind
 import com.exo.musicplayer.desktop.ui.ThemeColors
 import com.exo.musicplayer.util.AudioTypes
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -139,7 +141,31 @@ data class DesktopDuplicateGroup(val keep: DesktopTrack, val remove: List<Deskto
  * written from the caller's (main) dispatcher.
  */
 @Stable
-class DesktopController(private val scope: CoroutineScope) {
+class DesktopController(parent: CoroutineScope) {
+
+    /**
+     * The controller's own scope, supervised.
+     *
+     * Everything in here is launched from it. As a plain child of the window's
+     * scope, the first job to throw - an unreadable file, a service dying
+     * mid-call - cancelled that scope, and with it every later scan, lyric
+     * fetch, download and identification, silently, until the app was
+     * restarted. Supervised, a failure stays where it happened, and the handler
+     * clears whatever was marked as running so nothing is left spinning for
+     * work that has died.
+     */
+    private val scope = CoroutineScope(
+        parent.coroutineContext +
+            SupervisorJob(parent.coroutineContext[Job]) +
+            CoroutineExceptionHandler { _, error ->
+                scanning = false
+                lyricsLoading = false
+                youtubeBusy = false
+                identifyBusy = false
+                merging = false
+                System.err.println("Resonate: a background job failed: ${error.stackTraceToString()}")
+            }
+    )
 
     val settings = DesktopSettings()
     val store = DesktopStore(AppDirs.database)
@@ -2501,20 +2527,30 @@ class DesktopController(private val scope: CoroutineScope) {
         mergeNote = null
         scope.launch {
             val changes = plans.flatMap { TrackGroups.changes(it) }
-            val written = io { changes.filter { TagWriter.change(it).isSuccess }.map { it.file } }
-            val reread = FolderLibrary.readFiles(written).associateBy { it.file.absolutePath }
-            tracks = tracks.map { reread[it.file.absolutePath] ?: it }
+            // Whatever happens - an unreadable file, a locked one - the merge has
+            // to end: leaving it running would disable every merge button for good.
+            val outcome = runCatching {
+                val written = io { changes.filter { TagWriter.change(it).isSuccess }.map { it.file } }
+                val reread = FolderLibrary.readFiles(written).associateBy { it.file.absolutePath }
+                tracks = tracks.map { reread[it.file.absolutePath] ?: it }
+                written.size
+            }
             clearPicked()
             mergePlans = emptyList()
             merging = false
-            val failed = changes.size - written.size
             val what = if (plans.size == 1) {
                 "${plans[0].groups.size} ${plans[0].kind.plural} into “${plans[0].name}”"
             } else {
                 "${plans.size} sets of ${plans[0].kind.plural}"
             }
-            mergeNote = "Merged $what · ${written.size} songs retagged" +
-                if (failed > 0) " · $failed could not be written - playing, or open elsewhere?" else ""
+            mergeNote = outcome.fold(
+                { written ->
+                    val failed = changes.size - written
+                    "Merged $what · $written songs retagged" +
+                        if (failed > 0) " · $failed could not be written - playing, or open elsewhere?" else ""
+                },
+                { "Merging $what failed: ${it.message ?: it.javaClass.simpleName}" }
+            )
         }
     }
 
