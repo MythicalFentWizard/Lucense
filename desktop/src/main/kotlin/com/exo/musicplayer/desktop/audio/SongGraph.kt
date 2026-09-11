@@ -78,7 +78,7 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
         }
 
         val reported = status.positionMs.toDouble()
-        val predicted = positionMs()
+        val predicted = writtenMs()
         val now = System.nanoTime()
         anchorMs = if (!status.playing || !playing || abs(predicted - reported) > 400.0) {
             reported
@@ -89,7 +89,15 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
         playing = status.playing
     }
 
-    override fun positionMs(): Double {
+    /**
+     * Where the song is at the speakers. The engine counts what it has handed
+     * to the output line, and the line holds up to a fifth of a second of that
+     * before any of it is heard.
+     */
+    override fun positionMs(): Double = writtenMs() - engine.beat.delayNanos / 1e6 * engine.effects.speed
+
+    /** Where the engine has written up to, carried on between its reports. */
+    private fun writtenMs(): Double {
         if (!playing) return anchorMs
         return anchorMs + (System.nanoTime() - anchorNanos) / 1e6 * engine.effects.speed
     }

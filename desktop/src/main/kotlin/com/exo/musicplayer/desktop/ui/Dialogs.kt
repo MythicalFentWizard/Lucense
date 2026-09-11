@@ -50,7 +50,7 @@ import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
 
 /** Which modal is open, if any. */
-enum class DialogKind { BULK, DUPLICATES, ADD_TO_PLAYLIST }
+enum class DialogKind { BULK, DUPLICATES, ADD_TO_PLAYLIST, MERGE }
 
 /**
  * Modal surface.

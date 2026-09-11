@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.drawWithContent
@@ -96,10 +97,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.desktop.data.CollectionKind
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.DownloadEntry
 import com.exo.musicplayer.desktop.data.SortMode
 import com.exo.musicplayer.desktop.library.DesktopTrack
+import com.exo.musicplayer.desktop.system.Explorer
 import com.exo.musicplayer.util.asDuration
 import kotlinx.coroutines.delay
 import java.awt.Desktop
@@ -109,6 +112,7 @@ import java.util.Locale
 enum class Destination(val label: String, val icon: ImageVector) {
     LIBRARY("Library", Icons.Default.LibraryMusic),
     ALBUMS("Albums", Icons.Default.Album),
+    ARTISTS("Artists", Icons.Default.Person),
     PLAYLISTS("Playlists", Icons.AutoMirrored.Filled.QueueMusic),
     IDENTIFY("Identify", Icons.Default.Fingerprint),
     MOODS("Moods", Icons.Default.Cloud),
@@ -189,6 +193,7 @@ fun DesktopApp(
                         color = Palette.Stars,
                         spectrum = controller.engine.spectrum,
                         graph = controller.songGraph,
+                        beat = controller.engine.beat,
                         reactiveMode = controller.reactiveMode,
                         modifier = Modifier.matchParentSize()
                     )
@@ -236,7 +241,20 @@ fun DesktopApp(
                                         controller.identifyFile(track)
                                     }
                                 )
-                            destination == Destination.ALBUMS -> AlbumsScreen(controller)
+                            destination == Destination.ALBUMS || destination == Destination.ARTISTS ->
+                                CollectionScreen(
+                                    controller = controller,
+                                    kind = if (destination == Destination.ALBUMS) {
+                                        CollectionKind.ALBUMS
+                                    } else {
+                                        CollectionKind.ARTISTS
+                                    },
+                                    onMerge = { dialog = DialogKind.MERGE },
+                                    onClearDuplicates = { within ->
+                                        controller.findDuplicates(within)
+                                        dialog = DialogKind.DUPLICATES
+                                    }
+                                )
                             destination == Destination.PLAYLISTS ->
                                 PlaylistsScreen(controller, onPickPlaylistFile)
                             destination == Destination.IDENTIFY ->
@@ -281,6 +299,7 @@ fun DesktopApp(
         when (dialog) {
             DialogKind.BULK -> BulkToolsDialog(controller) { dialog = null }
             DialogKind.DUPLICATES -> DuplicatesDialog(controller) { dialog = null }
+            DialogKind.MERGE -> MergeDialog(controller) { dialog = null }
             DialogKind.ADD_TO_PLAYLIST ->
                 AddToPlaylistDialog(controller, playlistTargets) { dialog = null }
             null -> Unit
@@ -351,9 +370,11 @@ private fun NavigationRail(
             color = Palette.Stars,
             spectrum = controller.engine.spectrum,
             graph = controller.songGraph,
+            beat = controller.engine.beat,
             reactiveMode = controller.reactiveMode,
             modifier = Modifier.matchParentSize(),
-            count = 40
+            count = 40,
+            centerpiece = false
         )
         Column(Modifier.fillMaxSize().padding(vertical = 14.dp)) {
             Row(
@@ -595,6 +616,13 @@ private fun ContentHeader(
         destination == Destination.IDENTIFY -> "Seven catalogues, plus fingerprinting"
         destination == Destination.DOWNLOAD -> "YouTube, SoundCloud, Bandcamp, Spotify"
         destination == Destination.MOODS -> "Songs that match the weather"
+        destination == Destination.ALBUMS || destination == Destination.ARTISTS ->
+            controller.mergeNote
+                ?: if (controller.merging) {
+                    "Merging…"
+                } else {
+                    "Ctrl+click to pick several, then merge them"
+                }
         else -> "${controller.tracks.size} tracks"
     }
 
@@ -1224,18 +1252,7 @@ private fun BarToggle(
     }
 }
 
-private fun revealInExplorer(file: File) {
-    runCatching {
-        // "/select," highlights the file rather than just opening its folder.
-        ProcessBuilder("explorer.exe", "/select,${file.absolutePath}").start()
-    }.onFailure {
-        runCatching {
-            file.parentFile?.let { parent ->
-                if (Desktop.isDesktopSupported()) Desktop.getDesktop().open(parent)
-            }
-        }
-    }
-}
+private fun revealInExplorer(file: File) = Explorer.reveal(file)
 
 /**
  * Progress and outcome of a zip, under the toolbar.

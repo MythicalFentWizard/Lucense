@@ -194,4 +194,14 @@ object TagWriter {
         apply(FieldKey.YEAR, year?.toString())
         audio.commit()
     }
+
+    /** Writes only the fields [change] names, leaving the rest of the tag alone. */
+    fun change(change: TagChange): Result<Unit> = runCatching {
+        val audio = AudioFileIO.read(change.file)
+        val tag = audio.tagOrCreateAndSetDefault
+        change.artist?.let { tag.setField(FieldKey.ARTIST, it) }
+        change.album?.let { tag.setField(FieldKey.ALBUM, it) }
+        change.albumArtist?.let { tag.setField(FieldKey.ALBUM_ARTIST, it) }
+        audio.commit()
+    }
 }

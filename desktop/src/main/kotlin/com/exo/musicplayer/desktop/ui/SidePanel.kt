@@ -132,9 +132,11 @@ fun SidePanel(
             color = Palette.Stars,
             spectrum = controller.engine.spectrum,
             graph = controller.songGraph,
+            beat = controller.engine.beat,
             reactiveMode = controller.reactiveMode,
             modifier = Modifier.matchParentSize(),
-            count = 50
+            count = 50,
+            centerpiece = false
         )
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {

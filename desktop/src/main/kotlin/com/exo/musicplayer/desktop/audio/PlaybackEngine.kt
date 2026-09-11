@@ -44,6 +44,9 @@ class PlaybackEngine {
     /** Band levels for the mixer display; idle unless something is showing it. */
     val spectrum = SpectrumAnalyser()
 
+    /** The bass as it reaches the speakers, for the reactive backgrounds. */
+    val beat = BeatTap()
+
     private var worker: Thread? = null
     private var lines = listOf<SourceDataLine>()
     private var outputs = listOf<DesktopAudioOutput>()
@@ -72,6 +75,7 @@ class PlaybackEngine {
         lastPublished = -1
         effects.reset()
         spectrum.reset()
+        beat.reset()
         _status.value = PlaybackStatus(track = track, playing = true, durationMs = track.durationMs)
 
         // Above normal priority: a playback thread that loses its time slice to
@@ -131,6 +135,7 @@ class PlaybackEngine {
                     framesPlayed = decoder?.positionFrames ?: 0L
                     effects.reset()
                     spectrum.reset()
+                    beat.reset()
                     // Drops what is already queued at the old position. Without
                     // it, up to a fifth of a second of the old spot still plays
                     // after the jump, which is what makes a seek feel sluggish.
@@ -148,6 +153,7 @@ class PlaybackEngine {
                 // After the chain, so speed, pitch and reverb are all visible
                 // in the meter rather than it showing the untouched source.
                 spectrum.feed(processed)
+                beat.feed(processed, queuedFrames(), rate)
 
                 writeToAll(toBytes(processed))
                 publishPosition(duration, rate)
@@ -198,6 +204,12 @@ class PlaybackEngine {
             durationMs = if (duration > 0) duration else positionMs
         )
     }
+
+    /** Frames handed to the primary line that it has not played yet. */
+    private fun queuedFrames(): Int = runCatching {
+        val line = lines.firstOrNull() ?: return 0
+        (line.bufferSize - line.available()) / line.format.frameSize
+    }.getOrDefault(0)
 
     private fun writeToAll(bytes: ByteArray) {
         val current = lines

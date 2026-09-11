@@ -20,7 +20,9 @@ data class DesktopTrack(
     val durationMs: Long,
     val trackNumber: Int?,
     val year: Int?,
-    val sizeBytes: Long
+    val sizeBytes: Long,
+    /** The album artist tag, where the file has one. */
+    val albumArtist: String? = null
 ) {
     val displayArtist: String get() = artist?.takeIf { it.isNotBlank() } ?: "Unknown artist"
     val displayAlbum: String get() = album?.takeIf { it.isNotBlank() } ?: "—"
@@ -100,7 +102,8 @@ object FolderLibrary {
             durationMs = (header?.preciseTrackLength ?: 0.0).times(1000).toLong(),
             trackNumber = field(FieldKey.TRACK)?.substringBefore('/')?.toIntOrNull(),
             year = field(FieldKey.YEAR)?.take(4)?.toIntOrNull(),
-            sizeBytes = file.length()
+            sizeBytes = file.length(),
+            albumArtist = field(FieldKey.ALBUM_ARTIST)
         )
     }.getOrElse {
         // A file jaudiotagger cannot parse is still probably playable, so it is

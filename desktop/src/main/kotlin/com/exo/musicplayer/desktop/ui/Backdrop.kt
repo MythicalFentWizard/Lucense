@@ -30,7 +30,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalWindowInfo
 import com.exo.musicplayer.data.audio.SpectrumAnalyser
+import com.exo.musicplayer.desktop.audio.BeatTap
+import com.exo.musicplayer.desktop.audio.SongGraph
 import com.exo.musicplayer.desktop.audio.SongShape
+import kotlin.math.log10
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.jetbrains.skia.FilterBlurMode
@@ -98,42 +101,83 @@ internal class Placement {
 }
 
 /**
- * The music, as the reactive effects read it: one level per analyser band,
- * eased by time so it glides between the analyser's readings, bass, mids and
- * treble, a kick taken from the raw bass jumping above its recent average,
- * rings sent out on those kicks, and a distance travelled that runs faster the
- * louder it gets.
+ * The music, as the reactive effects read it, stretched so that it visibly moves.
+ *
+ * Each band is measured against its own recent floor and ceiling rather than
+ * against silence. A bass-heavy song sits near the top of the analyser's range
+ * the whole time, so levels taken as they come barely moved and the ball stood
+ * still; stretched between where that band has been over the last second or
+ * two, the same song swings the whole way on every beat. A little of the plain
+ * level is kept in the mix, so a loud song still looks louder than a quiet one,
+ * and anything near silence stays still.
+ *
+ * [punch] is the bass as it is heard right now, from a [BeatTap] when there is
+ * one, stretched the same way, and [kick] jumps on each beat and dies away
+ * within about a fifth of a second. The analyser's reading is held back by how
+ * far it runs ahead of the speakers, so the bars and the ball move with the
+ * sound rather than before it.
  */
 internal class Pulse(bands: Int = 14) {
     val levels = FloatArray(bands.coerceAtLeast(4))
     var bass = 0f
+        private set
     var mid = 0f
+        private set
     var treble = 0f
+        private set
     var energy = 0f
+        private set
+
+    /** The heard bass, 0..1 across its own recent range. */
+    var punch = 0f
+        private set
+
+    /** How hard the last beat hit, dying away after it. */
     var kick = 0f
+        private set
     var travel = 0f
+        private set
 
     /** When each ring was sent out, in effect seconds. */
     val rings = FloatArray(6) { -10f }
 
-    private var slowBass = 0f
+    private val floors = FloatArray(levels.size)
+    private val ceilings = FloatArray(levels.size)
+    private var heardFloor = 1f
+    private var heardCeiling = 0f
+    private var heard = 0f
+    private var heardSlow = 0f
     private var kickPeak = 0f
     private var lastRing = -10f
     private var lastTime = -1f
 
-    fun update(snapshot: FloatArray, t: Float) {
+    private val history = Array(HISTORY) { FloatArray(levels.size) }
+    private val historyAt = FloatArray(HISTORY) { -10f }
+    private var historyNext = 0
+
+    /**
+     * [snapshot] is the analyser's reading at [t] seconds, [aheadSeconds] how
+     * far that runs ahead of the speakers, and [heardBass] the bass a [BeatTap]
+     * says is being heard as RMS of full scale - negative where there is none.
+     */
+    fun update(snapshot: FloatArray, t: Float, aheadSeconds: Float = 0f, heardBass: Float = -1f) {
         val dt = if (lastTime < 0f) 0f else (t - lastTime).coerceIn(0f, 0.1f)
         lastTime = t
-        val attack = 1f - exp(-dt / ATTACK_SECONDS)
-        val release = 1f - exp(-dt / RELEASE_SECONDS)
+        val reading = delayed(snapshot, t, aheadSeconds)
+
+        val attack = ease(dt, 0.03f)
+        val release = ease(dt, 0.12f)
+        val settle = ease(dt, 1.6f)
         for (i in levels.indices) {
-            val value = if (snapshot.isEmpty()) {
-                0f
-            } else {
-                snapshot[(i * snapshot.size / levels.size).coerceAtMost(snapshot.size - 1)].coerceIn(0f, 1f)
-            }
-            levels[i] += (value - levels[i]) * (if (value > levels[i]) attack else release)
+            val value = reading[i]
+            floors[i] = if (value < floors[i]) value else floors[i] + (value - floors[i]) * settle
+            ceilings[i] = if (value > ceilings[i]) value else ceilings[i] + (value - ceilings[i]) * settle
+            val swing = ((value - floors[i]) / max(ceilings[i] - floors[i], MIN_SPAN)).coerceIn(0f, 1f)
+            // Near silence the stretch is faded out, so a quiet hiss doesn't dance.
+            val target = (value * 0.3f + swing * 0.7f) * (value / 0.08f).coerceAtMost(1f)
+            levels[i] += (target - levels[i]) * (if (target > levels[i]) attack else release)
         }
+
         val lowEnd = (levels.size * 0.22f).toInt().coerceAtLeast(1)
         val midEnd = (levels.size * 0.6f).toInt().coerceAtLeast(lowEnd + 1)
         bass = average(0, lowEnd)
@@ -141,17 +185,34 @@ internal class Pulse(bands: Int = 14) {
         treble = average(midEnd, levels.size)
         energy = average(0, levels.size)
 
-        var rawBass = 0f
-        val low = (snapshot.size / 6).coerceAtLeast(1).coerceAtMost(snapshot.size)
-        for (i in 0 until low) rawBass += snapshot[i].coerceIn(0f, 1f)
-        rawBass /= low
-        val detected = ((rawBass - slowBass) * 4f).coerceIn(0f, 1f)
-        slowBass += (rawBass - slowBass) * (1f - exp(-dt / 0.6f))
-        kickPeak = max(kickPeak * exp(-dt / 0.15f), detected)
-        kick += (kickPeak - kick) * (1f - exp(-dt / 0.04f))
+        // The heard bass on a decibel scale, sixty decibels down to full scale.
+        val loud = if (heardBass >= 0f) {
+            if (heardBass < 1e-6f) 0f else ((20f * log10(heardBass) + 60f) / 60f).coerceIn(0f, 1f)
+        } else {
+            var raw = 0f
+            for (i in 0 until lowEnd) raw += reading[i]
+            raw / lowEnd
+        }
+        // The floor and ceiling give way slowly, so one loud moment doesn't
+        // become the new normal and flatten everything after it.
+        heardFloor = if (loud < heardFloor) loud else heardFloor + (loud - heardFloor) * ease(dt, 1.6f)
+        heardCeiling = if (loud > heardCeiling) loud else heardCeiling + (loud - heardCeiling) * ease(dt, 1.6f)
+        val stretched = ((loud - heardFloor) / max(heardCeiling - heardFloor, MIN_HEARD_SPAN)).coerceIn(0f, 1f)
+        // A fifth of it is the plain loudness, so a quiet passage still sits
+        // lower than a loud one instead of both being stretched to fill the ball.
+        val plain = ((loud - 0.25f) / 0.75f).coerceIn(0f, 1f)
+        val target = (stretched * 0.8f + plain * 0.2f) * (loud / 0.1f).coerceAtMost(1f)
+        heard += (target - heard) * (if (target > heard) ease(dt, 0.012f) else ease(dt, 0.11f))
+        punch = heard
+
+        // A beat is the bass jumping above where it has been for the last quarter second.
+        heardSlow += (heard - heardSlow) * ease(dt, 0.25f)
+        val onset = ((heard - heardSlow) * 2.4f).coerceIn(0f, 1f)
+        kickPeak = max(kickPeak * exp(-dt / 0.14f), onset)
+        kick += (kickPeak - kick) * ease(dt, 0.015f)
 
         travel += dt * (0.015f + energy * 0.1f)
-        if (detected > 0.45f && t - lastRing > 0.28f) {
+        if (onset > 0.45f && t - lastRing > 0.22f) {
             var oldest = 0
             for (s in rings.indices) if (rings[s] < rings[oldest]) oldest = s
             rings[oldest] = t
@@ -168,10 +229,39 @@ internal class Pulse(bands: Int = 14) {
         return sum / (end - from)
     }
 
+    /** Keeps [snapshot] and gives back the reading from [ahead] seconds ago, spread across [levels]' bands. */
+    private fun delayed(snapshot: FloatArray, t: Float, ahead: Float): FloatArray {
+        val slot = history[historyNext]
+        for (i in slot.indices) {
+            slot[i] = if (snapshot.isEmpty()) {
+                0f
+            } else {
+                snapshot[(i * snapshot.size / slot.size).coerceAtMost(snapshot.size - 1)].coerceIn(0f, 1f)
+            }
+        }
+        historyAt[historyNext] = t
+        historyNext = (historyNext + 1) % HISTORY
+        if (ahead <= 0f) return slot
+        var best = slot
+        var bestAt = -1f
+        for (k in 0 until HISTORY) {
+            val at = historyAt[k]
+            if (at in 0f..(t - ahead) && at > bestAt) {
+                bestAt = at
+                best = history[k]
+            }
+        }
+        return best
+    }
+
+    private fun ease(dt: Float, seconds: Float): Float = 1f - exp(-dt / seconds)
+
     private companion object {
-        /** How quickly a level rises to a louder moment, and falls back after it. */
-        const val ATTACK_SECONDS = 0.07f
-        const val RELEASE_SECONDS = 0.30f
+        /** A band is never stretched from a range narrower than this, so a steady hum stays still. */
+        const val MIN_SPAN = 0.12f
+        const val MIN_HEARD_SPAN = 0.10f
+        /** A second and a half of readings, at sixty a second. */
+        const val HISTORY = 90
     }
 }
 
@@ -183,10 +273,12 @@ internal class Pulse(bands: Int = 14) {
  * front, and no ticking while the window isn't focused - unless
  * [pauseWhenUnfocused] is false, as for the lyrics window, which mostly sits
  * beside whatever has focus. Waves and Reactive redraw every display frame and
- * keep the analyser on while shown; Waves also follows [graph], the playing
- * song read ahead. Aurora, Waves and Reactive are laid out across the whole
- * window rather than each surface, so they carry on unbroken from the sidebar
- * into the library.
+ * keep the analyser and [beat] on while shown; Waves also follows [graph], the
+ * playing song read ahead. Aurora, Waves and Reactive's bars are laid out
+ * across the whole window rather than each surface, so they carry on unbroken
+ * from the sidebar into the library. Reactive's ball sits in the middle of the
+ * [centerpiece] surface - the page itself - and the sidebar and side panel
+ * leave it out.
  */
 @Composable
 fun Backdrop(
@@ -197,18 +289,21 @@ fun Backdrop(
     count: Int = 90,
     pauseWhenUnfocused: Boolean = true,
     graph: SongShape? = null,
-    reactiveMode: ReactiveMode = ReactiveMode.BALL
+    reactiveMode: ReactiveMode = ReactiveMode.BALL,
+    beat: BeatTap? = null,
+    centerpiece: Boolean = true
 ) {
-    when (style) {
-        BackdropStyle.NONE -> Unit
-        BackdropStyle.STARS -> Starfield(
+    when {
+        style == BackdropStyle.NONE -> Unit
+        style == BackdropStyle.REACTIVE && reactiveMode == ReactiveMode.BALL && !centerpiece -> Unit
+        style == BackdropStyle.STARS -> Starfield(
             enabled = true,
             color = color,
             modifier = modifier,
             count = count,
             pauseWhenUnfocused = pauseWhenUnfocused
         )
-        else -> Animated(style, color, spectrum, modifier, count, pauseWhenUnfocused, graph, reactiveMode)
+        else -> Animated(style, color, spectrum, modifier, count, pauseWhenUnfocused, graph, reactiveMode, beat)
     }
 }
 
@@ -221,7 +316,8 @@ private fun Animated(
     count: Int,
     pauseWhenUnfocused: Boolean,
     graph: SongShape?,
-    reactiveMode: ReactiveMode
+    reactiveMode: ReactiveMode,
+    beat: BeatTap?
 ) {
     val motes = remember(count) { motes(count) }
     val seconds = remember { mutableFloatStateOf(0f) }
@@ -247,19 +343,31 @@ private fun Animated(
             } else {
                 delay(50L)
             }
-            val now = (System.nanoTime() - origin) / 1e9f
+            val nanos = System.nanoTime()
+            val now = (nanos - origin) / 1e9f
             if (listening && spectrum != null) {
                 // Re-asserted every tick: the effects panel's meter switches the
                 // analyser off when it closes, and this still needs it.
                 spectrum.enabled = true
-                pulse.update(spectrum.snapshot(raw), now)
+                beat?.enabled = true
+                pulse.update(
+                    spectrum.snapshot(raw),
+                    now,
+                    aheadSeconds = (beat?.delayNanos ?: 0L) / 1e9f,
+                    heardBass = if (beat == null) -1f else beat.bassAt(nanos)
+                )
             }
-            if (style == BackdropStyle.WAVES) (graph as? com.exo.musicplayer.desktop.audio.SongGraph)?.sync()
+            if (style == BackdropStyle.WAVES) (graph as? SongGraph)?.sync()
             seconds.floatValue = now
         }
     }
     DisposableEffect(listening) {
-        onDispose { if (listening) spectrum?.enabled = false }
+        onDispose {
+            if (listening) {
+                spectrum?.enabled = false
+                beat?.enabled = false
+            }
+        }
     }
 
     Spacer(
@@ -283,7 +391,7 @@ private fun Animated(
                                 ribbon(t, color, if (listening) pulse else null, place)
                             }
                         BackdropStyle.REACTIVE -> when (reactiveMode) {
-                            ReactiveMode.BALL -> reactiveBall(t, color, pulse, place)
+                            ReactiveMode.BALL -> reactiveBall(t, color, pulse)
                             ReactiveMode.BARS -> reactiveBars(color, pulse, place)
                         }
                         else -> Unit
@@ -650,40 +758,54 @@ internal fun DrawScope.ribbon(t: Float, color: Color, pulse: Pulse?, place: Plac
 
 // ---- Reactive ------------------------------------------------------------------
 
+/** How big Reactive's ball is in a surface [width] by [height], in pixels. */
+internal fun ballRadius(pulse: Pulse, width: Float, height: Float): Float =
+    min(width, height) * 0.105f * (0.78f + pulse.punch * 0.68f + pulse.kick * 0.18f)
+
+/** How tall Reactive's bar for [band] stands in a surface [height] tall, in pixels. */
+internal fun barHeight(pulse: Pulse, band: Int, height: Float, density: Float): Float {
+    val count = pulse.levels.size
+    val level = pulse.levels[band].coerceIn(0f, 1f)
+    // The bass end is thrown up further on each beat; the top end stays honest.
+    val low = (1f - band / (count * 0.35f)).coerceIn(0f, 1f)
+    val lift = pulse.kick * low * 0.16f + pulse.punch * low * 0.10f
+    return 4f * density + (level.pow(0.9f) + lift).coerceAtMost(1.15f) * height * 0.42f
+}
+
 /**
- * A see-through glowing ball in the middle of the window, ringed by the
- * spectrum - mirrored so it is symmetrical, bass at the bottom - swelling with
- * the bass, sending out rings on each kick, and shaken by the beat the way music
- * visualiser videos are: a quick irregular jitter that dies away as the kick
- * fades.
+ * A see-through glowing ball in the middle of the page, ringed by the spectrum
+ * - mirrored so it is symmetrical, bass at the bottom.
+ *
+ * It swells and shrinks with the bass as heard, to about twice the size on a
+ * hard beat, sends a ring out on each kick, and shakes the way music visualiser
+ * videos do: a quick irregular jitter that dies away with the kick.
  */
-internal fun DrawScope.reactiveBall(t: Float, color: Color, pulse: Pulse, place: Placement) {
+internal fun DrawScope.reactiveBall(t: Float, color: Color, pulse: Pulse) {
     val w = size.width
     val h = size.height
-    val windowWidth = max(place.width, w)
     val hot = lerp(color, Color.White, 0.4f)
-    val breathe = 0.5f + 0.5f * sin(t * 0.8f)
-    val shake = (pulse.kick * 10f + pulse.bass * 1.5f) * density
+    val punch = pulse.punch
+    val kick = pulse.kick
+    val shake = (kick * 26f + punch * 4f) * density
     val jitter = Offset(
         (sin(t * 47f) * 0.6f + sin(t * 83f + 1.3f) * 0.4f) * shake,
         (cos(t * 53f) * 0.6f + sin(t * 71f + 2.1f) * 0.4f) * shake
     )
-    val centre = Offset(windowWidth / 2f - place.x, h * 0.46f) + jitter
-    val radius = min(windowWidth, h) * 0.12f * (1f + pulse.bass * 0.22f + pulse.kick * 0.10f + breathe * 0.02f)
-    if (centre.x + radius * 5f < 0f || centre.x - radius * 5f > w) return
+    val centre = Offset(w / 2f, h / 2f) + jitter
+    val radius = ballRadius(pulse, w, h)
 
-    softCircle(color, 0.16f + 0.04f * breathe + pulse.bass * 0.24f, centre, radius * 5f)
+    softCircle(color, 0.10f + punch * 0.30f + kick * 0.08f, centre, radius * 4.2f)
 
     for (birth in pulse.rings) {
         val age = t - birth
-        if (age < 0f || age > 1.4f) continue
-        val progress = age / 1.4f
+        if (age < 0f || age > 1.2f) continue
+        val progress = age / 1.2f
         val fade = (1f - progress) * (1f - progress)
         drawCircle(
-            hot.copy(alpha = 0.45f * fade),
-            radius * (1.2f + progress * 2.6f),
+            hot.copy(alpha = 0.55f * fade),
+            radius * (1.15f + progress * 3.2f),
             centre,
-            style = Stroke(width = (2.2f - 1.2f * progress) * density)
+            style = Stroke(width = (2.8f - 1.8f * progress) * density)
         )
     }
 
@@ -696,31 +818,31 @@ internal fun DrawScope.reactiveBall(t: Float, color: Color, pulse: Pulse, place:
         val level = pulse.levels[(j * bands / half).coerceAtMost(bands - 1)].coerceIn(0f, 1f)
         val angle = PI / 2 + i.toDouble() / bars * 2 * PI
         val inner = radius * 1.12f
-        val outer = inner + radius * (0.06f + level.pow(0.9f) * 0.95f)
+        val outer = inner + radius * (0.05f + level.pow(0.85f) * 1.25f)
         val dx = cos(angle).toFloat()
         val dy = sin(angle).toFloat()
         ring.moveTo(centre.x + dx * inner, centre.y + dy * inner)
         ring.lineTo(centre.x + dx * outer, centre.y + dy * outer)
     }
-    glowPath(ring, color.copy(alpha = 0.5f), 3f * density, 6f * density)
-    drawPath(ring, hot.copy(alpha = 0.85f), style = Stroke(width = 2.6f * density, cap = StrokeCap.Round))
+    glowPath(ring, color.copy(alpha = 0.45f + punch * 0.25f), 3f * density, 7f * density)
+    drawPath(ring, hot.copy(alpha = 0.9f), style = Stroke(width = 2.6f * density, cap = StrokeCap.Round))
 
     drawCircle(
         Brush.radialGradient(
-            listOf(hot.copy(alpha = 0.55f), color.copy(alpha = 0.35f), color.copy(alpha = 0.16f)),
+            listOf(hot.copy(alpha = 0.35f + punch * 0.35f), color.copy(alpha = 0.30f), color.copy(alpha = 0.14f)),
             centre,
             radius
         ),
         radius,
         centre
     )
-    drawCircle(hot.copy(alpha = 0.85f), radius, centre, style = Stroke(width = 2f * density))
+    drawCircle(hot.copy(alpha = 0.85f), radius, centre, style = Stroke(width = (2f + punch * 1.5f) * density))
 }
 
 /**
  * The Effects panel's output meter across the bottom of the window: the same
- * rounded bars, one per analyser band, lit in the theme's colour when there is
- * signal and a quiet shade when there isn't, each with a soft glow at its top.
+ * rounded bars, one per analyser band, but reaching most of the way up the
+ * window and stretched to each band's own recent range.
  */
 internal fun DrawScope.reactiveBars(color: Color, pulse: Pulse, place: Placement) {
     val w = size.width
@@ -731,27 +853,25 @@ internal fun DrawScope.reactiveBars(color: Color, pulse: Pulse, place: Placement
     val gap = 6f * density
     val barWidth = ((windowWidth - margin * 2 - gap * (count - 1)) / count).coerceAtLeast(2f)
     val floorY = h - 14f * density
-    val tallest = h * 0.32f
     val quiet = lerp(color, Color.Black, 0.55f).copy(alpha = 0.55f)
     val lit = lerp(color, Color.White, 0.25f)
     val corner = CornerRadius(min(barWidth / 2f, 4f * density))
     for (i in 0 until count) {
         val level = pulse.levels[i].coerceIn(0f, 1f)
-        val barHeight = 4f * density + level * tallest
+        val tall = barHeight(pulse, i, h, density)
         val left = margin + i * (barWidth + gap) - place.x
         if (left > w || left + barWidth < 0f) continue
-        val topLeft = Offset(left, floorY - barHeight)
-        val barSize = Size(barWidth, barHeight)
+        val top = floorY - tall
         if (level > 0.02f) {
-            softCircle(color, 0.10f + level * 0.28f, Offset(left + barWidth / 2f, floorY - barHeight), barWidth * 1.3f)
+            softCircle(color, 0.12f + level * 0.30f, Offset(left + barWidth / 2f, top), barWidth * 1.4f)
             drawRoundRect(
-                Brush.verticalGradient(listOf(lit, color), startY = floorY - barHeight, endY = floorY),
-                topLeft,
-                barSize,
+                Brush.verticalGradient(listOf(lit, color), startY = top, endY = floorY),
+                Offset(left, top),
+                Size(barWidth, tall),
                 corner
             )
         } else {
-            drawRoundRect(quiet, topLeft, barSize, corner)
+            drawRoundRect(quiet, Offset(left, top), Size(barWidth, tall), corner)
         }
     }
 }

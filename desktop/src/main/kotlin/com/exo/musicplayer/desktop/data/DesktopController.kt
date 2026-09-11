@@ -59,6 +59,7 @@ import com.exo.musicplayer.desktop.download.DownloadProgress
 import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
 import com.exo.musicplayer.desktop.system.DuckKey
+import com.exo.musicplayer.desktop.system.Explorer
 import com.exo.musicplayer.desktop.system.GlobalHotkey
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.desktop.library.FolderLibrary
@@ -2156,9 +2157,7 @@ class DesktopController(private val scope: CoroutineScope) {
     /** Opens the containing folder, selecting the first of them. */
     fun revealSelection(visible: List<DesktopTrack>) {
         val first = selectedTracks(visible).firstOrNull() ?: return
-        runCatching {
-            ProcessBuilder("explorer.exe", "/select,${first.file.absolutePath}").start()
-        }
+        Explorer.reveal(first.file)
     }
 
     /**
@@ -2340,9 +2339,7 @@ class DesktopController(private val scope: CoroutineScope) {
     /** Opens the folder the archive landed in, and selects it. */
     fun revealArchive() {
         val file = archiveFile ?: return
-        runCatching {
-            ProcessBuilder("explorer.exe", "/select,${file.absolutePath}").start()
-        }
+        Explorer.reveal(file)
     }
 
     fun dismissArchive() {
@@ -2359,7 +2356,7 @@ class DesktopController(private val scope: CoroutineScope) {
     var duplicatesNote by mutableStateOf<String?>(null)
         private set
 
-    fun findDuplicates() {
+    fun findDuplicates(within: List<DesktopTrack>? = null) {
         duplicatesScanning = true
         duplicatesNote = null
         scope.launch {
@@ -2369,7 +2366,7 @@ class DesktopController(private val scope: CoroutineScope) {
                 // called it directly would re-read the same track O(log n) times.
                 val hasArt = HashMap<String, Boolean>()
                 DuplicateMatcher.group(
-                    items = tracks,
+                    items = within ?: tracks,
                     artistOf = { it.artist },
                     titleOf = { it.title },
                     durationOf = { it.durationMs },
@@ -2417,6 +2414,107 @@ class DesktopController(private val scope: CoroutineScope) {
             duplicates = emptyList()
             duplicatesNote = "Removed $removed file${if (removed == 1) "" else "s"}."
             rescan()
+        }
+    }
+
+    // ---- Albums and artists -------------------------------------------------
+
+    var albumSort by mutableStateOf(GroupSort.NAME)
+    var artistSort by mutableStateOf(GroupSort.NAME)
+
+    /** Keys of the album or artist cards picked with Ctrl or Shift. */
+    var pickedGroups by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** Which page [pickedGroups] belongs to. */
+    var pickedKind by mutableStateOf<CollectionKind?>(null)
+        private set
+
+    /** Where a Shift+click on a card measures from. */
+    private var pickAnchor: String? = null
+
+    fun clearPicked() {
+        pickedGroups = emptySet()
+        pickedKind = null
+        pickAnchor = null
+    }
+
+    /** Ctrl+click on a card: pick it, or unpick it. */
+    fun togglePicked(kind: CollectionKind, group: TrackGroup) {
+        if (pickedKind != kind) clearPicked()
+        pickedKind = kind
+        pickedGroups = if (group.key in pickedGroups) pickedGroups - group.key else pickedGroups + group.key
+        pickAnchor = group.key
+    }
+
+    /** Shift+click on a card: everything from the last Ctrl+click to here. */
+    fun extendPicked(kind: CollectionKind, group: TrackGroup, shown: List<TrackGroup>) {
+        val from = shown.indexOfFirst { it.key == pickAnchor }
+        val to = shown.indexOfFirst { it.key == group.key }
+        if (pickedKind != kind || from < 0 || to < 0) {
+            togglePicked(kind, group)
+            return
+        }
+        pickedGroups = pickedGroups + (minOf(from, to)..maxOf(from, to)).map { shown[it].key }
+    }
+
+    /** What the merge dialog offers: one plan for the picked cards, or one for each duplicate set. */
+    var mergePlans by mutableStateOf<List<MergePlan>>(emptyList())
+        private set
+    var mergeKind by mutableStateOf(CollectionKind.ALBUMS)
+        private set
+    var mergeFromPicked by mutableStateOf(false)
+        private set
+    var merging by mutableStateOf(false)
+        private set
+
+    /** How the last merge went, shown under the page title. */
+    var mergeNote by mutableStateOf<String?>(null)
+        private set
+
+    fun planPickedMerge(kind: CollectionKind, shown: List<TrackGroup>) {
+        val chosen = shown.filter { it.key in pickedGroups }
+        if (pickedKind != kind || chosen.size < 2) return
+        mergeKind = kind
+        mergeFromPicked = true
+        mergeNote = null
+        mergePlans = listOf(TrackGroups.plan(kind, chosen))
+    }
+
+    fun planDuplicateMerges(kind: CollectionKind, shown: List<TrackGroup>) {
+        mergeKind = kind
+        mergeFromPicked = false
+        mergeNote = null
+        mergePlans = TrackGroups.duplicates(kind, shown).map { TrackGroups.plan(kind, it) }
+    }
+
+    /**
+     * Retags the songs in [plans] so that each set becomes one album or artist,
+     * then re-reads only those files.
+     *
+     * Written into the files themselves: a merge kept only in Resonate would
+     * come apart at the next scan, and would show in no other player.
+     */
+    fun merge(plans: List<MergePlan>) {
+        if (plans.isEmpty() || merging) return
+        merging = true
+        mergeNote = null
+        scope.launch {
+            val changes = plans.flatMap { TrackGroups.changes(it) }
+            val written = io { changes.filter { TagWriter.change(it).isSuccess }.map { it.file } }
+            val reread = FolderLibrary.readFiles(written).associateBy { it.file.absolutePath }
+            tracks = tracks.map { reread[it.file.absolutePath] ?: it }
+            clearPicked()
+            mergePlans = emptyList()
+            merging = false
+            val failed = changes.size - written.size
+            val what = if (plans.size == 1) {
+                "${plans[0].groups.size} ${plans[0].kind.plural} into “${plans[0].name}”"
+            } else {
+                "${plans.size} sets of ${plans[0].kind.plural}"
+            }
+            mergeNote = "Merged $what · ${written.size} songs retagged" +
+                if (failed > 0) " · $failed could not be written - playing, or open elsewhere?" else ""
         }
     }
 
