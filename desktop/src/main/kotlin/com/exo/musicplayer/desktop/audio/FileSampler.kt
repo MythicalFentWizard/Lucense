@@ -25,7 +25,7 @@ object FileSampler {
         val rate = AudioDevices.FORMAT.sampleRate.toInt()
         val wantedFrames = seconds * rate
 
-        Decoder(file).use { decoder ->
+        Decoder.open(file).use { decoder ->
             // Half-way in, but never so far that less than a full window is left.
             val startFrame = if (durationMs > seconds * 1000L) {
                 val midpoint = (durationMs / 2) * rate / 1000

@@ -38,8 +38,18 @@ class TimeStretcher {
     private var primed = false
     private var output = FloatArray(0)
 
-    private val fade = FloatArray(window) { i ->
-        (0.5 - 0.5 * cos(2.0 * PI * i / (window - 1))).toFloat()
+    /**
+     * Crossfade weights across one hop, rising from exactly 0 to exactly 1.
+     *
+     * The noise came from here. This used to be a Hann window as long as the
+     * whole analysis window, of which only the first quarter was read, so the
+     * weight climbed to 0.5 and then snapped back to 0 at the start of the next
+     * hop. Every 512 frames, 86 times a second, the output jumped between two
+     * different slices of the song: a buzz at 86 Hz and its harmonics laid over
+     * everything whenever the speed was anything but 1.
+     */
+    private val fade = FloatArray(synthesisHop) { i ->
+        (0.5 - 0.5 * cos(PI * i / (synthesisHop - 1))).toFloat()
     }
 
     fun reset() {
@@ -50,7 +60,12 @@ class TimeStretcher {
 
     fun process(input: FloatArray): FloatArray {
         val f = factor
-        if (f in 0.999f..1.001f) return input
+        if (f in 0.999f..1.001f) {
+            // Leftovers from an earlier speed would be spliced into the next
+            // time a speed is set; start that from clean instead.
+            if (primed || pendingLength > 0) reset()
+            return input
+        }
 
         if (pending.size < pendingLength + input.size) {
             pending = pending.copyOf(maxOf(pendingLength + input.size, pending.size * 2))
@@ -100,35 +115,53 @@ class TimeStretcher {
         return output.copyOf(written)
     }
 
-    /** Offset within the search window whose waveform best matches the tail. */
+    /**
+     * Offset within the search window whose waveform best matches the tail.
+     *
+     * A coarse pass over the whole radius, then every offset around the winner.
+     * The old search stepped 32 frames and compared every fourth sample: close
+     * enough to stay in phase for bass, but up to half a cycle out for anything
+     * above about 700 Hz, which is a comb-filter warble on vocals and cymbals.
+     */
     private fun bestOffset(read: Int): Int {
+        val compare = minOf(synthesisHop, 512)
         var best = 0
         var bestScore = -Float.MAX_VALUE
-        val compare = minOf(synthesisHop, 512)
-
         var offset = -searchRadius
         while (offset <= searchRadius) {
-            val start = read + offset
-            if (start < 0 || (start + compare) * 2 > pendingLength) {
-                offset += 32
-                continue
-            }
-            var score = 0f
-            var i = 0
-            while (i < compare) {
-                // Summed channels: keeps left and right from drifting apart.
-                val a = tail[i * 2] + tail[i * 2 + 1]
-                val b = pending[(start + i) * 2] + pending[(start + i) * 2 + 1]
-                score += a * b
-                i += 4          // sparse sampling; full correlation is wasted here
-            }
+            val score = correlation(read + offset, compare, stride = 2)
             if (score > bestScore) {
                 bestScore = score
                 best = offset
             }
-            offset += 32
+            offset += 16
+        }
+
+        val coarse = best
+        bestScore = correlation(read + coarse, compare, stride = 1)
+        for (fine in (coarse - 15)..(coarse + 15)) {
+            if (fine == coarse || fine < -searchRadius || fine > searchRadius) continue
+            val score = correlation(read + fine, compare, stride = 1)
+            if (score > bestScore) {
+                bestScore = score
+                best = fine
+            }
         }
         return best
+    }
+
+    /** Similarity of the tail to the pending input at [start], on the summed channels. */
+    private fun correlation(start: Int, compare: Int, stride: Int): Float {
+        if (start < 0 || (start + compare) * 2 > pendingLength) return -Float.MAX_VALUE
+        var score = 0f
+        var i = 0
+        while (i < compare) {
+            // Summed channels: keeps left and right from drifting apart.
+            score += (tail[i * 2] + tail[i * 2 + 1]) *
+                (pending[(start + i) * 2] + pending[(start + i) * 2 + 1])
+            i += stride
+        }
+        return score
     }
 }
 

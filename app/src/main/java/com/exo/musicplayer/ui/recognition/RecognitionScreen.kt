@@ -1,6 +1,9 @@
 package com.exo.musicplayer.ui.recognition
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,11 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -42,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -101,6 +107,8 @@ fun RecognitionScreen(
     preview: PreviewState,
     onPreviewYouTube: (YouTubeVideo) -> Unit,
     onDownloadYouTube: (YouTubeVideo) -> Unit,
+    /** Several picked results at once: catalogue matches or YouTube videos. */
+    onDownloadMany: (matches: List<MusicMatch>, videos: List<YouTubeVideo>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -118,147 +126,213 @@ fun RecognitionScreen(
         if (resultsKey != null) listState.animateScrollToItem(HEADER_ITEMS)
     }
 
-    LazyColumn(
-        modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(bottom = 16.dp)
-    ) {
-        item(key = "header") {
-            Header(
-                showBlurb = resultsKey == null,
-                onPickVideo = onPickVideo,
-                onPickAudio = onPickAudio
-            )
-        }
-        item(key = "modes") { ModeChips(mode = mode, onModeChange = onModeChange) }
-        item(key = "inputs") {
-            SearchInputs(
-                mode = mode,
-                query = query,
-                onQueryChange = onQueryChange,
-                artist = artist,
-                onArtistChange = onArtistChange,
-                title = title,
-                onTitleChange = onTitleChange,
-                onSearch = onSearch
-            )
-        }
+    // Results picked for downloading together, as positions in the current
+    // result list, so a new search starts with nothing picked.
+    var selectedMatches by remember(resultsKey) { mutableStateOf(emptySet<Int>()) }
+    var selectedVideos by remember(resultsKey) { mutableStateOf(emptySet<Int>()) }
+    val selectionCount = if (mode == SearchMode.YOUTUBE) selectedVideos.size else selectedMatches.size
+    val clearSelection = {
+        selectedMatches = emptySet()
+        selectedVideos = emptySet()
+    }
+    BackHandler(enabled = selectionCount > 0) { clearSelection() }
 
-        when {
-            // Checked before the busy state so the list stays on screen while a
-            // second search runs: a phone search takes seconds, and blanking the
-            // results people are reading is worse than a stale list.
-            mode == SearchMode.YOUTUBE && youtubeResults.isNotEmpty() -> {
-                youtubeStatus?.let { status ->
-                    item(key = "youtube-status") {
+    Box(modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(bottom = if (selectionCount > 0) 96.dp else 16.dp)
+        ) {
+            item(key = "header") {
+                Header(
+                    showBlurb = resultsKey == null,
+                    onPickVideo = onPickVideo,
+                    onPickAudio = onPickAudio
+                )
+            }
+            item(key = "modes") { ModeChips(mode = mode, onModeChange = onModeChange) }
+            item(key = "inputs") {
+                SearchInputs(
+                    mode = mode,
+                    query = query,
+                    onQueryChange = onQueryChange,
+                    artist = artist,
+                    onArtistChange = onArtistChange,
+                    title = title,
+                    onTitleChange = onTitleChange,
+                    onSearch = onSearch
+                )
+            }
+
+            when {
+                // Checked before the busy state so the list stays on screen while a
+                // second search runs: a phone search takes seconds, and blanking the
+                // results people are reading is worse than a stale list.
+                mode == SearchMode.YOUTUBE && youtubeResults.isNotEmpty() -> {
+                    youtubeStatus?.let { status ->
+                        item(key = "youtube-status") {
+                            Text(
+                                "$status · long-press to pick several",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                    youTubeResults(
+                        videos = youtubeResults,
+                        preview = preview,
+                        onPreview = onPreviewYouTube,
+                        onDownload = onDownloadYouTube,
+                        selected = selectedVideos,
+                        selecting = selectionCount > 0,
+                        onToggle = { selectedVideos = selectedVideos.toggled(it) }
+                    )
+                }
+
+                stage != RecognitionStage.IDLE -> item(key = "busy") {
+                    MessageBlock {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(16.dp))
                         Text(
-                            status,
-                            style = MaterialTheme.typography.labelSmall,
+                            stage.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        sourceLabel?.let {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                result is RecognitionResult.NoMatch -> item(key = "no-match") {
+                    MessageBlock {
+                        Text("No match", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Shazam heard the audio but didn't recognise it. Clips with " +
+                                "talking over the music, very obscure tracks, and live or " +
+                                "pitch-shifted versions often fail.",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
-                youTubeResults(
-                    videos = youtubeResults,
-                    preview = preview,
-                    onPreview = onPreviewYouTube,
-                    onDownload = onDownloadYouTube
-                )
-            }
 
-            stage != RecognitionStage.IDLE -> item(key = "busy") {
-                MessageBlock {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        stage.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    sourceLabel?.let {
-                        Spacer(Modifier.height(4.dp))
+                result is RecognitionResult.Error -> item(key = "error") {
+                    MessageBlock {
+                        Text("Couldn't identify", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            it,
-                            style = MaterialTheme.typography.labelSmall,
+                            result.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                result is RecognitionResult.Found -> {
+                    // Grouped so the rows you can act on are the ones you land on.
+                    // Streaming-only results are still worth keeping for their names,
+                    // years and cover art, but they cannot be downloaded, and burying
+                    // the downloadable ones under them just makes for scrolling.
+                    matchSection(
+                        label = "Ready to download",
+                        matches = result.matches.withIndex().filterNot { it.value.drmProtected },
+                        selected = selectedMatches,
+                        selecting = selectionCount > 0,
+                        onToggle = { selectedMatches = selectedMatches.toggled(it) },
+                        onFindInLibrary = onFindInLibrary,
+                        onCopy = onCopy,
+                        onDownload = onDownload
+                    )
+                    matchSection(
+                        label = "Details only — streaming services",
+                        matches = result.matches.withIndex().filter { it.value.drmProtected },
+                        // Streaming-only rows have no file to fetch, so none can be picked.
+                        selected = emptySet(),
+                        selecting = false,
+                        onToggle = null,
+                        onFindInLibrary = onFindInLibrary,
+                        onCopy = onCopy,
+                        onDownload = onDownload
+                    )
+                }
+
+                else -> item(key = "empty") {
+                    MessageBlock {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            if (mode == SearchMode.YOUTUBE) {
+                                "Type anything and press Go. Every result can be previewed " +
+                                    "before you take it, and downloads land as tagged mp3 files."
+                            } else {
+                                "Search above, or pick a video or audio file and Resonate " +
+                                    "will listen to it."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
             }
+        }
 
-            result is RecognitionResult.NoMatch -> item(key = "no-match") {
-                MessageBlock {
-                    Text("No match", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
+        if (selectionCount > 0) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = RoundedCornerShape(18.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Row(
+                    Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        "Shazam heard the audio but didn't recognise it. Clips with " +
-                            "talking over the music, very obscure tracks, and live or " +
-                            "pitch-shifted versions often fail.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
+                        "$selectionCount selected",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
                     )
-                }
-            }
-
-            result is RecognitionResult.Error -> item(key = "error") {
-                MessageBlock {
-                    Text("Couldn't identify", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        result.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            result is RecognitionResult.Found -> {
-                // Grouped so the rows you can act on are the ones you land on.
-                // Streaming-only results are still worth keeping for their names,
-                // years and cover art, but they cannot be downloaded, and burying
-                // the downloadable ones under them just makes for scrolling.
-                matchSection(
-                    label = "Ready to download",
-                    matches = result.matches.filterNot { it.drmProtected },
-                    onFindInLibrary = onFindInLibrary,
-                    onCopy = onCopy,
-                    onDownload = onDownload
-                )
-                matchSection(
-                    label = "Details only — streaming services",
-                    matches = result.matches.filter { it.drmProtected },
-                    onFindInLibrary = onFindInLibrary,
-                    onCopy = onCopy,
-                    onDownload = onDownload
-                )
-            }
-
-            else -> item(key = "empty") {
-                MessageBlock {
-                    Icon(
-                        Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(40.dp)
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
+                    TextButton(onClick = clearSelection) { Text("Clear") }
+                    Button(onClick = {
+                        val matches = (result as? RecognitionResult.Found)?.matches.orEmpty()
                         if (mode == SearchMode.YOUTUBE) {
-                            "Type anything and press Go. Every result can be previewed " +
-                                "before you take it, and downloads land as tagged mp3 files."
+                            onDownloadMany(
+                                emptyList(),
+                                selectedVideos.sorted().mapNotNull { youtubeResults.getOrNull(it) }
+                            )
                         } else {
-                            "Search above, or pick a video or audio file and Resonate " +
-                                "will listen to it."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
+                            onDownloadMany(
+                                selectedMatches.sorted().mapNotNull { matches.getOrNull(it) },
+                                emptyList()
+                            )
+                        }
+                        clearSelection()
+                    }) {
+                        Icon(Icons.Default.Download, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Download $selectionCount")
+                    }
                 }
             }
         }
@@ -268,18 +342,27 @@ fun RecognitionScreen(
 /** A heading and its cards, skipped entirely when there are none. */
 private fun LazyListScope.matchSection(
     label: String,
-    matches: List<MusicMatch>,
+    matches: List<IndexedValue<MusicMatch>>,
+    selected: Set<Int>,
+    selecting: Boolean,
+    /** Null where a row cannot be picked for downloading. */
+    onToggle: ((Int) -> Unit)?,
     onFindInLibrary: (MusicMatch) -> Unit,
     onCopy: (MusicMatch) -> Unit,
     onDownload: (MusicMatch) -> Unit
 ) {
     if (matches.isEmpty()) return
-    item(key = "heading-$label") { ResultHeading(label, matches.size) }
-    // Keyed by position: two services can return the same artist, title and
-    // album, and a duplicate key crashes a lazy list.
-    itemsIndexed(matches, key = { index, _ -> "$label-$index" }) { _, match ->
+    item(key = "heading-$label") {
+        ResultHeading(label, matches.size, hint = if (onToggle != null) "long-press to pick several" else null)
+    }
+    // Keyed by position in the full result list: two services can return the
+    // same artist, title and album, and a duplicate key crashes a lazy list.
+    items(matches, key = { "$label-${it.index}" }) { (index, match) ->
         MatchCard(
             match = match,
+            selected = index in selected,
+            selecting = selecting,
+            onToggle = onToggle?.let { toggle -> { toggle(index) } },
             onFindInLibrary = { onFindInLibrary(match) },
             onCopy = { onCopy(match) },
             onDownload = { onDownload(match) }
@@ -428,9 +511,13 @@ private fun SearchInputs(
  * and Find in library move into the overflow menu, and the card is about half
  * the height, so a screen shows twice as many.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MatchCard(
     match: MusicMatch,
+    selected: Boolean,
+    selecting: Boolean,
+    onToggle: (() -> Unit)?,
     onFindInLibrary: () -> Unit,
     onCopy: () -> Unit,
     onDownload: () -> Unit
@@ -438,11 +525,22 @@ private fun MatchCard(
     var menuOpen by remember { mutableStateOf(false) }
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = if (selected) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            // Long-press starts picking several; once picking, a tap adds or removes.
+            .combinedClickable(
+                enabled = onToggle != null,
+                onClick = { if (selecting) onToggle?.invoke() },
+                onLongClick = onToggle
+            )
     ) {
         Row(
             Modifier.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 2.dp),
@@ -468,6 +566,16 @@ private fun MatchCard(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (selected) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Check, "Selected", tint = MaterialTheme.colorScheme.onPrimary)
+                    }
                 }
             }
             Spacer(Modifier.width(10.dp))
@@ -556,7 +664,7 @@ private fun MessageBlock(content: @Composable () -> Unit) {
 
 /** Section divider above a group of results. */
 @Composable
-private fun ResultHeading(label: String, count: Int) {
+private fun ResultHeading(label: String, count: Int, hint: String? = null) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -575,5 +683,15 @@ private fun ResultHeading(label: String, count: Int) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        hint?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "· $it",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
+
+private fun Set<Int>.toggled(index: Int): Set<Int> = if (index in this) this - index else this + index

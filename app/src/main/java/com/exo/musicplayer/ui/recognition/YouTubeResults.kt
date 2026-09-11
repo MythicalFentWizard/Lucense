@@ -1,7 +1,9 @@
 package com.exo.musicplayer.ui.recognition
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,24 +67,35 @@ fun LazyListScope.youTubeResults(
     videos: List<YouTubeVideo>,
     preview: PreviewState,
     onPreview: (YouTubeVideo) -> Unit,
-    onDownload: (YouTubeVideo) -> Unit
+    onDownload: (YouTubeVideo) -> Unit,
+    /** Positions in [videos] picked for downloading together. */
+    selected: Set<Int> = emptySet(),
+    selecting: Boolean = false,
+    onToggle: (Int) -> Unit = {}
 ) {
     // Keyed by position as well as id: a search can return the same video
     // twice, and a duplicate key crashes a lazy list.
-    itemsIndexed(videos, key = { index, video -> "youtube-$index-${video.id}" }) { _, video ->
+    itemsIndexed(videos, key = { index, video -> "youtube-$index-${video.id}" }) { index, video ->
         YouTubeRow(
             video = video,
             preview = preview,
+            selected = index in selected,
+            selecting = selecting,
+            onToggle = { onToggle(index) },
             onPreview = { onPreview(video) },
             onDownload = { onDownload(video) }
         )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun YouTubeRow(
     video: YouTubeVideo,
     preview: PreviewState,
+    selected: Boolean,
+    selecting: Boolean,
+    onToggle: () -> Unit,
     onPreview: () -> Unit,
     onDownload: () -> Unit
 ) {
@@ -90,7 +103,7 @@ private fun YouTubeRow(
     val isLoading = isPreviewing && preview.loading
 
     Surface(
-        color = if (isPreviewing) {
+        color = if (selected || isPreviewing) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceVariant
@@ -99,6 +112,9 @@ private fun YouTubeRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            // Long-press starts picking several; once picking, a tap adds or removes.
+            .combinedClickable(onClick = { if (selecting) onToggle() }, onLongClick = onToggle)
     ) {
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp)) {
             Row {
@@ -108,7 +124,7 @@ private fun YouTubeRow(
                         .aspectRatio(16f / 9f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surface)
-                        .clickable(onClick = onPreview)
+                        .clickable { if (selecting) onToggle() else onPreview() }
                 ) {
                     AsyncImage(
                         // The small rendition on purpose: at this size the large
@@ -119,6 +135,15 @@ private fun YouTubeRow(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    if (selected) {
+                        Box(
+                            Modifier.fillMaxSize().background(Color(0x99000000)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CheckCircle, "Selected", Modifier.size(30.dp), tint = Color.White)
+                        }
+                    }
 
                     if (isLoading) {
                         Box(

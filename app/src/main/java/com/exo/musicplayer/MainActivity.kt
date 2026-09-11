@@ -69,6 +69,7 @@ import com.exo.musicplayer.ui.common.DuplicatesDialog
 import com.exo.musicplayer.ui.common.EditTrackDialog
 import com.exo.musicplayer.ui.common.FixTagsDialog
 import com.exo.musicplayer.ui.common.LibraryToolsDialog
+import com.exo.musicplayer.ui.download.DownloadRequest
 import com.exo.musicplayer.ui.download.DownloadScreen
 import com.exo.musicplayer.ui.download.DownloadViewModel
 import com.exo.musicplayer.ui.library.LibraryScreen
@@ -499,6 +500,14 @@ private fun AppScaffold(
                             )
                             // The preview would otherwise keep playing over the
                             // download screen it just opened.
+                            recognition.stopPreview()
+                            showDownload = true
+                        },
+                        onDownloadMany = { matches, videos ->
+                            download.downloadAll(
+                                matches.map { DownloadRequest(it.downloadUrl, it.artist, it.title, it.durationMs) } +
+                                    videos.map { DownloadRequest(it.watchUrl, null, it.title, null) }
+                            )
                             recognition.stopPreview()
                             showDownload = true
                         },

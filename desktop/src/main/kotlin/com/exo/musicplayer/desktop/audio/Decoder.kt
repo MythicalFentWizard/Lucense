@@ -1,33 +1,100 @@
 package com.exo.musicplayer.desktop.audio
 
+import com.exo.musicplayer.desktop.data.ToolPaths
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.InputStream
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.UnsupportedAudioFileException
 import kotlin.math.ceil
 
+/** Consecutive empty reads tolerated before a stream is taken to have stalled. */
+private const val MAX_IDLE_READS = 64
+
+/** Everything is decoded to this rate before it reaches the effects and the device. */
+private val OUTPUT_RATE: Float get() = AudioDevices.FORMAT.sampleRate
+
+/** An audio file as 44.1 kHz interleaved stereo floats in -1..1. */
+interface Decoder : AutoCloseable {
+
+    /** Total frames at the output rate, or -1 when the container doesn't say. */
+    val totalFrames: Long
+
+    /** Output frames read or skipped so far, counted from the start of the file. */
+    val positionFrames: Long
+
+    /** Up to [frames] output frames, or null at the end of the stream. */
+    fun read(frames: Int): FloatArray?
+
+    /** Moves forward by [frames] output frames without producing them. */
+    fun skip(frames: Long): Long
+
+    companion object {
+
+        /**
+         * What goes through Java Sound in-process.
+         *
+         * Deliberately narrow. OGG and FLAC have Java Sound providers too, but the
+         * Vorbis one returns empty reads mid-stream, which the skip took for the end
+         * of the file: seeking an .ogg to 22 s left it playing from the start. ffmpeg
+         * decodes both and seeks them properly, so they go there.
+         */
+        private val JAVA_SOUND_EXTENSIONS =
+            setOf("mp3", "wav", "wave", "aif", "aiff", "aifc", "au")
+
+        /**
+         * Opens [file] positioned at [startFrame], with whichever decoder can read it.
+         *
+         * Java Sound first for the formats its providers handle, because it runs
+         * in-process. Everything else, and anything Java Sound refuses (an Opus
+         * stream in a .ogg file, say), goes to the ffmpeg bundled with the app.
+         * Before this, m4a, AAC, ALAC, Opus, WebM, Matroska, WMA, WavPack, AC-3 and
+         * TTA files were listed in the library and then could not be played.
+         */
+        fun open(file: File, startFrame: Long = 0L): Decoder {
+            if (file.extension.lowercase() in JAVA_SOUND_EXTENSIONS) {
+                val native = runCatching { JavaSoundDecoder(file) }.getOrNull()
+                if (native != null) {
+                    if (startFrame > 0) native.skip(startFrame)
+                    return native
+                }
+            }
+            val ffmpeg = ToolPaths.ffmpeg
+            if (ffmpeg.isFile) return FfmpegDecoder(ffmpeg, file, startFrame)
+
+            // No ffmpeg, as when running from a plain classpath: whatever Java Sound
+            // manages is better than nothing.
+            val fallback = runCatching { JavaSoundDecoder(file) }.getOrNull()
+                ?: throw UnsupportedAudioFileException(
+                    "Playing .${file.extension} files needs ffmpeg, which is missing from this installation."
+                )
+            if (startFrame > 0) fallback.skip(startFrame)
+            return fallback
+        }
+    }
+}
+
 /**
- * Turns any supported file into 44.1 kHz stereo float samples.
+ * MP3, Vorbis, FLAC, WAV and AIFF through the Java Sound service providers.
  *
- * Java Sound resolves the codec from the service providers on the classpath
- * (MP3, OGG Vorbis, FLAC; WAV and AIFF are built in). It will decode to PCM at
- * the file's own sample rate but often cannot convert the rate, so that part is
- * done here.
- *
- * Two things in this file are shaped by measurements on a five-minute MP3:
+ * Two things here are shaped by measurements on a five-minute MP3:
  *
  *  - Rate conversion goes through [StreamingResampler] rather than the
  *    fingerprinting resampler this used to share, which cost 11.6 ms of every
  *    92.9 ms buffer on a 48 kHz file.
- *  - [skip] moves through the decoded stream without converting or resampling
- *    what it passes over. Seeking used to decode, convert and resample
- *    everything up to the target: 0.9 s to reach three minutes into a 44.1 kHz
- *    file, and 22.8 s into a 48 kHz one.
+ *  - [skip] reads and discards decoded audio in large chunks. Seeking used to
+ *    decode, convert and resample everything up to the target (22.8 s to reach
+ *    three minutes into a 48 kHz file); AudioInputStream.skip was slower still,
+ *    at 50 to 62 s. Chunked reads take about 0.9 s.
  *
  * Buffers are reused between reads. This runs on the playback thread, where a
  * steady stream of garbage is what turns into audible hitches.
  */
-class Decoder(file: File) : AutoCloseable {
+class JavaSoundDecoder(file: File) : Decoder {
 
     private val source: AudioInputStream = AudioSystem.getAudioInputStream(file)
     private val pcm: AudioInputStream
@@ -39,11 +106,9 @@ class Decoder(file: File) : AutoCloseable {
     private val resampling: Boolean
     private val resampler = StreamingResampler(2)
 
-    /** Total frames at the output rate, or -1 when the container doesn't say. */
-    val totalFrames: Long
+    override val totalFrames: Long
 
-    /** Output frames read or skipped so far. */
-    var positionFrames: Long = 0L
+    override var positionFrames: Long = 0L
         private set
 
     private var bytes = ByteArray(0)
@@ -71,20 +136,23 @@ class Decoder(file: File) : AutoCloseable {
         totalFrames = if (frames > 0) (frames * (OUTPUT_RATE / sourceRate)).toLong() else -1L
     }
 
-    /**
-     * Reads up to [frames] output frames as interleaved stereo floats in -1..1,
-     * or null at the end of the stream.
-     */
-    fun read(frames: Int): FloatArray? {
+    override fun read(frames: Int): FloatArray? {
         val frameBytes = sourceChannels * 2
         val sourceFrames = if (resampling) ceil(frames * step).toInt() + 2 else frames
         val wanted = sourceFrames * frameBytes
         if (bytes.size < wanted) bytes = ByteArray(wanted)
 
         var filled = 0
+        var idle = 0
         while (filled < wanted) {
             val read = pcm.read(bytes, filled, wanted - filled)
-            if (read <= 0) break
+            if (read < 0) break
+            // A provider may return 0 with more to come; only -1 is the end.
+            if (read == 0) {
+                if (++idle > MAX_IDLE_READS) break
+                continue
+            }
+            idle = 0
             filled += read
         }
         val frameCount = filled / frameBytes
@@ -114,28 +182,24 @@ class Decoder(file: File) : AutoCloseable {
         return out
     }
 
-    /**
-     * Moves forward by [frames] output frames without producing them.
-     *
-     * Skipped on the decoded stream in whole source frames, so nothing on the
-     * way is converted or resampled. Whether the codec underneath decodes what it
-     * passes over is up to its service provider.
-     */
-    fun skip(frames: Long): Long {
+    override fun skip(frames: Long): Long {
         if (frames <= 0) return 0L
         val frameBytes = (sourceChannels * 2).toLong()
         val target = (frames * step).toLong() * frameBytes
         var remaining = target
+        var idle = 0
 
-        // Read and discarded in large chunks rather than through pcm.skip(),
-        // which was measured at 50 to 62 seconds to reach three minutes into a
-        // five-minute MP3.
         while (remaining > 0) {
             val chunk = (minOf(remaining, 65536L) / frameBytes * frameBytes).toInt()
             if (chunk <= 0) break
             if (bytes.size < chunk) bytes = ByteArray(chunk)
             val read = pcm.read(bytes, 0, chunk)
-            if (read <= 0) break
+            if (read < 0) break
+            if (read == 0) {
+                if (++idle > MAX_IDLE_READS) break
+                continue
+            }
+            idle = 0
             remaining -= read
         }
 
@@ -150,12 +214,118 @@ class Decoder(file: File) : AutoCloseable {
         runCatching { pcm.close() }
         runCatching { source.close() }
     }
+}
 
-    companion object {
-        private val OUTPUT_RATE: Float = AudioDevices.FORMAT.sampleRate
+/**
+ * Everything Java Sound cannot open, decoded by the ffmpeg that ships with the app.
+ *
+ * ffmpeg is asked for exactly what the output wants, 44.1 kHz stereo 16-bit PCM
+ * on stdout, so nothing is resampled here. A long skip restarts it with -ss
+ * before -i, which seeks within the container instead of decoding up to the
+ * target; a short one just reads on.
+ */
+class FfmpegDecoder(
+    private val ffmpeg: File,
+    private val file: File,
+    startFrame: Long = 0L
+) : Decoder {
 
-        fun canOpen(file: File): Boolean = runCatching {
-            AudioSystem.getAudioInputStream(file).close(); true
-        }.getOrDefault(false)
+    override val totalFrames: Long = -1L
+
+    override var positionFrames: Long = 0L
+        private set
+
+    private var process: Process? = null
+    private var input: InputStream? = null
+    private var bytes = ByteArray(0)
+
+    /** Beyond this, restarting at the new position is quicker than reading up to it. */
+    private val restartFrames = (OUTPUT_RATE * 5).toLong()
+
+    init {
+        start(startFrame.coerceAtLeast(0L))
+    }
+
+    private fun start(frame: Long) {
+        stop()
+        val command = buildList {
+            add(ffmpeg.absolutePath)
+            addAll(listOf("-hide_banner", "-loglevel", "error", "-nostdin"))
+            if (frame > 0) {
+                add("-ss")
+                add(String.format(Locale.ROOT, "%.3f", frame / OUTPUT_RATE.toDouble()))
+            }
+            addAll(
+                listOf(
+                    "-i", file.absolutePath,
+                    "-vn",   // embedded cover art is a video stream; ignore it
+                    "-f", "s16le", "-ac", "2", "-ar", OUTPUT_RATE.toInt().toString(),
+                    "pipe:1"
+                )
+            )
+        }
+        val started = ProcessBuilder(command)
+            // Discarded rather than piped: an unread stderr fills its buffer and
+            // stalls ffmpeg mid-song, which sounds exactly like a hang.
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+        process = started
+        input = BufferedInputStream(started.inputStream, 1 shl 16)
+        positionFrames = frame
+    }
+
+    override fun read(frames: Int): FloatArray? {
+        val stream = input ?: return null
+        val wanted = frames * 4
+        if (bytes.size < wanted) bytes = ByteArray(wanted)
+        var filled = 0
+        while (filled < wanted) {
+            val read = stream.read(bytes, filled, wanted - filled)
+            if (read <= 0) break
+            filled += read
+        }
+        val frameCount = filled / 4
+        if (frameCount <= 0) return null
+
+        val out = FloatArray(frameCount * 2)
+        for (i in out.indices) {
+            val b = i * 2
+            out[i] = ((bytes[b + 1].toInt() shl 8) or (bytes[b].toInt() and 0xFF)) / 32768f
+        }
+        positionFrames += frameCount
+        return out
+    }
+
+    override fun skip(frames: Long): Long {
+        if (frames <= 0) return 0L
+        if (frames > restartFrames) {
+            start(positionFrames + frames)
+            return frames
+        }
+        val stream = input ?: return 0L
+        var remaining = frames * 4
+        while (remaining > 0) {
+            val chunk = minOf(remaining, 65536L).toInt()
+            if (bytes.size < chunk) bytes = ByteArray(chunk)
+            val read = stream.read(bytes, 0, chunk)
+            if (read <= 0) break
+            remaining -= read
+        }
+        val moved = (frames * 4 - remaining) / 4
+        positionFrames += moved
+        return moved
+    }
+
+    override fun close() = stop()
+
+    private fun stop() {
+        runCatching { input?.close() }
+        process?.let { running ->
+            running.destroy()
+            runCatching { running.waitFor(500, TimeUnit.MILLISECONDS) }
+            if (running.isAlive) running.destroyForcibly()
+        }
+        process = null
+        input = null
     }
 }

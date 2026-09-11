@@ -175,6 +175,14 @@ fun DownloadScreen(
                     .padding(horizontal = 16.dp)
             ) {
                 Column(Modifier.padding(16.dp)) {
+                    if (state.queueSize > 1) {
+                        Text(
+                            "Song ${state.queuePosition} of ${state.queueSize}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(12.dp))

@@ -104,7 +104,7 @@ class PlaybackEngine {
     private fun run(track: DesktopTrack) {
         var decoder: Decoder? = null
         try {
-            decoder = Decoder(track.file)
+            decoder = Decoder.open(track.file)
             reopenLines()
             if (lines.isEmpty()) {
                 _status.value = _status.value.copy(
@@ -179,7 +179,7 @@ class PlaybackEngine {
             return current
         }
         runCatching { current?.close() }
-        return Decoder(track.file).also { it.skip(frame) }
+        return Decoder.open(track.file, frame)
     }
 
     /**
