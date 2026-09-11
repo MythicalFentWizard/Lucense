@@ -303,7 +303,8 @@ fun Backdrop(
             count = count,
             pauseWhenUnfocused = pauseWhenUnfocused
         )
-        else -> Animated(style, color, spectrum, modifier, count, pauseWhenUnfocused, graph, reactiveMode, beat)
+        else ->
+            Animated(style, color, spectrum, modifier, count, pauseWhenUnfocused, graph, reactiveMode, beat, centerpiece)
     }
 }
 
@@ -317,7 +318,8 @@ private fun Animated(
     pauseWhenUnfocused: Boolean,
     graph: SongShape?,
     reactiveMode: ReactiveMode,
-    beat: BeatTap?
+    beat: BeatTap?,
+    centerpiece: Boolean
 ) {
     val motes = remember(count) { motes(count) }
     val seconds = remember { mutableFloatStateOf(0f) }
@@ -392,7 +394,7 @@ private fun Animated(
                             }
                         BackdropStyle.REACTIVE -> when (reactiveMode) {
                             ReactiveMode.BALL -> reactiveBall(t, color, pulse)
-                            ReactiveMode.BARS -> reactiveBars(color, pulse, place)
+                            ReactiveMode.BARS -> reactiveBars(color, pulse, place, centerpiece)
                         }
                         else -> Unit
                     }
@@ -843,8 +845,19 @@ internal fun DrawScope.reactiveBall(t: Float, color: Color, pulse: Pulse) {
  * The Effects panel's output meter across the bottom of the window: the same
  * rounded bars, one per analyser band, but reaching most of the way up the
  * window and stretched to each band's own recent range.
+ *
+ * One row of bars laid out across the whole window, each surface drawing the
+ * part of it that falls inside itself. Where that part is a menu rather than
+ * the page - [centerpiece] is false for the sidebar and the side panel - the
+ * bars sink away as they go further in, so they read as something carrying on
+ * behind the menu rather than something drawn across it.
  */
-internal fun DrawScope.reactiveBars(color: Color, pulse: Pulse, place: Placement) {
+internal fun DrawScope.reactiveBars(
+    color: Color,
+    pulse: Pulse,
+    place: Placement,
+    centerpiece: Boolean = true
+) {
     val w = size.width
     val h = size.height
     val windowWidth = max(place.width, w)
@@ -856,22 +869,39 @@ internal fun DrawScope.reactiveBars(color: Color, pulse: Pulse, place: Placement
     val quiet = lerp(color, Color.Black, 0.55f).copy(alpha = 0.55f)
     val lit = lerp(color, Color.White, 0.25f)
     val corner = CornerRadius(min(barWidth / 2f, 4f * density))
+    // How far into a menu a bar is, measured from the edge it shares with the page.
+    val fadeOver = 170f * density
+    val intoMenu: (Float) -> Float = when {
+        centerpiece -> { _ -> 0f }
+        // The sidebar sits at the window's left edge, so its inner edge is on the right.
+        place.x <= 1f -> { centre -> (w - centre) / fadeOver }
+        else -> { centre -> centre / fadeOver }
+    }
     for (i in 0 until count) {
         val level = pulse.levels[i].coerceIn(0f, 1f)
         val tall = barHeight(pulse, i, h, density)
         val left = margin + i * (barWidth + gap) - place.x
         if (left > w || left + barWidth < 0f) continue
         val top = floorY - tall
+        val depth = intoMenu(left + barWidth / 2f).coerceIn(0f, 1f)
+        val fade = 1f - (1f - BEHIND_MENUS) * (depth * depth * (3f - 2f * depth))
         if (level > 0.02f) {
-            softCircle(color, 0.12f + level * 0.30f, Offset(left + barWidth / 2f, top), barWidth * 1.4f)
+            softCircle(color, (0.12f + level * 0.30f) * fade, Offset(left + barWidth / 2f, top), barWidth * 1.4f)
             drawRoundRect(
-                Brush.verticalGradient(listOf(lit, color), startY = top, endY = floorY),
+                Brush.verticalGradient(
+                    listOf(lit.copy(alpha = fade), color.copy(alpha = fade)),
+                    startY = top,
+                    endY = floorY
+                ),
                 Offset(left, top),
                 Size(barWidth, tall),
                 corner
             )
         } else {
-            drawRoundRect(quiet, Offset(left, top), Size(barWidth, tall), corner)
+            drawRoundRect(quiet.copy(alpha = quiet.alpha * fade), Offset(left, top), Size(barWidth, tall), corner)
         }
     }
 }
+
+/** What is left of a bar once it is well inside the sidebar or the side panel. */
+private const val BEHIND_MENUS = 0.14f
