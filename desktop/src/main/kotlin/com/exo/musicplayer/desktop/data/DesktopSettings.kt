@@ -102,6 +102,15 @@ class DesktopSettings {
         get() = prefs.get(KEY_BACKDROP_COLOR, "")
         set(value) = prefs.put(KEY_BACKDROP_COLOR, value)
 
+    /** Whether a wallpaper is set; the picture itself is kept in Resonate's own folder. */
+    var hasWallpaper: Boolean
+        get() = prefs.getBoolean(KEY_WALLPAPER, false)
+        set(value) = prefs.putBoolean(KEY_WALLPAPER, value)
+
+    var wallpaperDim: Float
+        get() = prefs.getFloat(KEY_WALLPAPER_DIM, 0.55f)
+        set(value) = prefs.putFloat(KEY_WALLPAPER_DIM, value)
+
     /** A ProxyMode name. System by default, which is how Resonate behaved before there was a choice. */
     var proxyMode: String
         get() = prefs.get(KEY_PROXY_MODE, "SYSTEM")
@@ -133,6 +142,8 @@ class DesktopSettings {
         const val KEY_BACKDROP = "backdrop_style"
         const val KEY_CUSTOM_THEME = "custom_theme"
         const val KEY_BACKDROP_COLOR = "backdrop_color"
+        const val KEY_WALLPAPER = "wallpaper"
+        const val KEY_WALLPAPER_DIM = "wallpaper_dim"
         const val KEY_PROXY_MODE = "proxy_mode"
         const val KEY_PROXY_HOST = "proxy_host"
         const val KEY_PROXY_PORT = "proxy_port"

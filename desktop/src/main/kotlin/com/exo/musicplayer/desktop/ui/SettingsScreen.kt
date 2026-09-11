@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -45,6 +46,7 @@ import com.exo.musicplayer.desktop.data.AppDirs
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.ProxyMode
 import com.exo.musicplayer.desktop.system.DuckKey
+import kotlin.math.roundToInt
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -197,6 +199,45 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                         "lyrics, and paused while the window isn't focused."
                 }
             )
+
+            Spacer(Modifier.height(18.dp))
+            Text("Wallpaper", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint("A picture of your own behind everything, with the background effect drawn over it.")
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GhostButton(
+                    if (controller.wallpaper == null) "Choose picture" else "Change picture",
+                    icon = Icons.Default.Image
+                ) { chooseImage()?.let { controller.setWallpaper(it) } }
+                if (controller.wallpaper != null) {
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton("Remove") { controller.clearWallpaper() }
+                }
+            }
+            controller.wallpaperNote?.let { note ->
+                Spacer(Modifier.height(6.dp))
+                Hint(note)
+            }
+            if (controller.wallpaper != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Dim ${(controller.wallpaperDim * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.TextDim
+                )
+                Slider(
+                    value = controller.wallpaperDim,
+                    onValueChange = { controller.wallpaperDim = it },
+                    valueRange = 0f..0.9f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Palette.Accent,
+                        activeTrackColor = Palette.Accent,
+                        inactiveTrackColor = Palette.Line
+                    )
+                )
+                Hint("Darkens the picture so text stays easy to read.")
+            }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -523,4 +564,13 @@ private fun ProxySettings(controller: DesktopController) {
             }
         }
     }
+}
+
+/** Windows' own open dialog, filtered to pictures. */
+private fun chooseImage(): File? {
+    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose a wallpaper", java.awt.FileDialog.LOAD)
+    dialog.file = "*.jpg;*.jpeg;*.png;*.webp;*.bmp"
+    dialog.isVisible = true
+    val name = dialog.file ?: return null
+    return File(dialog.directory, name)
 }

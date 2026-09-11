@@ -30,6 +30,7 @@ import com.exo.musicplayer.desktop.data.DesktopController
 fun LyricsWindow(controller: DesktopController) {
     val status by controller.engine.status.collectAsState()
     Box(Modifier.fillMaxSize().background(Palette.Sidebar)) {
+        Wallpaper(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
         Backdrop(
             style = controller.backdrop,
             color = Palette.Stars,

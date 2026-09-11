@@ -39,13 +39,13 @@ object Thumbnails {
     private const val BYTE_BUDGET = 40L * 1024 * 1024
 
     /** Decodes [bytes], scaling down so the longest edge is at most [MAX_EDGE]. */
-    fun decodeScaled(bytes: ByteArray): ImageBitmap? = runCatching {
+    fun decodeScaled(bytes: ByteArray, maxEdge: Int = MAX_EDGE): ImageBitmap? = runCatching {
         val source = Image.makeFromEncoded(bytes)
         try {
             val longest = max(source.width, source.height)
-            if (longest <= MAX_EDGE) return@runCatching source.toComposeImageBitmap()
+            if (longest <= maxEdge) return@runCatching source.toComposeImageBitmap()
 
-            val scale = MAX_EDGE.toFloat() / longest
+            val scale = maxEdge.toFloat() / longest
             val width = (source.width * scale).roundToInt().coerceAtLeast(1)
             val height = (source.height * scale).roundToInt().coerceAtLeast(1)
 

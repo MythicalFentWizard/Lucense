@@ -124,7 +124,7 @@ fun SidePanel(
         Modifier
             .width(if (kind == SidePanelKind.OUTPUT) 288.dp else 348.dp)
             .fillMaxHeight()
-            .background(Palette.Sidebar)
+            .background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.75f else 1f))
     ) {
     if (kind == SidePanelKind.LYRICS) {
         Backdrop(

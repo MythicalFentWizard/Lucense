@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import com.exo.musicplayer.data.archive.ArchiveEntry
 import com.exo.musicplayer.data.archive.MusicArchive
 import com.exo.musicplayer.data.download.DownloadQuality
@@ -489,6 +490,67 @@ class DesktopController(private val scope: CoroutineScope) {
         Palette.setStars(color)
         settings.backdropColor = color?.let { ThemeColors.hex(it) }.orEmpty()
     }
+
+    // ---- Wallpaper ----------------------------------------------------------
+
+    /** The user's own background picture, scaled to screen size; null for none. */
+    var wallpaper by mutableStateOf<ImageBitmap?>(null)
+        private set
+
+    private val wallpaperDimState = mutableStateOf(settings.wallpaperDim)
+
+    /** How far the picture is darkened under everything, 0 to 0.9. */
+    var wallpaperDim: Float
+        get() = wallpaperDimState.value
+        set(value) {
+            wallpaperDimState.value = value.coerceIn(0f, 0.9f)
+            settings.wallpaperDim = wallpaperDimState.value
+        }
+
+    var wallpaperNote by mutableStateOf<String?>(null)
+        private set
+
+    /** Resonate's own copy, so moving or deleting the original doesn't take the wallpaper with it. */
+    private val wallpaperFile: File get() = File(AppDirs.root, "wallpaper.img")
+
+    fun setWallpaper(file: File) {
+        scope.launch {
+            val image = io {
+                runCatching {
+                    val decoded = decodeWallpaper(file) ?: return@runCatching null
+                    if (file.canonicalFile != wallpaperFile.canonicalFile) {
+                        file.copyTo(wallpaperFile, overwrite = true)
+                    }
+                    decoded
+                }.getOrNull()
+            }
+            if (image == null) {
+                wallpaperNote = "Couldn't read that picture. JPEG, PNG, WebP and BMP work."
+                return@launch
+            }
+            wallpaper = image
+            wallpaperNote = null
+            settings.hasWallpaper = true
+        }
+    }
+
+    fun clearWallpaper() {
+        wallpaper = null
+        wallpaperNote = null
+        settings.hasWallpaper = false
+        runCatching { wallpaperFile.delete() }
+    }
+
+    private fun loadWallpaper() {
+        if (!settings.hasWallpaper) return
+        scope.launch {
+            wallpaper = io { runCatching { decodeWallpaper(wallpaperFile) }.getOrNull() }
+        }
+    }
+
+    /** Longest edge 2560: sharp on a 1440p window, a fraction of a 4K photo's memory. */
+    private fun decodeWallpaper(file: File): ImageBitmap? =
+        Thumbnails.decodeScaled(file.readBytes(), maxEdge = 2560)
 
     // ---- Proxy --------------------------------------------------------------
 
@@ -2341,6 +2403,7 @@ class DesktopController(private val scope: CoroutineScope) {
         refreshPlaylists()
         refreshTools()
         refreshWeather()
+        loadWallpaper()
     }
 
     fun release() {

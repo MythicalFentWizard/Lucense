@@ -163,7 +163,12 @@ fun DesktopApp(
             .fillMaxSize()
             .dragAndDropTarget(shouldStartDragAndDrop = { true }, target = dropTarget)
     ) {
-        Column(Modifier.fillMaxSize().background(Palette.Base)) {
+        Wallpaper(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(if (controller.wallpaper != null) Color.Transparent else Palette.Base)
+        ) {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 NavigationRail(
                     controller = controller,
@@ -177,7 +182,7 @@ fun DesktopApp(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .background(Palette.Content)
+                        .background(Palette.Content.copy(alpha = if (controller.wallpaper != null) 0.3f else 1f))
                 ) {
                     Backdrop(
                         style = controller.backdrop,
@@ -337,7 +342,7 @@ private fun NavigationRail(
         Modifier
             .width(212.dp)
             .fillMaxHeight()
-            .background(Palette.Sidebar)
+            .background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.6f else 1f))
     ) {
         Backdrop(
             style = controller.backdrop,
@@ -593,7 +598,6 @@ private fun ContentHeader(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Palette.Content)
                 .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -760,7 +764,6 @@ private fun LibraryPane(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Palette.Content)
                 .padding(start = 24.dp, end = 32.dp, bottom = 8.dp)
         ) {
             HeaderCell("#", Modifier.width(40.dp))
