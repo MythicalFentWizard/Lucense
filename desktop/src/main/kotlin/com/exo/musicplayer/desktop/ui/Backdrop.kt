@@ -773,7 +773,7 @@ internal fun barHeight(pulse: Pulse, band: Int, height: Float, density: Float): 
     // The bass end is thrown up further on each beat; the top end stays honest.
     val low = (1f - band / (count * 0.35f)).coerceIn(0f, 1f)
     val lift = pulse.kick * low * 0.16f + pulse.punch * low * 0.10f
-    return 4f * density + (level.pow(0.9f) + lift).coerceAtMost(1.15f) * height * 0.42f
+    return 4f * density + (level.pow(0.9f) + lift).coerceAtMost(1.15f) * height * 0.34f
 }
 
 /**
@@ -888,10 +888,15 @@ internal fun DrawScope.reactiveBars(
         val depth = intoMenu(left + barWidth / 2f).coerceIn(0f, 1f)
         val fade = 1f - (1f - BEHIND_MENUS) * (depth * depth * (3f - 2f * depth))
         if (level > 0.02f) {
-            softCircle(color, (0.12f + level * 0.30f) * fade, Offset(left + barWidth / 2f, top), barWidth * 1.4f)
+            // A column you can see through, with a bright cap along the top: it
+            // still reads as a meter, without standing in front of the library.
+            // Filled solid, it drowned the list it is supposed to sit behind.
+            softCircle(color, (0.04f + level * 0.13f) * fade, Offset(left + barWidth / 2f, top), barWidth * 1.7f)
             drawRoundRect(
                 Brush.verticalGradient(
-                    listOf(lit.copy(alpha = fade), color.copy(alpha = fade)),
+                    0f to color.copy(alpha = 0.05f * fade),
+                    0.4f to color.copy(alpha = 0.15f * fade),
+                    1f to color.copy(alpha = 0.30f * fade),
                     startY = top,
                     endY = floorY
                 ),
@@ -899,8 +904,19 @@ internal fun DrawScope.reactiveBars(
                 Size(barWidth, tall),
                 corner
             )
+            drawRoundRect(
+                lit.copy(alpha = 0.40f * fade),
+                Offset(left, top),
+                Size(barWidth, min(3f * density, tall)),
+                corner
+            )
         } else {
-            drawRoundRect(quiet.copy(alpha = quiet.alpha * fade), Offset(left, top), Size(barWidth, tall), corner)
+            drawRoundRect(
+                quiet.copy(alpha = quiet.alpha * 0.45f * fade),
+                Offset(left, top),
+                Size(barWidth, tall),
+                corner
+            )
         }
     }
 }
