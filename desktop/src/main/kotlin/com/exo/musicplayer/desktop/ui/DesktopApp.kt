@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.onClick
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -782,21 +783,15 @@ private fun LibraryPane(
                     isFavourite = track.file.absolutePath in controller.favourites,
                     isSelected = track.file.absolutePath in controller.selectedPaths,
                     onPlay = {
-                        val modifiers = windowInfo.keyboardModifiers
-                        when {
-                            modifiers.isCtrlPressed -> controller.toggleSelection(track)
-                            modifiers.isShiftPressed -> controller.extendSelection(track, tracks)
-                            else -> {
-                                // A plain click plays, and drops any selection -
-                                // leaving one active behind the thing you just
-                                // started would be a trap.
-                                controller.clearSelection()
-                                controller.play(track, tracks)
-                            }
-                        }
+                        // A plain click plays, and drops any selection - leaving
+                        // one active behind the thing you just started would be a trap.
+                        controller.clearSelection()
+                        controller.play(track, tracks)
                     },
                     onAddToPlaylist = { onAddToPlaylist(listOf(track)) },
-                    onIdentify = { onIdentify(track) }
+                    onIdentify = { onIdentify(track) },
+                    onToggleSelect = { controller.toggleSelection(track) },
+                    onExtendSelect = { controller.extendSelection(track, tracks) }
                 )
             }
         }
@@ -822,6 +817,7 @@ private fun HeaderCell(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TrackRow(
     index: Int,
@@ -832,7 +828,9 @@ private fun TrackRow(
     isSelected: Boolean,
     onPlay: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    onIdentify: () -> Unit
+    onIdentify: () -> Unit,
+    onToggleSelect: () -> Unit = {},
+    onExtendSelect: () -> Unit = {}
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -870,7 +868,13 @@ private fun TrackRow(
                     }
                 )
                 .hoverable(interaction)
-                .clickable(onClick = onPlay)
+                // Ctrl and Shift are read from the click itself. They used to come
+                // from the window's keyboard state, which a Ctrl+click did not
+                // reliably reach, so it was taken for a plain click: it played the
+                // track and dropped the selection instead of adding to it.
+                .onClick(keyboardModifiers = { isCtrlPressed }, onClick = onToggleSelect)
+                .onClick(keyboardModifiers = { isShiftPressed && !isCtrlPressed }, onClick = onExtendSelect)
+                .onClick(keyboardModifiers = { !isCtrlPressed && !isShiftPressed }, onClick = onPlay)
                 .padding(start = 24.dp, end = 32.dp, top = 5.dp, bottom = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

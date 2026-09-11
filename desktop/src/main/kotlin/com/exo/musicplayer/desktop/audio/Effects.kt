@@ -6,61 +6,66 @@ import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sign
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tanh
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Time-stretching by WSOLA (waveform similarity overlap-add).
+ * Time-stretching for "slowed" and "sped up" without moving the pitch.
  *
- * Needed because "slowed" and "pitch" have to stay independent, exactly as on
- * Android. Plain resampling couples them — slow it down and it inevitably goes
- * deeper. WSOLA changes duration while leaving pitch alone by overlapping
- * windows at a shifted rate, choosing each window's offset by cross-correlation
- * so successive windows stay phase-aligned. Without that correlation search
- * (i.e. plain OLA) the result develops a distinctive metallic warble.
+ * Built the way SoundTouch's time-domain stretcher is. The song is cut into
+ * sequences of 45 to 100 ms, longer the slower it plays. Each is copied
+ * untouched apart from a 12 ms crossfade into the next, and where the next one
+ * starts is chosen within a 15 to 22 ms search by normalised cross-correlation
+ * against the end of the one before, so the join lands in phase. Almost every
+ * output sample is an original sample.
  *
- * Operates on interleaved stereo; the search runs on the summed channels so both
- * stay locked together.
+ * The stretcher before this crossfaded continuously: every output sample was a
+ * blend of two copies of the song a few milliseconds apart, spliced afresh 86
+ * times a second, which comb-filters the sound slightly and was heard as a small
+ * loss of clarity whenever a track was slowed down. Its search also compared
+ * only 11 ms over a 6 ms range with an unnormalised product, so loud passages
+ * beat well-matched ones and the bass could not be kept in phase.
  *
- * Its buffers are kept and reused. An earlier version collected output in an
- * ArrayList of boxed floats and concatenated arrays on every call: tens of
- * thousands of small objects a second on the playback thread whenever a speed
- * effect was on, which is garbage the collector has to stop for.
+ * Operates on interleaved stereo with both channels in the match, so neither
+ * side drifts. Buffers are kept and reused, so the playback thread makes no
+ * garbage.
  */
-class TimeStretcher {
+class TimeStretcher(private val sampleRate: Int = 44_100) {
 
     @Volatile
     var factor: Float = 1f      // >1 plays faster
 
-    private val window = 2048   // frames
-    private val synthesisHop = window / 4
-    private val searchRadius = 256
+    private val overlap = frames(12.0)
 
     /** Input not yet consumed, interleaved stereo, and how much of it is valid. */
     private var pending = FloatArray(0)
     private var pendingLength = 0
-    private val tail = FloatArray(window * 2)
-    private var primed = false
     private var output = FloatArray(0)
 
-    /**
-     * Crossfade weights across one hop, rising from exactly 0 to exactly 1.
-     *
-     * The noise came from here. This used to be a Hann window as long as the
-     * whole analysis window, of which only the first quarter was read, so the
-     * weight climbed to 0.5 and then snapped back to 0 at the start of the next
-     * hop. Every 512 frames, 86 times a second, the output jumped between two
-     * different slices of the song: a buzz at 86 Hz and its harmonics laid over
-     * everything whenever the speed was anything but 1.
-     */
-    private val fade = FloatArray(synthesisHop) { i ->
-        (0.5 - 0.5 * cos(PI * i / (synthesisHop - 1))).toFloat()
+    /** The last [overlap] frames of the previous sequence, to crossfade from. */
+    private val previous = FloatArray(overlap * 2)
+    private var primed = false
+    private var skipCarry = 0.0
+
+    /** Rises from 0 to 1 across the crossfade; with 1 - w it always sums to 1. */
+    private val fade = FloatArray(overlap) { i ->
+        (0.5 - 0.5 * cos(PI * (i + 0.5) / overlap)).toFloat()
     }
+
+    private fun frames(ms: Double) = (sampleRate * ms / 1000.0).toInt()
+
+    /** 100 ms sequences at half speed down to 45 ms at double, as SoundTouch scales them. */
+    private fun sequenceFrames(f: Float) = frames(100.0 - (f.coerceIn(0.5f, 2f) - 0.5) / 1.5 * 55.0)
+
+    /** How far each join may move to find its match: 22 ms at half speed, 15 ms at double. */
+    private fun seekFrames(f: Float) = frames(22.0 - (f.coerceIn(0.5f, 2f) - 0.5) / 1.5 * 7.0)
 
     fun reset() {
         pendingLength = 0
-        tail.fill(0f)
         primed = false
+        skipCarry = 0.0
+        previous.fill(0f)
     }
 
     fun process(input: FloatArray): FloatArray {
@@ -78,38 +83,36 @@ class TimeStretcher {
         System.arraycopy(input, 0, pending, pendingLength, input.size)
         pendingLength += input.size
 
-        val analysisHop = (synthesisHop * f).toInt().coerceAtLeast(1)
-        val windows = ((pendingLength / 2 - searchRadius - window) / analysisHop + 1).coerceAtLeast(0)
-        if (output.size < windows * synthesisHop * 2) output = FloatArray(windows * synthesisHop * 2)
+        val sequence = sequenceFrames(f)
+        val seek = seekFrames(f)
+        val body = sequence - 2 * overlap
+        val advance = f * (sequence - overlap)
 
         var written = 0
         var read = 0
-        while (true) {
-            val need = (read + searchRadius + window) * 2
-            if (need > pendingLength) break
+        while ((read + seek + sequence) * 2 <= pendingLength) {
+            val start = read + if (primed) bestOffset(read, seek) else 0
+            val needed = written + (sequence - overlap) * 2
+            if (output.size < needed) output = output.copyOf(maxOf(needed, output.size * 2))
 
-            val offset = if (primed) bestOffset(read) else 0
-            val start = (read + offset).coerceAtLeast(0)
-            if ((start + window) * 2 > pendingLength) break
-            if (written + synthesisHop * 2 > output.size) {
-                output = output.copyOf(output.size * 2 + synthesisHop * 2)
+            // Crossfade from the end of the previous sequence into this one.
+            for (i in 0 until overlap) {
+                val w = if (primed) fade[i] else 1f
+                val at = (start + i) * 2
+                output[written++] = previous[i * 2] * (1f - w) + pending[at] * w
+                output[written++] = previous[i * 2 + 1] * (1f - w) + pending[at + 1] * w
             }
-
-            // Overlap-add the new window against the previous one's tail.
-            for (i in 0 until synthesisHop) {
-                val w = fade[i]
-                output[written++] = tail[i * 2] * (1f - w) + pending[(start + i) * 2] * w
-                output[written++] = tail[i * 2 + 1] * (1f - w) + pending[(start + i) * 2 + 1] * w
-            }
-            // Keep the remainder as the next overlap source.
-            for (i in 0 until window - synthesisHop) {
-                val src = (start + synthesisHop + i) * 2
-                if (src + 1 >= pendingLength) break
-                tail[i * 2] = pending[src]
-                tail[i * 2 + 1] = pending[src + 1]
-            }
+            // The middle goes through untouched.
+            System.arraycopy(pending, (start + overlap) * 2, output, written, body * 2)
+            written += body * 2
+            // Its last stretch is held back, to fade from next time.
+            System.arraycopy(pending, (start + sequence - overlap) * 2, previous, 0, overlap * 2)
             primed = true
-            read += analysisHop
+
+            skipCarry += advance
+            val skip = skipCarry.toInt()
+            skipCarry -= skip
+            read += skip
         }
 
         if (read > 0) {
@@ -121,32 +124,26 @@ class TimeStretcher {
     }
 
     /**
-     * Offset within the search window whose waveform best matches the tail.
-     *
-     * A coarse pass over the whole radius, then every offset around the winner.
-     * The old search stepped 32 frames and compared every fourth sample: close
-     * enough to stay in phase for bass, but up to half a cycle out for anything
-     * above about 700 Hz, which is a comb-filter warble on vocals and cymbals.
+     * Where, within [seek] frames of [read], the next sequence's opening best
+     * continues the end of the previous one: every fourth offset first, then
+     * each frame around the best of those.
      */
-    private fun bestOffset(read: Int): Int {
-        val compare = minOf(synthesisHop, 512)
+    private fun bestOffset(read: Int, seek: Int): Int {
         var best = 0
-        var bestScore = -Float.MAX_VALUE
-        var offset = -searchRadius
-        while (offset <= searchRadius) {
-            val score = correlation(read + offset, compare, stride = 2)
+        var bestScore = Double.NEGATIVE_INFINITY
+        var offset = 0
+        while (offset < seek) {
+            val score = similarity(read + offset)
             if (score > bestScore) {
                 bestScore = score
                 best = offset
             }
-            offset += 16
+            offset += 4
         }
-
         val coarse = best
-        bestScore = correlation(read + coarse, compare, stride = 1)
-        for (fine in (coarse - 15)..(coarse + 15)) {
-            if (fine == coarse || fine < -searchRadius || fine > searchRadius) continue
-            val score = correlation(read + fine, compare, stride = 1)
+        for (fine in (coarse - 3)..(coarse + 3)) {
+            if (fine == coarse || fine < 0 || fine >= seek) continue
+            val score = similarity(read + fine)
             if (score > bestScore) {
                 bestScore = score
                 best = fine
@@ -155,18 +152,21 @@ class TimeStretcher {
         return best
     }
 
-    /** Similarity of the tail to the pending input at [start], on the summed channels. */
-    private fun correlation(start: Int, compare: Int, stride: Int): Float {
-        if (start < 0 || (start + compare) * 2 > pendingLength) return -Float.MAX_VALUE
-        var score = 0f
-        var i = 0
-        while (i < compare) {
-            // Summed channels: keeps left and right from drifting apart.
-            score += (tail[i * 2] + tail[i * 2 + 1]) *
-                (pending[(start + i) * 2] + pending[(start + i) * 2 + 1])
-            i += stride
+    /**
+     * Correlation of the held-back end with the input at [start], both channels,
+     * normalised by the input's energy so a loud stretch doesn't win over a
+     * matching one.
+     */
+    private fun similarity(start: Int): Double {
+        var correlation = 0.0
+        var energy = 0.0
+        val from = start * 2
+        for (i in 0 until overlap * 2) {
+            val sample = pending[from + i].toDouble()
+            correlation += previous[i] * sample
+            energy += sample * sample
         }
-        return score
+        return correlation / sqrt(energy + 1e-12)
     }
 }
 
