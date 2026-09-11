@@ -4,6 +4,7 @@ import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.data.youtube.YouTubeBackend
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
+import com.exo.musicplayer.desktop.data.NetworkProxy
 import com.exo.musicplayer.desktop.data.ToolPaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,12 +37,14 @@ class DesktopYouTubeBackend : YouTubeBackend {
                         add(exe.absolutePath)
                         add(YtDlpFlatSearch.target(query, limit))
                         addAll(YtDlpFlatSearch.ARGUMENTS)
+                        addAll(NetworkProxy.ytDlpArgs())
                     }
                 )
                     // Kept apart, unlike the download path: stderr carries
                     // deprecation notices that would corrupt the JSON document
                     // if they were folded into stdout.
                     .redirectErrorStream(false)
+                    .also(NetworkProxy::configure)
                     .start()
 
                 val json = process.inputStream.bufferedReader().use { it.readText() }
@@ -75,8 +78,9 @@ class DesktopYouTubeBackend : YouTubeBackend {
                 "-g",
                 "--no-warnings",
                 "--no-playlist",
-                "--ignore-config"
-            ).redirectErrorStream(false).start()
+                "--ignore-config",
+                *NetworkProxy.ytDlpArgs().toTypedArray()
+            ).redirectErrorStream(false).also(NetworkProxy::configure).start()
 
             val out = process.inputStream.bufferedReader().use { it.readText() }
             process.errorStream.use { it.readBytes() }

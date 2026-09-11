@@ -1,6 +1,7 @@
 package com.exo.musicplayer.desktop.audio
 
 import com.exo.musicplayer.data.youtube.PreviewState
+import com.exo.musicplayer.desktop.data.NetworkProxy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -11,6 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Plays a YouTube result without downloading it.
@@ -97,18 +100,47 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
     private suspend fun stream(ffmpeg: java.io.File, url: String, videoId: String) =
         withContext(Dispatchers.IO) {
             val format = AudioDevices.FORMAT
+            // ffmpeg cannot speak SOCKS, and its own HTTP proxy option would be a
+            // second setting to keep in step. So behind a proxy the stream is
+            // fetched here, along the same route as everything else, and fed to
+            // ffmpeg on stdin; without one ffmpeg reads the URL itself as before.
+            val proxied = NetworkProxy.urlFor(url) != null
             val started = ProcessBuilder(
-                ffmpeg.absolutePath,
-                "-hide_banner", "-loglevel", "error",
-                // Keeps a stalled connection from hanging the preview forever.
-                "-rw_timeout", "15000000",
-                "-i", url,
-                "-f", "s16le",
-                "-ac", format.channels.toString(),
-                "-ar", format.sampleRate.toInt().toString(),
-                "pipe:1"
+                buildList {
+                    add(ffmpeg.absolutePath)
+                    addAll(listOf("-hide_banner", "-loglevel", "error"))
+                    if (proxied) {
+                        addAll(listOf("-i", "pipe:0"))
+                    } else {
+                        // Keeps a stalled connection from hanging the preview forever.
+                        addAll(listOf("-rw_timeout", "15000000", "-i", url))
+                    }
+                    addAll(
+                        listOf(
+                            "-f", "s16le",
+                            "-ac", format.channels.toString(),
+                            "-ar", format.sampleRate.toInt().toString(),
+                            "pipe:1"
+                        )
+                    )
+                }
             ).redirectErrorStream(false).start()
             process = started
+
+            if (proxied) {
+                Thread {
+                    runCatching {
+                        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                            connectTimeout = 15_000
+                            readTimeout = 15_000
+                        }
+                        connection.inputStream.use { input ->
+                            started.outputStream.use { output -> input.copyTo(output, 1 shl 16) }
+                        }
+                    }
+                    runCatching { started.outputStream.close() }
+                }.apply { isDaemon = true; start() }
+            }
 
             // stderr is drained on its own thread: ffmpeg blocks once the pipe
             // buffer fills, and a blocked encoder looks exactly like a hang.

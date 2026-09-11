@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.data.AppDirs
 import com.exo.musicplayer.desktop.data.DesktopController
+import com.exo.musicplayer.desktop.data.ProxyMode
 import com.exo.musicplayer.desktop.system.DuckKey
 import java.awt.Desktop
 import java.io.File
@@ -130,6 +131,8 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(10.dp))
+                GhostButton("Open") { controller.openMusicFolder() }
+                Spacer(Modifier.width(6.dp))
                 GhostButton("Change") {
                     onChooseFolder()?.let { controller.chooseDownloadDir(it) }
                 }
@@ -142,6 +145,10 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     "and your files aren't modified"
             ) { controller.writeTags = it }
         }
+
+        Spacer(Modifier.height(14.dp))
+
+        ProxySettings(controller)
 
         Spacer(Modifier.height(14.dp))
 
@@ -415,6 +422,83 @@ private fun openFolder(dir: File) {
             Desktop.getDesktop().isSupported(Desktop.Action.OPEN)
         ) {
             Desktop.getDesktop().open(dir)
+        }
+    }
+}
+
+/**
+ * The proxy for everything Resonate does online.
+ *
+ * One address box and one port box rather than a URL field: the kind of proxy
+ * is already chosen above it, and a pasted "socks5://" would only be something
+ * to strip back off.
+ */
+@Composable
+private fun ProxySettings(controller: DesktopController) {
+    val proxy = controller.proxy
+    Panel(Modifier.fillMaxWidth()) {
+        SectionTitle("Proxy")
+        Spacer(Modifier.height(4.dp))
+        Hint(
+            "Used for everything that goes online: yt-dlp and spotdl downloads, YouTube " +
+                "search and previews, lyrics, cover art, identification and weather."
+        )
+        Spacer(Modifier.height(12.dp))
+        SegmentedRow(
+            options = ProxyMode.entries,
+            selected = proxy.mode,
+            label = { it.label },
+            onSelect = { controller.proxy = controller.proxy.copy(mode = it) }
+        )
+        Spacer(Modifier.height(10.dp))
+        when (proxy.mode) {
+            ProxyMode.SYSTEM ->
+                Hint("Follows Windows: Settings, Network & internet, Proxy.")
+            ProxyMode.DIRECT ->
+                Hint("Connects straight to the internet, even if Windows has a proxy set.")
+            else -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextInput(
+                        value = proxy.host,
+                        onValueChange = { controller.proxy = controller.proxy.copy(host = it.trim()) },
+                        placeholder = "Address, like 127.0.0.1",
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextInput(
+                        value = if (proxy.port == 0) "" else proxy.port.toString(),
+                        onValueChange = { typed ->
+                            val digits = typed.filter { it.isDigit() }.take(5)
+                            controller.proxy = controller.proxy.copy(port = digits.toIntOrNull() ?: 0)
+                        },
+                        placeholder = "Port",
+                        modifier = Modifier.width(110.dp)
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Hint(
+                    when {
+                        proxy.port > 65535 ->
+                            "Ports go up to 65535. Until then Resonate connects directly."
+                        proxy.incomplete ->
+                            "Fill in both the address and the port. Until then Resonate connects directly."
+                        proxy.mode == ProxyMode.HTTPS ->
+                            "Reaches the proxy the same way as HTTP and tunnels secure sites through it."
+                        proxy.mode == ProxyMode.SOCKS5 ->
+                            "Recommended: carries every kind of connection Resonate makes."
+                        else ->
+                            "Applied straight away to every new connection."
+                    }
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GhostButton("Test connection") { controller.testProxy() }
+            controller.proxyTestNote?.let { note ->
+                Spacer(Modifier.width(10.dp))
+                Text(note, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
+            }
         }
     }
 }

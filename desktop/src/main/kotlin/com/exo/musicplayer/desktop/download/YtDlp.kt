@@ -2,6 +2,7 @@ package com.exo.musicplayer.desktop.download
 
 import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.desktop.data.AppDirs
+import com.exo.musicplayer.desktop.data.NetworkProxy
 import com.exo.musicplayer.desktop.data.ToolPaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,8 +66,9 @@ object YtDlp {
             val exe = ToolPaths.makeUpdatable("yt-dlp.exe")
                 ?: error("Couldn't find yt-dlp to update.")
             onLine("Updating ${exe.absolutePath}")
-            val process = ProcessBuilder(exe.absolutePath, "-U")
+            val process = ProcessBuilder(listOf(exe.absolutePath, "-U") + NetworkProxy.ytDlpArgs())
                 .redirectErrorStream(true)
+                .also(NetworkProxy::configure)
                 .start()
             process.inputStream.bufferedReader().forEachLine(onLine)
             check(process.waitFor() == 0) { "Update failed." }
@@ -123,9 +125,12 @@ object YtDlp {
                     command += "--embed-metadata"
                     if (embedThumbnail) command += "--embed-thumbnail"
                 }
+                command += NetworkProxy.ytDlpArgs()
                 command += target
 
-                val process = ProcessBuilder(command).redirectErrorStream(true).start()
+                val process = ProcessBuilder(command).redirectErrorStream(true)
+                    .also(NetworkProxy::configure)
+                    .start()
                 registerProcess(process)
                 process.inputStream.bufferedReader().forEachLine { line ->
                     onProgress(DownloadProgress(percentOf(line), line.trim()))
@@ -171,7 +176,10 @@ object YtDlp {
                     command += listOf("--ffmpeg", ToolPaths.ffmpeg.absolutePath)
                 }
 
-                val process = ProcessBuilder(command).redirectErrorStream(true).start()
+                // spotdl has no SOCKS option of its own; it gets the environment.
+                val process = ProcessBuilder(command).redirectErrorStream(true)
+                    .also(NetworkProxy::configure)
+                    .start()
                 registerProcess(process)
                 process.inputStream.bufferedReader().forEachLine { line ->
                     onProgress(DownloadProgress(null, line.trim()))

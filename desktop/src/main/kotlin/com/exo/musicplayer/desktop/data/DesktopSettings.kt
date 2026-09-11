@@ -87,6 +87,19 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_STARS, true)
         set(value) = prefs.putBoolean(KEY_STARS, value)
 
+    /** A ProxyMode name. System by default, which is how Resonate behaved before there was a choice. */
+    var proxyMode: String
+        get() = prefs.get(KEY_PROXY_MODE, "SYSTEM")
+        set(value) = prefs.put(KEY_PROXY_MODE, value)
+
+    var proxyHost: String
+        get() = prefs.get(KEY_PROXY_HOST, "")
+        set(value) = prefs.put(KEY_PROXY_HOST, value)
+
+    var proxyPort: Int
+        get() = prefs.getInt(KEY_PROXY_PORT, 0)
+        set(value) = prefs.putInt(KEY_PROXY_PORT, value)
+
     private companion object {
         const val KEY_FOLDERS = "library_folders"
         const val KEY_OUTPUTS = "audio_outputs"
@@ -102,5 +115,8 @@ class DesktopSettings {
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"
         const val KEY_STARS = "starry_background"
+        const val KEY_PROXY_MODE = "proxy_mode"
+        const val KEY_PROXY_HOST = "proxy_host"
+        const val KEY_PROXY_PORT = "proxy_port"
     }
 }

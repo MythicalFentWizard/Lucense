@@ -7,9 +7,11 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -97,6 +100,7 @@ import com.exo.musicplayer.desktop.data.DownloadEntry
 import com.exo.musicplayer.desktop.data.SortMode
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
+import kotlinx.coroutines.delay
 import java.awt.Desktop
 import java.io.File
 import java.util.Locale
@@ -121,6 +125,7 @@ enum class Destination(val label: String, val icon: ImageVector) {
  * arrangement every desktop music player has converged on, because it survives a
  * 1400px-wide window where a phone layout does not.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DesktopApp(
     controller: DesktopController,
@@ -143,7 +148,20 @@ fun DesktopApp(
         if (onDownloadPage) controller.acknowledgeDownloads()
     }
 
-    Box(Modifier.fillMaxSize()) {
+    // Songs, folders and links dropped anywhere on the window.
+    val dropTarget = remember(controller) {
+        fileDropTarget(
+            onHover = { controller.dropHover = it },
+            onFiles = controller::importDropped,
+            onText = controller::importDroppedText
+        )
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .dragAndDropTarget(shouldStartDragAndDrop = { true }, target = dropTarget)
+    ) {
         Column(Modifier.fillMaxSize().background(Palette.Base)) {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 NavigationRail(
@@ -257,6 +275,50 @@ fun DesktopApp(
             DialogKind.ADD_TO_PLAYLIST ->
                 AddToPlaylistDialog(controller, playlistTargets) { dialog = null }
             null -> Unit
+        }
+
+        if (controller.dropHover) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Palette.Base.copy(alpha = 0.82f))
+                    .padding(28.dp)
+                    .border(2.dp, Palette.Accent, RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Drop to add to your library",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Palette.Text
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Songs are copied into your music folder, folders are added where " +
+                            "they are, and links start downloading.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim
+                    )
+                }
+            }
+        }
+
+        controller.dropNote?.let { note ->
+            LaunchedEffect(note) {
+                delay(5000)
+                controller.dismissDropNote()
+            }
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Palette.Raised)
+                    .border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Text(note, style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+            }
         }
     }
 }
@@ -554,9 +616,13 @@ private fun ContentHeader(
                 }
                 IconButton(onClick = onAddFolder) {
                     Icon(
-                        Icons.Default.FolderOpen, "Add folder",
+                        Icons.Default.CreateNewFolder, "Add folder",
                         tint = Palette.TextDim, modifier = Modifier.size(18.dp)
                     )
+                }
+                Spacer(Modifier.width(6.dp))
+                GhostButton("Music folder", icon = Icons.Default.FolderOpen) {
+                    controller.openMusicFolder()
                 }
             }
         }

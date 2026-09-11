@@ -63,6 +63,7 @@ import com.exo.musicplayer.desktop.ui.AccentChoice
 import com.exo.musicplayer.desktop.ui.DesktopFxState
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.SidePanelKind
+import com.exo.musicplayer.util.AudioTypes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -444,6 +445,142 @@ class DesktopController(private val scope: CoroutineScope) {
             starryState.value = value
             settings.starryBackground = value
         }
+
+    // ---- Proxy --------------------------------------------------------------
+
+    private val proxyState = mutableStateOf(
+        ProxyConfig(ProxyMode.fromName(settings.proxyMode), settings.proxyHost, settings.proxyPort)
+    )
+
+    init {
+        // Before anything goes online: every request the app makes, and every
+        // yt-dlp it starts, reads the route from here.
+        NetworkProxy.apply(proxyState.value)
+    }
+
+    /** Applied the moment it changes, so the next connection already takes the new route. */
+    var proxy: ProxyConfig
+        get() = proxyState.value
+        set(value) {
+            proxyState.value = value
+            settings.proxyMode = value.mode.name
+            settings.proxyHost = value.host
+            settings.proxyPort = value.port
+            NetworkProxy.apply(value)
+            proxyTestNote = null
+        }
+
+    var proxyTestNote by mutableStateOf<String?>(null)
+        private set
+
+    fun testProxy() {
+        val tested = proxy
+        proxyTestNote = "Testing…"
+        scope.launch {
+            val result = NetworkProxy.test()
+            // A result for a setting changed since would describe the wrong route.
+            if (proxy == tested) proxyTestNote = result
+        }
+    }
+
+    // ---- Music folder -------------------------------------------------------
+
+    /** Opens the folder downloads and dropped songs are saved to. */
+    fun openMusicFolder() {
+        val dir = File(settings.downloadDir)
+        runCatching {
+            dir.mkdirs()
+            java.awt.Desktop.getDesktop().open(dir)
+        }
+    }
+
+    // ---- Drag and drop ------------------------------------------------------
+
+    /** True while something is being dragged over the window. */
+    var dropHover by mutableStateOf(false)
+
+    var dropNote by mutableStateOf<String?>(null)
+        private set
+
+    fun dismissDropNote() { dropNote = null }
+
+    /**
+     * Files and folders dropped on the window.
+     *
+     * Folders join the library where they are, the same as adding one by hand.
+     * Loose songs are copied into the music folder, where downloads go, so they
+     * stay in the library if the originals are moved or deleted. Songs already
+     * inside the library are added as they are rather than copied again.
+     */
+    fun importDropped(files: List<File>) {
+        val droppedFolders = files.filter { it.isDirectory }
+        val songs = files.filter { it.isFile && AudioTypes.isProbablyAudio(null, it.name) }
+        val ignored = files.size - droppedFolders.size - songs.size
+
+        scope.launch {
+            val music = File(settings.downloadDir)
+            // Compared as lowercase text: Windows paths ignore case, File.startsWith does not.
+            val roots = (folders + settings.downloadDir)
+                .map { File(it).absoluteFile.normalize().path.trimEnd('\\', '/').lowercase() + File.separator }
+            val placed = io {
+                songs.mapNotNull { song ->
+                    val source = song.absoluteFile.normalize()
+                    if (roots.any { source.path.lowercase().startsWith(it) }) {
+                        source
+                    } else {
+                        runCatching {
+                            music.mkdirs()
+                            source.copyTo(freeName(music, source.name))
+                        }.getOrNull()
+                    }
+                }
+            }
+
+            if (droppedFolders.isNotEmpty()) {
+                folders = (folders + droppedFolders.map { it.absolutePath }).distinct()
+                settings.folders = folders
+                // Covers the copied songs too: the music folder is always scanned.
+                rescan()
+            } else {
+                addToLibrary(placed)
+            }
+
+            dropNote = buildList {
+                if (placed.isNotEmpty()) add("added ${placed.size} song${if (placed.size == 1) "" else "s"}")
+                if (droppedFolders.isNotEmpty()) {
+                    add("added ${droppedFolders.size} folder${if (droppedFolders.size == 1) "" else "s"}")
+                }
+                if (songs.size > placed.size) add("${songs.size - placed.size} couldn't be copied")
+                if (ignored > 0) add("skipped $ignored that aren't audio")
+            }.joinToString(", ").replaceFirstChar { it.uppercase() }.ifBlank { "Nothing there to add." }
+        }
+    }
+
+    /** A link dropped on the window starts downloading it. */
+    fun importDroppedText(text: String): Boolean {
+        val link = text.trim().lineSequence().firstOrNull()?.trim().orEmpty()
+        if (!link.startsWith("http", ignoreCase = true)) return false
+        startDownload(link)
+        dropNote = if (tools.ready) {
+            "Downloading that link. It's in the Download list."
+        } else {
+            "Install yt-dlp first, on the Download page, then drop the link again."
+        }
+        return true
+    }
+
+    /** [name] in [dir], or "name (2)" and so on if that is taken. */
+    private fun freeName(dir: File, name: String): File {
+        val stem = name.substringBeforeLast('.')
+        val extension = name.substringAfterLast('.', "")
+        var candidate = File(dir, name)
+        var n = 2
+        while (candidate.exists()) {
+            candidate = File(dir, if (extension.isEmpty()) "$stem ($n)" else "$stem ($n).$extension")
+            n++
+        }
+        return candidate
+    }
 
     fun togglePanel(kind: SidePanelKind) {
         sidePanel = if (sidePanel == kind) null else kind
@@ -2105,7 +2242,9 @@ class DesktopController(private val scope: CoroutineScope) {
         applyOutputs()
         pushVolume()
         applyDuckBinding()
-        if (folders.isNotEmpty()) rescan() else scope.launch { refreshAggregates() }
+        // The music folder is always part of the library, so there is something to
+        // scan even before any folder has been added by hand.
+        rescan()
         refreshPlaylists()
         refreshTools()
         refreshWeather()
