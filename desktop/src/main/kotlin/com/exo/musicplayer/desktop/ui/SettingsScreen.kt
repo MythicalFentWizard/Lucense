@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.desktop.AppVersion
@@ -159,14 +160,17 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             SectionTitle("Appearance")
             Spacer(Modifier.height(4.dp))
             Hint(
-                "Recolours the whole window, not just the buttons. The surfaces take " +
-                    "the accent's hue and keep their brightness, so the layering reads " +
-                    "the same whichever you pick."
+                "Recolours the whole window, not just the buttons. Each one is a published " +
+                    "scheme - the surfaces and the text tones come from it together, which is " +
+                    "what keeps every label readable on every layer."
             )
             Spacer(Modifier.height(14.dp))
             var editingColours by remember { mutableStateOf(false) }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                AccentChoice.entries.chunked(6).forEach { row ->
+                // Fixed-width cells, and the short last row padded out with empty
+                // ones: a swatch used to be as wide as its own label, so "Amethyst"
+                // and "Rose" made different columns and the bottom row sat offset.
+                AccentChoice.entries.chunked(SWATCHES_PER_ROW).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                         row.forEach { option ->
                             AccentSwatch(option, option == controller.accent) {
@@ -174,9 +178,12 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                                 if (option == AccentChoice.CUSTOM) editingColours = true
                             }
                         }
+                        repeat(SWATCHES_PER_ROW - row.size) { Spacer(Modifier.width(SWATCH_CELL)) }
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Hint(controller.accent.credit)
             Spacer(Modifier.height(12.dp))
             GhostButton("Edit colours", icon = Icons.Default.ColorLens) { editingColours = true }
             Spacer(Modifier.height(6.dp))
@@ -377,7 +384,10 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
 
 @Composable
 private fun AccentSwatch(choice: AccentChoice, selected: Boolean, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier.width(SWATCH_CELL),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Box(
             Modifier
                 .size(40.dp)
@@ -399,10 +409,17 @@ private fun AccentSwatch(choice: AccentChoice, selected: Boolean, onClick: () ->
         Text(
             choice.label,
             style = MaterialTheme.typography.labelSmall,
-            color = if (selected) Palette.Text else Palette.TextFaint
+            color = if (selected) Palette.Text else Palette.TextFaint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
         )
     }
 }
+
+/** Every swatch takes the same width, whatever its name is, so the rows line up. */
+private val SWATCH_CELL = 78.dp
+private const val SWATCHES_PER_ROW = 6
 
 @Composable
 private fun WeatherSettings(controller: DesktopController) {
