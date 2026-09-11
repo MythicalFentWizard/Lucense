@@ -416,7 +416,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Fetches lyrics for the whole library through the four-tier chain. */
-    fun fetchAllLyrics(redo: Boolean = false) = runBulk("lyrics", redo) { track ->
+    fun fetchAllLyrics(redo: Boolean = false) = runBulk("lyrics", redo, parallel = 5) { track ->
         val found = runCatching { app.lyrics.fetch(track, force = redo) }
             .getOrNull() is LyricsFetch.Found
         library.markLyricsChecked(track.id)

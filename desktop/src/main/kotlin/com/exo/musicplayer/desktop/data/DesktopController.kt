@@ -1235,12 +1235,10 @@ class DesktopController(private val scope: CoroutineScope) {
             queue.forEach { work.trySend(it) }
             work.close()
 
-            // Cover and tag lookups mostly wait on the network, so several songs
-            // go at once. Lyrics and identification stay one at a time:
-            // identifying decodes audio, and the lyric services are the likeliest
-            // to rate-limit. Workers share the UI thread between suspensions, so
-            // the counters need no locking.
-            val workers = if (kind == BulkKind.COVERS || kind == BulkKind.TAGS) SONGS_AT_ONCE else 1
+            // Lookups mostly wait on the network, so several songs go at once;
+            // identifying decodes audio, so it stays one at a time. Workers share
+            // the UI thread between suspensions, so the counters need no locking.
+            val workers = if (kind == BulkKind.IDENTIFY) 1 else SONGS_AT_ONCE
             coroutineScope {
                 repeat(workers) {
                     launch {
