@@ -35,6 +35,8 @@ fun LyricsWindow(controller: DesktopController) {
             style = controller.backdrop,
             color = Palette.Stars,
             spectrum = controller.engine.spectrum,
+            graph = controller.songGraph,
+            reactiveMode = controller.reactiveMode,
             modifier = Modifier.matchParentSize(),
             count = 60,
             pauseWhenUnfocused = false

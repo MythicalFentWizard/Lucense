@@ -92,6 +92,11 @@ class DesktopSettings {
         get() = prefs.get(KEY_BACKDROP, null) ?: if (starryBackground) "STARS" else "NONE"
         set(value) = prefs.put(KEY_BACKDROP, value)
 
+    /** A ReactiveMode name. */
+    var reactiveMode: String
+        get() = prefs.get(KEY_REACTIVE_MODE, "BALL")
+        set(value) = prefs.put(KEY_REACTIVE_MODE, value)
+
     /** The Custom theme as ARGB hex, "primary,secondary,tertiary,button"; empty until edited. */
     var customTheme: String
         get() = prefs.get(KEY_CUSTOM_THEME, "")
@@ -150,6 +155,7 @@ class DesktopSettings {
         const val KEY_DUCK_PERCENT = "duck_percent"
         const val KEY_STARS = "starry_background"
         const val KEY_BACKDROP = "backdrop_style"
+        const val KEY_REACTIVE_MODE = "reactive_mode"
         const val KEY_CUSTOM_THEME = "custom_theme"
         const val KEY_BACKDROP_COLOR = "backdrop_color"
         const val KEY_WALLPAPER = "wallpaper"

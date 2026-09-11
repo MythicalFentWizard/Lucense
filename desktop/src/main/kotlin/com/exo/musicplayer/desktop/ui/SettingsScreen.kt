@@ -192,12 +192,23 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 label = { it.label },
                 onSelect = { controller.backdrop = it }
             )
+            if (controller.backdrop == BackdropStyle.REACTIVE) {
+                Spacer(Modifier.height(8.dp))
+                SegmentedRow(
+                    options = ReactiveMode.entries,
+                    selected = controller.reactiveMode,
+                    label = { it.label },
+                    onSelect = { controller.reactiveMode = it }
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Hint(
                 if (controller.backdrop == BackdropStyle.NONE) {
                     controller.backdrop.note
                 } else {
-                    controller.backdrop.note + " Shown behind the sidebar, the library and the " +
+                    controller.backdrop.note +
+                        (if (controller.backdrop == BackdropStyle.REACTIVE) " " + controller.reactiveMode.note else "") +
+                        " Shown behind the sidebar, the library and the " +
                         "lyrics, and paused while the window isn't focused."
                 }
             )

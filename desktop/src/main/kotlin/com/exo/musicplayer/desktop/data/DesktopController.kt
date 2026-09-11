@@ -52,6 +52,7 @@ import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import com.exo.musicplayer.desktop.audio.SongGraph
 import com.exo.musicplayer.desktop.download.DesktopYouTubeBackend
 import com.exo.musicplayer.desktop.audio.PlaybackEngine
 import com.exo.musicplayer.desktop.download.DownloadProgress
@@ -65,6 +66,7 @@ import com.exo.musicplayer.desktop.ui.AccentChoice
 import com.exo.musicplayer.desktop.ui.BackdropStyle
 import com.exo.musicplayer.desktop.ui.DesktopFxState
 import com.exo.musicplayer.desktop.ui.Palette
+import com.exo.musicplayer.desktop.ui.ReactiveMode
 import com.exo.musicplayer.desktop.ui.SidePanelKind
 import com.exo.musicplayer.desktop.ui.ThemeColors
 import com.exo.musicplayer.util.AudioTypes
@@ -141,6 +143,9 @@ class DesktopController(private val scope: CoroutineScope) {
     val settings = DesktopSettings()
     val store = DesktopStore(AppDirs.database)
     val engine = PlaybackEngine()
+
+    /** The playing song read ahead, for the Waves background. */
+    val songGraph = SongGraph(engine)
 
     init {
         ThemeColors.decode(settings.customTheme)?.let(Palette::setCustom)
@@ -475,6 +480,16 @@ class DesktopController(private val scope: CoroutineScope) {
         set(value) {
             backdropState.value = value
             settings.backdrop = value.name
+        }
+
+    private val reactiveModeState = mutableStateOf(ReactiveMode.fromName(settings.reactiveMode))
+
+    /** Which of Reactive's two looks is shown. */
+    var reactiveMode: ReactiveMode
+        get() = reactiveModeState.value
+        set(value) {
+            reactiveModeState.value = value
+            settings.reactiveMode = value.name
         }
 
     /** Lyrics popped out into a window of their own. */

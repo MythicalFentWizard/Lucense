@@ -188,6 +188,8 @@ fun DesktopApp(
                         style = controller.backdrop,
                         color = Palette.Stars,
                         spectrum = controller.engine.spectrum,
+                        graph = controller.songGraph,
+                        reactiveMode = controller.reactiveMode,
                         modifier = Modifier.matchParentSize()
                     )
                     Column(Modifier.fillMaxSize()) {
@@ -348,6 +350,8 @@ private fun NavigationRail(
             style = controller.backdrop,
             color = Palette.Stars,
             spectrum = controller.engine.spectrum,
+            graph = controller.songGraph,
+            reactiveMode = controller.reactiveMode,
             modifier = Modifier.matchParentSize(),
             count = 40
         )
@@ -382,8 +386,8 @@ private fun NavigationRail(
             RailItem("Settings", Icons.Default.Settings, settingsOpen, onClick = onSettings)
             Text(
                 "made by lucent",
-                style = MaterialTheme.typography.labelSmall,
-                color = Palette.TextFaint,
+                style = MaterialTheme.typography.bodySmall,
+                color = Palette.TextDim,
                 modifier = Modifier.padding(start = 20.dp, top = 10.dp)
             )
         }
@@ -603,7 +607,13 @@ private fun ContentHeader(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.headlineMedium, color = Palette.Text)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.TextDim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             if (destination == Destination.LIBRARY && !showSettings) {

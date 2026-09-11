@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.rememberDialogState
 import com.exo.musicplayer.desktop.data.DesktopController
 import kotlin.math.roundToInt
+import java.awt.Dimension
 
 private enum class ColourField(val label: String, val note: String) {
     PRIMARY("Primary", "Highlights, sliders, the playing track. The window takes its hue."),
@@ -60,7 +62,10 @@ fun ThemeEditorWindow(controller: DesktopController, onClose: () -> Unit) {
         title = "Colours · Resonate",
         state = rememberDialogState(size = DpSize(640.dp, 700.dp))
     ) {
-        ResonateDesktopTheme { ThemeEditor(controller, onClose) }
+        LaunchedEffect(Unit) { window.minimumSize = Dimension(460, 460) }
+        ResonateDesktopTheme {
+            ScaledToWindow(designWidth = 640.dp, designHeight = 700.dp) { ThemeEditor(controller, onClose) }
+        }
     }
 }
 

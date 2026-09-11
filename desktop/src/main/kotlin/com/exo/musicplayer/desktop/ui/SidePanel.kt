@@ -131,6 +131,8 @@ fun SidePanel(
             style = controller.backdrop,
             color = Palette.Stars,
             spectrum = controller.engine.spectrum,
+            graph = controller.songGraph,
+            reactiveMode = controller.reactiveMode,
             modifier = Modifier.matchParentSize(),
             count = 50
         )
@@ -303,8 +305,8 @@ private fun EffectsControls(
         Spacer(Modifier.height(6.dp))
         Text(
             "Off. Speed and pitch still apply.",
-            style = MaterialTheme.typography.labelSmall,
-            color = Palette.TextFaint
+            style = MaterialTheme.typography.bodySmall,
+            color = Palette.TextDim
         )
     }
 
@@ -341,8 +343,8 @@ private fun EffectsControls(
         Spacer(Modifier.height(6.dp))
         Text(
             "Off. Ten bands from 31 Hz to 16 kHz, up to 12 dB either way.",
-            style = MaterialTheme.typography.labelSmall,
-            color = Palette.TextFaint
+            style = MaterialTheme.typography.bodySmall,
+            color = Palette.TextDim
         )
     }
 

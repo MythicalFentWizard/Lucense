@@ -63,8 +63,8 @@ object Palette {
     val Line: Color get() = surface(0.22f, 0.180f)
 
     val Text: Color get() = surface(0.30f, 0.961f)
-    val TextDim: Color get() = surface(0.18f, 0.680f)
-    val TextFaint: Color get() = surface(0.11f, 0.449f)
+    val TextDim: Color get() = surface(0.16f, 0.770f)
+    val TextFaint: Color get() = surface(0.12f, 0.590f)
 
     val Accent: Color get() = scheme.value.accent
     val AccentSoft: Color get() = scheme.value.soft
@@ -277,16 +277,16 @@ private val DesktopTypography = Typography(
     ),
     bodySmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontSize = 12.sp
+        fontSize = 13.sp
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontSize = 11.sp,
+        fontSize = 12.sp,
         letterSpacing = 0.3.sp
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontSize = 10.5.sp,
+        fontSize = 11.5.sp,
         letterSpacing = 0.4.sp
     )
 )

@@ -39,7 +39,9 @@ import com.exo.musicplayer.desktop.ui.DesktopApp
 import com.exo.musicplayer.desktop.ui.LyricsWindow
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.ResonateDesktopTheme
+import com.exo.musicplayer.desktop.ui.ScaledToWindow
 import kotlinx.coroutines.delay
+import java.awt.Dimension
 import java.io.File
 import javax.swing.JFileChooser
 import javax.swing.UIManager
@@ -85,8 +87,12 @@ fun main() = application {
             }
         }
     ) {
+        // The smallest window the scaled layout still fits in.
+        LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
         ResonateDesktopTheme {
-            AppHost(controller)
+            ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
+                AppHost(controller)
+            }
         }
     }
 
@@ -96,7 +102,10 @@ fun main() = application {
             title = "Lyrics · Resonate",
             state = rememberWindowState(width = 460.dp, height = 700.dp)
         ) {
-            ResonateDesktopTheme { LyricsWindow(controller) }
+            LaunchedEffect(Unit) { window.minimumSize = Dimension(300, 360) }
+            ResonateDesktopTheme {
+                ScaledToWindow(designWidth = 420.dp, designHeight = 560.dp) { LyricsWindow(controller) }
+            }
         }
     }
 }
