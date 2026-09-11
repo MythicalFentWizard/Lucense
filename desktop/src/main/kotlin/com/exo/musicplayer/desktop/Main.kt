@@ -36,6 +36,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.ui.DesktopApp
+import com.exo.musicplayer.desktop.ui.LyricsWindow
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.ResonateDesktopTheme
 import kotlinx.coroutines.delay
@@ -86,6 +87,16 @@ fun main() = application {
     ) {
         ResonateDesktopTheme {
             AppHost(controller)
+        }
+    }
+
+    if (controller.lyricsDetached) {
+        Window(
+            onCloseRequest = { controller.lyricsDetached = false },
+            title = "Lyrics · Resonate",
+            state = rememberWindowState(width = 460.dp, height = 700.dp)
+        ) {
+            ResonateDesktopTheme { LyricsWindow(controller) }
         }
     }
 }

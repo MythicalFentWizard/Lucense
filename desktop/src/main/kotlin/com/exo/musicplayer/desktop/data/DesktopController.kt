@@ -5,6 +5,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import com.exo.musicplayer.data.archive.ArchiveEntry
 import com.exo.musicplayer.data.archive.MusicArchive
 import com.exo.musicplayer.data.download.DownloadQuality
@@ -60,9 +61,11 @@ import com.exo.musicplayer.desktop.system.GlobalHotkey
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.desktop.library.FolderLibrary
 import com.exo.musicplayer.desktop.ui.AccentChoice
+import com.exo.musicplayer.desktop.ui.BackdropStyle
 import com.exo.musicplayer.desktop.ui.DesktopFxState
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.SidePanelKind
+import com.exo.musicplayer.desktop.ui.ThemeColors
 import com.exo.musicplayer.util.AudioTypes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -139,6 +142,8 @@ class DesktopController(private val scope: CoroutineScope) {
     val engine = PlaybackEngine()
 
     init {
+        ThemeColors.decode(settings.customTheme)?.let(Palette::setCustom)
+        Palette.setStars(ThemeColors.parse(settings.backdropColor))
         Palette.use(AccentChoice.fromName(settings.accentName))
     }
 
@@ -350,6 +355,8 @@ class DesktopController(private val scope: CoroutineScope) {
             engine.effects.reverb.enabled = value.reverbEnabled
             engine.effects.reverb.mix = value.reverbMix
             engine.effects.reverb.decay = value.reverbDecay
+            engine.effects.equalizer.enabled = value.eqEnabled
+            engine.effects.equalizer.setGains(value.eqGains)
         }
 
     private val volumeState = mutableStateOf(settings.volume)
@@ -457,15 +464,31 @@ class DesktopController(private val scope: CoroutineScope) {
             settings.accentName = value.name
         }
 
-    private val starryState = mutableStateOf(settings.starryBackground)
+    private val backdropState = mutableStateOf(BackdropStyle.fromName(settings.backdrop))
 
-    /** The twinkling starfield behind the sidebar and content, as on the phone. */
-    var starry: Boolean
-        get() = starryState.value
+    /** What is drawn behind the sidebar, the library and the lyrics. */
+    var backdrop: BackdropStyle
+        get() = backdropState.value
         set(value) {
-            starryState.value = value
-            settings.starryBackground = value
+            backdropState.value = value
+            settings.backdrop = value.name
         }
+
+    /** Lyrics popped out into a window of their own. */
+    var lyricsDetached by mutableStateOf(false)
+
+    /** Stores the Custom theme and switches to it. */
+    fun saveCustomTheme(colors: ThemeColors) {
+        Palette.setCustom(colors)
+        settings.customTheme = colors.encode()
+        accent = AccentChoice.CUSTOM
+    }
+
+    /** The background effect's own colour, or null to follow the theme. */
+    fun setBackdropColor(color: Color?) {
+        Palette.setStars(color)
+        settings.backdropColor = color?.let { ThemeColors.hex(it) }.orEmpty()
+    }
 
     // ---- Proxy --------------------------------------------------------------
 
@@ -604,6 +627,12 @@ class DesktopController(private val scope: CoroutineScope) {
     }
 
     fun togglePanel(kind: SidePanelKind) {
+        // The lyrics button brings popped-out lyrics back into the panel.
+        if (kind == SidePanelKind.LYRICS && lyricsDetached) {
+            lyricsDetached = false
+            sidePanel = kind
+            return
+        }
         sidePanel = if (sidePanel == kind) null else kind
     }
 

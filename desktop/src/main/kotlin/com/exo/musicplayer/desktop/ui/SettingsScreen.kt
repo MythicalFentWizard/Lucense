@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
@@ -161,20 +162,41 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     "the same whichever you pick."
             )
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                AccentChoice.entries.forEach { option ->
-                    AccentSwatch(option, option == controller.accent) {
-                        controller.accent = option
+            var editingColours by remember { mutableStateOf(false) }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                AccentChoice.entries.chunked(6).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        row.forEach { option ->
+                            AccentSwatch(option, option == controller.accent) {
+                                controller.accent = option
+                                if (option == AccentChoice.CUSTOM) editingColours = true
+                            }
+                        }
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
-            CheckRow(
-                label = "Starry background",
-                checked = controller.starry,
-                note = "A slow twinkle behind the sidebar and the library, as on the phone. " +
-                    "It stops while the window isn't focused."
-            ) { controller.starry = it }
+            Spacer(Modifier.height(12.dp))
+            GhostButton("Edit colours", icon = Icons.Default.ColorLens) { editingColours = true }
+            if (editingColours) ThemeEditorWindow(controller) { editingColours = false }
+
+            Spacer(Modifier.height(18.dp))
+            Text("Background", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(8.dp))
+            SegmentedRow(
+                options = BackdropStyle.entries,
+                selected = controller.backdrop,
+                label = { it.label },
+                onSelect = { controller.backdrop = it }
+            )
+            Spacer(Modifier.height(6.dp))
+            Hint(
+                if (controller.backdrop == BackdropStyle.NONE) {
+                    controller.backdrop.note
+                } else {
+                    controller.backdrop.note + " Shown behind the sidebar, the library and the " +
+                        "lyrics, and paused while the window isn't focused."
+                }
+            )
         }
 
         Spacer(Modifier.height(14.dp))
@@ -306,7 +328,7 @@ private fun AccentSwatch(choice: AccentChoice, selected: Boolean, onClick: () ->
             Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(9.dp))
-                .background(choice.accent)
+                .background(if (choice == AccentChoice.CUSTOM) Palette.custom.accent else choice.accent)
                 .border(
                     2.dp,
                     if (selected) Palette.Text else Color.Transparent,
@@ -316,7 +338,7 @@ private fun AccentSwatch(choice: AccentChoice, selected: Boolean, onClick: () ->
             contentAlignment = Alignment.Center
         ) {
             if (selected) {
-                Icon(Icons.Default.Check, null, Modifier.size(17.dp), tint = choice.onAccent)
+                Icon(Icons.Default.Check, null, Modifier.size(17.dp), tint = if (choice == AccentChoice.CUSTOM) Palette.custom.onAccent else choice.onAccent)
             }
         }
         Spacer(Modifier.height(6.dp))

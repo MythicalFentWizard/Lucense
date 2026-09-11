@@ -1,8 +1,13 @@
 package com.exo.musicplayer.desktop.audio
 
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.sign
+import kotlin.math.sin
+import kotlin.math.tanh
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Time-stretching by WSOLA (waveform similarity overlap-add).
@@ -254,6 +259,108 @@ class Reverb {
 }
 
 /**
+ * Ten-band graphic equalizer: peaking filters an octave apart from 31 Hz to
+ * 16 kHz, +-12 dB each.
+ *
+ * Gains arrive from the UI thread and are picked up at the start of the next
+ * buffer, where the filters are redesigned; their memory is kept, so moving a
+ * band while music plays doesn't click. A band at 0 dB is skipped. Boosts can
+ * push peaks past full scale, so anything above the knee eases into a soft
+ * ceiling instead of clipping hard.
+ */
+class Equalizer(private val sampleRate: Double = 44_100.0) {
+
+    @Volatile
+    var enabled: Boolean = false
+
+    private val incoming = AtomicReference<FloatArray?>(null)
+    private var gains = FloatArray(BANDS.size)
+    private val b0 = DoubleArray(BANDS.size)
+    private val b1 = DoubleArray(BANDS.size)
+    private val b2 = DoubleArray(BANDS.size)
+    private val a1 = DoubleArray(BANDS.size)
+    private val a2 = DoubleArray(BANDS.size)
+
+    // Transposed direct form II state: two values per band per channel.
+    private val z1 = DoubleArray(BANDS.size * 2)
+    private val z2 = DoubleArray(BANDS.size * 2)
+
+    init {
+        design()
+    }
+
+    fun setGains(db: List<Float>) {
+        incoming.set(FloatArray(BANDS.size) { db.getOrElse(it) { 0f }.coerceIn(-12f, 12f) })
+    }
+
+    fun reset() {
+        z1.fill(0.0)
+        z2.fill(0.0)
+    }
+
+    fun process(buffer: FloatArray) {
+        incoming.getAndSet(null)?.let {
+            gains = it
+            design()
+        }
+        if (!enabled) return
+        var boosted = false
+        for (band in BANDS.indices) {
+            if (abs(gains[band]) < 0.05f) continue
+            if (gains[band] > 0f) boosted = true
+            val c0 = b0[band]
+            val c1 = b1[band]
+            val c2 = b2[band]
+            val d1 = a1[band]
+            val d2 = a2[band]
+            var i = 0
+            while (i + 1 < buffer.size) {
+                for (channel in 0..1) {
+                    val k = band * 2 + channel
+                    val x = buffer[i + channel].toDouble()
+                    val y = c0 * x + z1[k]
+                    z1[k] = c1 * x - d1 * y + z2[k]
+                    z2[k] = c2 * x - d2 * y
+                    buffer[i + channel] = y.toFloat()
+                }
+                i += 2
+            }
+        }
+        if (boosted) {
+            for (i in buffer.indices) {
+                val x = buffer[i]
+                val magnitude = abs(x)
+                if (magnitude > KNEE) {
+                    buffer[i] = sign(x) * (KNEE + (1f - KNEE) * tanh((magnitude - KNEE) / (1f - KNEE)))
+                }
+            }
+        }
+    }
+
+    /** RBJ cookbook peaking filters. */
+    private fun design() {
+        for (band in BANDS.indices) {
+            val amplitude = 10.0.pow(gains[band] / 40.0)
+            val w0 = 2.0 * PI * BANDS[band] / sampleRate
+            val alpha = sin(w0) / (2.0 * Q)
+            val cosine = cos(w0)
+            val a0 = 1.0 + alpha / amplitude
+            b0[band] = (1.0 + alpha * amplitude) / a0
+            b1[band] = -2.0 * cosine / a0
+            b2[band] = (1.0 - alpha * amplitude) / a0
+            a1[band] = -2.0 * cosine / a0
+            a2[band] = (1.0 - alpha / amplitude) / a0
+        }
+    }
+
+    companion object {
+        val BANDS = doubleArrayOf(31.0, 62.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0)
+        private const val Q = 1.41
+        private const val KNEE = 0.9f
+    }
+}
+
+/**
  * Speed, pitch and reverb, composed the same way as the Android build: three
  * independent axes that stack.
  *
@@ -265,6 +372,7 @@ class EffectChain {
 
     val stretcher = TimeStretcher()
     val reverb = Reverb()
+    val equalizer = Equalizer()
 
     /**
      * Continuous across buffers. The pitch shift used to resample each buffer on
@@ -286,6 +394,7 @@ class EffectChain {
     fun reset() {
         stretcher.reset()
         reverb.reset()
+        equalizer.reset()
         pitchResampler.reset()
         pitchActive = false
     }
@@ -307,6 +416,7 @@ class EffectChain {
         stretcher.factor = speed / pitch
         buffer = stretcher.process(buffer)
 
+        equalizer.process(buffer)
         reverb.process(buffer)
 
         if (volume !in 0.999f..1.001f) {

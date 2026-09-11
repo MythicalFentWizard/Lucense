@@ -61,7 +61,7 @@ fun AccentButton(
     val background = when {
         !enabled -> Palette.Hover
         hovered -> Palette.Accent
-        else -> Palette.AccentSoft
+        else -> Palette.Button
     }
     Row(
         Modifier
@@ -75,7 +75,7 @@ fun AccentButton(
         val tint = when {
             !enabled -> Palette.TextFaint
             hovered -> Palette.OnAccent
-            else -> Palette.Text
+            else -> Palette.OnButton
         }
         if (icon != null) {
             Icon(icon, null, Modifier.size(15.dp), tint = tint)

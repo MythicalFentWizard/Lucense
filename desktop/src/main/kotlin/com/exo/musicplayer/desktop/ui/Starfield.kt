@@ -55,7 +55,8 @@ fun Starfield(
     color: Color,
     modifier: Modifier = Modifier,
     count: Int = 90,
-    seed: Int = 7
+    seed: Int = 7,
+    pauseWhenUnfocused: Boolean = true
 ) {
     if (!enabled) return
 
@@ -81,7 +82,7 @@ fun Starfield(
     }
 
     val seconds = remember { mutableFloatStateOf(0f) }
-    val focused = LocalWindowInfo.current.isWindowFocused
+    val focused = LocalWindowInfo.current.isWindowFocused || !pauseWhenUnfocused
 
     LaunchedEffect(focused) {
         if (!focused) return@LaunchedEffect

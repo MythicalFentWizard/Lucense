@@ -2,12 +2,15 @@ package com.exo.musicplayer.desktop.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
@@ -35,8 +39,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import com.exo.musicplayer.data.audio.SpectrumAnalyser
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,10 +71,12 @@ data class DesktopFxState(
     val pitchSemitones: Float = 0f,
     val reverbEnabled: Boolean = false,
     val reverbMix: Float = 0.35f,
-    val reverbDecay: Float = 0.82f
+    val reverbDecay: Float = 0.82f,
+    val eqEnabled: Boolean = false,
+    val eqGains: List<Float> = List(10) { 0f }
 ) {
     val isDefault: Boolean
-        get() = abs(speed - 1f) < 0.005f && abs(pitchSemitones) < 0.05f && !reverbEnabled
+        get() = abs(speed - 1f) < 0.005f && abs(pitchSemitones) < 0.05f && !reverbEnabled && !eqEnabled
 
     /**
      * Maps a shared preset onto this platform's reverb model.
@@ -73,7 +85,7 @@ data class DesktopFxState(
      * the Schroeder decay coefficient, whose useful range stops at 0.94 because
      * beyond that the comb filters ring rather than decay.
      */
-    fun applying(preset: EffectPreset) = DesktopFxState(
+    fun applying(preset: EffectPreset) = copy(
         speed = preset.speed,
         pitchSemitones = preset.pitchSemitones,
         reverbEnabled = preset.reverb,
@@ -108,13 +120,22 @@ fun SidePanel(
     positionMs: Long,
     onClose: () -> Unit
 ) {
-    Column(
+    Box(
         Modifier
             .width(if (kind == SidePanelKind.OUTPUT) 288.dp else 348.dp)
             .fillMaxHeight()
             .background(Palette.Sidebar)
-            .padding(horizontal = 18.dp, vertical = 16.dp)
     ) {
+    if (kind == SidePanelKind.LYRICS) {
+        Backdrop(
+            style = controller.backdrop,
+            color = Palette.Stars,
+            spectrum = controller.engine.spectrum,
+            modifier = Modifier.matchParentSize(),
+            count = 50
+        )
+    }
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = when (kind) {
@@ -126,6 +147,14 @@ fun SidePanel(
                 color = Palette.Text,
                 modifier = Modifier.weight(1f)
             )
+            if (kind == SidePanelKind.LYRICS) {
+                IconButton(onClick = { controller.lyricsDetached = true; onClose() }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.OpenInNew, "Open lyrics in their own window",
+                        Modifier.size(16.dp), tint = Palette.TextDim
+                    )
+                }
+            }
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.Close, "Close panel", Modifier.size(16.dp), tint = Palette.TextDim)
             }
@@ -159,6 +188,7 @@ fun SidePanel(
             SidePanelKind.LYRICS -> LyricsPanel(controller, track, positionMs)
         }
         }
+    }
     }
 }
 
@@ -276,6 +306,42 @@ private fun EffectsControls(
         )
     }
 
+    Spacer(Modifier.height(20.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Equalizer",
+            style = MaterialTheme.typography.titleMedium,
+            color = Palette.Text,
+            modifier = Modifier.weight(1f)
+        )
+        if (fx.eqEnabled) {
+            GhostButton("Flat") { onFx(fx.copy(eqGains = List(EQ_LABELS.size) { 0f })) }
+            Spacer(Modifier.width(8.dp))
+        }
+        Switch(
+            checked = fx.eqEnabled,
+            onCheckedChange = { onFx(fx.copy(eqEnabled = it)) },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Palette.Base,
+                checkedTrackColor = Palette.Accent,
+                uncheckedTrackColor = Palette.Hover
+            )
+        )
+    }
+    if (fx.eqEnabled) {
+        Spacer(Modifier.height(10.dp))
+        EqualizerBands(fx.eqGains) { band, db ->
+            onFx(fx.copy(eqGains = fx.eqGains.toMutableList().also { it[band] = db }))
+        }
+    } else {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Off. Ten bands from 31 Hz to 16 kHz, up to 12 dB either way.",
+            style = MaterialTheme.typography.labelSmall,
+            color = Palette.TextFaint
+        )
+    }
+
     Spacer(Modifier.height(24.dp))
 }
 
@@ -299,6 +365,8 @@ private fun Spectrum(spectrum: SpectrumAnalyser, playing: Boolean) {
     LaunchedEffect(spectrum) {
         val buffer = FloatArray(spectrum.bands())
         while (true) {
+            // A reactive background switches the analyser off when it goes away.
+            spectrum.enabled = true
             levels = spectrum.snapshot(buffer).copyOf()
             withFrameNanos { }
             kotlinx.coroutines.delay(60)
@@ -578,4 +646,60 @@ private fun intervalName(semitones: Float, speed: Float = 1f): String {
     )
     val name = names.getOrNull(abs(rounded)) ?: "$rounded semitones"
     return if (rounded > 0) "$name up" else "$name down"
+}
+
+private val EQ_LABELS = listOf("31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+
+/** Ten vertical faders. Click or drag anywhere on one; the middle line is 0 dB. */
+@Composable
+private fun EqualizerBands(gains: List<Float>, onChange: (Int, Float) -> Unit) {
+    val change by rememberUpdatedState(onChange)
+    val accent = Palette.Accent
+    val track = Palette.Line
+    val zero = Palette.TextFaint
+    Row(Modifier.fillMaxWidth().height(160.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        EQ_LABELS.forEachIndexed { band, label ->
+            val db = gains.getOrElse(band) { 0f }
+            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (abs(db) < 0.25f) "0" else "%+.0f".format(db),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (abs(db) < 0.25f) Palette.TextFaint else Palette.Accent
+                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .pointerInput(band) {
+                            detectTapGestures { change(band, dbAt(it.y, size.height)) }
+                        }
+                        .pointerInput(band) {
+                            detectVerticalDragGestures(
+                                onDragStart = { change(band, dbAt(it.y, size.height)) }
+                            ) { pointer, _ ->
+                                change(band, dbAt(pointer.position.y, size.height))
+                            }
+                        }
+                        .drawBehind {
+                            val x = size.width / 2f
+                            val width = 3.dp.toPx()
+                            val mid = size.height / 2f
+                            val y = mid - (db / 12f) * mid
+                            drawRoundRect(track, Offset(x - width / 2f, 0f), Size(width, size.height), CornerRadius(width))
+                            drawLine(zero, Offset(x - 6.dp.toPx(), mid), Offset(x + 6.dp.toPx(), mid), 1.dp.toPx())
+                            drawRect(accent, Offset(x - width / 2f, minOf(mid, y)), Size(width, abs(y - mid)))
+                            drawCircle(accent, 6.dp.toPx(), Offset(x, y))
+                        }
+                )
+                Text(label, style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
+            }
+        }
+    }
+}
+
+/** Half-decibel steps from -12 to +12 for a pointer at [y] on a fader [height] tall. */
+private fun dbAt(y: Float, height: Int): Float {
+    val fraction = 1f - (y / height).coerceIn(0f, 1f)
+    return ((fraction * 24f - 12f) * 2f).roundToInt() / 2f
 }

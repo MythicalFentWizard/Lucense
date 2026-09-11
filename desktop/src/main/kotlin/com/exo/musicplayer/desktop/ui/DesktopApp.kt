@@ -178,9 +178,10 @@ fun DesktopApp(
                         .fillMaxHeight()
                         .background(Palette.Content)
                 ) {
-                    Starfield(
-                        enabled = controller.starry,
-                        color = Palette.Accent,
+                    Backdrop(
+                        style = controller.backdrop,
+                        color = Palette.Stars,
+                        spectrum = controller.engine.spectrum,
                         modifier = Modifier.matchParentSize()
                     )
                     Column(Modifier.fillMaxSize()) {
@@ -337,11 +338,12 @@ private fun NavigationRail(
             .fillMaxHeight()
             .background(Palette.Sidebar)
     ) {
-        Starfield(
-            enabled = controller.starry,
-            color = Palette.Accent,
-            count = 40,
-            modifier = Modifier.matchParentSize()
+        Backdrop(
+            style = controller.backdrop,
+            color = Palette.Stars,
+            spectrum = controller.engine.spectrum,
+            modifier = Modifier.matchParentSize(),
+            count = 40
         )
         Column(Modifier.fillMaxSize().padding(vertical = 14.dp)) {
             Row(

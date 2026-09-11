@@ -87,6 +87,21 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_STARS, true)
         set(value) = prefs.putBoolean(KEY_STARS, value)
 
+    /** A BackdropStyle name; until one is chosen, whatever the old starry switch said. */
+    var backdrop: String
+        get() = prefs.get(KEY_BACKDROP, null) ?: if (starryBackground) "STARS" else "NONE"
+        set(value) = prefs.put(KEY_BACKDROP, value)
+
+    /** The Custom theme as ARGB hex, "primary,secondary,tertiary,button"; empty until edited. */
+    var customTheme: String
+        get() = prefs.get(KEY_CUSTOM_THEME, "")
+        set(value) = prefs.put(KEY_CUSTOM_THEME, value)
+
+    /** ARGB hex for the background effect, or empty to follow the theme. */
+    var backdropColor: String
+        get() = prefs.get(KEY_BACKDROP_COLOR, "")
+        set(value) = prefs.put(KEY_BACKDROP_COLOR, value)
+
     /** A ProxyMode name. System by default, which is how Resonate behaved before there was a choice. */
     var proxyMode: String
         get() = prefs.get(KEY_PROXY_MODE, "SYSTEM")
@@ -115,6 +130,9 @@ class DesktopSettings {
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"
         const val KEY_STARS = "starry_background"
+        const val KEY_BACKDROP = "backdrop_style"
+        const val KEY_CUSTOM_THEME = "custom_theme"
+        const val KEY_BACKDROP_COLOR = "backdrop_color"
         const val KEY_PROXY_MODE = "proxy_mode"
         const val KEY_PROXY_HOST = "proxy_host"
         const val KEY_PROXY_PORT = "proxy_port"
