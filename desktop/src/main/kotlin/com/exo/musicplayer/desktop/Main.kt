@@ -128,11 +128,11 @@ private fun AppHost(controller: DesktopController) {
         booting = false
     }
 
-    // Roll on to the next track when one runs out.
-    LaunchedEffect(status.playing, status.track) {
-        val finished = status.track != null && !status.playing &&
-            status.durationMs > 0 && status.positionMs >= status.durationMs - 1200
-        if (finished) controller.advance()
+    // Roll on to the next track when one runs out. The engine says when that
+    // happened; working it out from the position meant that pausing a track
+    // whose length was unknown counted as finishing it, and skipped ahead.
+    LaunchedEffect(status.ended, status.track) {
+        if (status.ended) controller.advance()
     }
 
     Box(Modifier.fillMaxSize()) {

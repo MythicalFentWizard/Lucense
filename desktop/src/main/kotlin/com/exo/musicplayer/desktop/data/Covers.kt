@@ -199,6 +199,7 @@ object TagWriter {
     fun change(change: TagChange): Result<Unit> = runCatching {
         val audio = AudioFileIO.read(change.file)
         val tag = audio.tagOrCreateAndSetDefault
+        change.title?.let { tag.setField(FieldKey.TITLE, it) }
         change.artist?.let { tag.setField(FieldKey.ARTIST, it) }
         change.album?.let { tag.setField(FieldKey.ALBUM, it) }
         change.albumArtist?.let { tag.setField(FieldKey.ALBUM_ARTIST, it) }

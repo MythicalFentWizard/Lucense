@@ -71,6 +71,9 @@ import com.exo.musicplayer.desktop.ui.ReactiveMode
 import com.exo.musicplayer.desktop.ui.SidePanelKind
 import com.exo.musicplayer.desktop.ui.ThemeColors
 import com.exo.musicplayer.util.AudioTypes
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -476,6 +479,46 @@ class DesktopController(parent: CoroutineScope) {
     /** The list playback walks through — whatever the user is currently looking at. */
     private var queue: List<DesktopTrack> = emptyList()
 
+    /** [queue] in the order it is played: the same list, or a shuffled one. */
+    private var order: List<DesktopTrack> = emptyList()
+
+    private val shuffleState = mutableStateOf(settings.shuffle)
+
+    var shuffle: Boolean
+        get() = shuffleState.value
+        set(value) {
+            shuffleState.value = value
+            settings.shuffle = value
+            // Shuffled around whatever is playing rather than from the top, so
+            // turning it on doesn't cut the current track off, and turning it
+            // off puts the rest of the list back in its own order.
+            order = orderFrom(engine.status.value.track, queue)
+        }
+
+    private val repeatState = mutableStateOf(RepeatMode.fromName(settings.repeat))
+
+    var repeat: RepeatMode
+        get() = repeatState.value
+        set(value) {
+            repeatState.value = value
+            settings.repeat = value.name
+        }
+
+    fun cycleRepeat() {
+        repeat = when (repeat) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+    }
+
+    /** [list] in playing order, with [first] at the front of a shuffle. */
+    internal fun orderFrom(first: DesktopTrack?, list: List<DesktopTrack>): List<DesktopTrack> {
+        if (!shuffle) return list
+        val rest = list.filter { it.file != first?.file }.shuffled()
+        return if (first != null && list.any { it.file == first.file }) listOf(first) + rest else rest
+    }
+
     /**
      * The play currently being timed.
      *
@@ -771,6 +814,12 @@ class DesktopController(parent: CoroutineScope) {
 
     fun play(track: DesktopTrack, from: List<DesktopTrack> = visibleTracks) {
         queue = from
+        order = orderFrom(track, from)
+        start(track)
+    }
+
+    /** Plays [track] without disturbing the order the queue is already in. */
+    private fun start(track: DesktopTrack) {
         closeListenEvent()
         engine.play(track)
         openListenEvent(track)
@@ -780,13 +829,23 @@ class DesktopController(parent: CoroutineScope) {
     fun togglePlay() = engine.togglePlay()
 
     fun next() {
-        val index = queue.indexOfFirst { it.file == engine.status.value.track?.file }
-        if (index >= 0 && index < queue.lastIndex) play(queue[index + 1], queue)
+        val list = order.ifEmpty { queue }
+        if (list.isEmpty()) return
+        val index = list.indexOfFirst { it.file == engine.status.value.track?.file }
+        when {
+            index >= 0 && index < list.lastIndex -> start(list[index + 1])
+            repeat == RepeatMode.ALL -> start(list.first())
+        }
     }
 
     fun previous() {
-        val index = queue.indexOfFirst { it.file == engine.status.value.track?.file }
-        if (index > 0) play(queue[index - 1], queue)
+        val list = order.ifEmpty { queue }
+        if (list.isEmpty()) return
+        val index = list.indexOfFirst { it.file == engine.status.value.track?.file }
+        when {
+            index > 0 -> start(list[index - 1])
+            index == 0 && repeat == RepeatMode.ALL -> start(list.last())
+        }
     }
 
     fun seekFraction(fraction: Float) {
@@ -797,6 +856,11 @@ class DesktopController(parent: CoroutineScope) {
     /** Called when a track finishes on its own. */
     fun advance() {
         closeListenEvent()
+        val current = engine.status.value.track
+        if (repeat == RepeatMode.ONE && current != null) {
+            start(current)
+            return
+        }
         next()
     }
 
@@ -1362,8 +1426,12 @@ class DesktopController(parent: CoroutineScope) {
         if (bulk.running) return
         val column = kind.markColumn
         bulkJob = scope.launch {
-            val already = if (redo) emptySet() else io { store.markedPaths(column) }
-            val queue = tracks.filter { redo || it.file.absolutePath !in already }
+            val already = if (redo || column == null) emptySet() else io { store.markedPaths(column) }
+            val queue = if (kind == BulkKind.REPAIR) {
+                io { tracks.filter { needsRepair(it) } }
+            } else {
+                tracks.filter { redo || it.file.absolutePath !in already }
+            }
             val skipped = tracks.size - queue.size
 
             bulk = BulkJob(
@@ -1398,6 +1466,7 @@ class DesktopController(parent: CoroutineScope) {
                                     BulkKind.TAGS -> bulkTags(track).asOutcome()
                                     BulkKind.LYRICS -> bulkLyrics(track).asOutcome()
                                     BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
+                                    BulkKind.REPAIR -> bulkRepair(track)
                                 }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
@@ -1409,7 +1478,7 @@ class DesktopController(parent: CoroutineScope) {
                                 BulkOutcome.ALREADY_HAD -> alreadyHad++
                                 BulkOutcome.NOTHING_FOUND -> failed++
                             }
-                            io { store.mark(track.file.absolutePath, column) }
+                            if (column != null) io { store.mark(track.file.absolutePath, column) }
                             done++
                             inFlight -= track.title
                             bulk = bulk.copy(
@@ -1441,6 +1510,84 @@ class DesktopController(parent: CoroutineScope) {
             // that rewrite tags need the library read again.
             if (kind != BulkKind.COVERS) rescan()
         }
+    }
+
+    /**
+     * Whether a file is one of the broken ones: no length, or an MP3 with no
+     * Xing header, or an MP4 whose index sits after the audio, or nothing but a
+     * "Title   Artist" filename to go on.
+     */
+    internal fun needsRepair(track: DesktopTrack): Boolean {
+        if (track.durationMs <= 0L) return true
+        if (lacksHeader(track.file)) return true
+        return track.artist.isNullOrBlank() && TelegramName.of(track.file.nameWithoutExtension) != null
+    }
+
+    internal fun lacksHeader(file: File): Boolean = runCatching {
+        val head = file.inputStream().use { stream -> ByteArray(16 * 1024).also { stream.read(it) } }
+        val text = String(head, Charsets.ISO_8859_1)
+        when (file.extension.lowercase()) {
+            // Without one of these an MP3 carries no statement of its length.
+            "mp3" -> !text.contains("Xing") && !text.contains("Info") && !text.contains("VBRI")
+            // The index has to come before the audio, or nothing can seek until
+            // the whole file has been read.
+            "m4a", "mp4", "m4b" -> {
+                val moov = text.indexOf("moov")
+                val mdat = text.indexOf("mdat")
+                moov < 0 || (mdat in 0 until moov)
+            }
+            else -> false
+        }
+    }.getOrDefault(false)
+
+    /**
+     * Rewrites the container around the audio, which is copied across
+     * untouched: an MP3 gains the Xing header that states its length, an MP4
+     * gets its index moved to the front. The original is replaced only once the
+     * rewrite has finished and is a sensible size.
+     */
+    internal fun rebuildContainer(file: File): Boolean = runCatching {
+        val ffmpeg = ToolPaths.ffmpeg
+        if (!ffmpeg.isFile) return false
+        val mp3 = file.extension.equals("mp3", ignoreCase = true)
+        val format = if (mp3) {
+            listOf("-write_xing", "1", "-id3v2_version", "3")
+        } else {
+            listOf("-movflags", "+faststart")
+        }
+        val rewritten = File(file.parentFile, file.nameWithoutExtension + ".resonate-fix." + file.extension)
+        val process = ProcessBuilder(
+            listOf(
+                ffmpeg.absolutePath, "-hide_banner", "-loglevel", "error", "-y",
+                "-i", file.absolutePath, "-map", "0:a:0", "-c", "copy"
+            ) + format + rewritten.absolutePath
+        ).redirectErrorStream(true).start()
+        process.inputStream.use { it.readBytes() }
+        val finished = process.waitFor(180, TimeUnit.SECONDS)
+        val ok = finished && process.exitValue() == 0 && rewritten.isFile &&
+            rewritten.length() > file.length() / 2
+        if (!ok) {
+            rewritten.delete()
+            return false
+        }
+        Files.move(rewritten.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        true
+    }.getOrDefault(false)
+
+    private suspend fun bulkRepair(track: DesktopTrack): BulkOutcome {
+        val file = track.file
+        var mended = false
+        if (track.durationMs <= 0L || io { lacksHeader(file) }) {
+            if (io { rebuildContainer(file) }) mended = true
+        }
+        val named = TelegramName.of(file.nameWithoutExtension)
+        if (named != null && track.artist.isNullOrBlank()) {
+            val wrote = io {
+                TagWriter.change(TagChange(file, artist = named.artist, title = named.title)).isSuccess
+            }
+            if (wrote) mended = true
+        }
+        return if (mended) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
     }
 
     private suspend fun bulkCover(track: DesktopTrack): BulkOutcome {
@@ -2598,11 +2745,39 @@ private const val SONGS_AT_ONCE = 5
  */
 private const val TAGS_GIVE_UP_MS = 10_000L
 
-enum class BulkKind(val label: String, val markColumn: String) {
+enum class BulkKind(val label: String, val markColumn: String?) {
     COVERS("Covers", "artCheckedAt"),
     TAGS("Names & tags", "identifiedAt"),
     LYRICS("Lyrics", "lyricsCheckedAt"),
-    IDENTIFY("Identify by sound", "fingerprintedAt")
+    IDENTIFY("Identify by sound", "fingerprintedAt"),
+
+    /** Marks nothing: it only ever visits files that are still broken. */
+    REPAIR("Mass fix Telegram songs", null)
+}
+
+/** What happens when a track, or the queue, runs out. */
+enum class RepeatMode(val label: String) {
+    OFF("Repeat off"),
+    ALL("Repeat all"),
+    ONE("Repeat one");
+
+    companion object {
+        fun fromName(name: String?): RepeatMode = entries.firstOrNull { it.name == name } ?: OFF
+    }
+}
+
+/** A "Title   Artist" filename, which is the shape Telegram's exports arrive in. */
+internal data class TelegramName(val title: String, val artist: String) {
+    companion object {
+        /** Two or more spaces: one space is part of a title, not a separator. */
+        private val SEPARATOR = Regex("""\s{2,}""")
+
+        fun of(name: String): TelegramName? {
+            val parts = name.split(SEPARATOR).map { it.trim() }.filter { it.isNotEmpty() }
+            if (parts.size < 2) return null
+            return TelegramName(parts.first(), parts.drop(1).joinToString(", "))
+        }
+    }
 }
 
 /** What to send a catalogue when looking a track up. */

@@ -97,6 +97,15 @@ class DesktopSettings {
         get() = prefs.get(KEY_REACTIVE_MODE, "BALL")
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
+    var shuffle: Boolean
+        get() = prefs.getBoolean(KEY_SHUFFLE, false)
+        set(value) = prefs.putBoolean(KEY_SHUFFLE, value)
+
+    /** A RepeatMode name. */
+    var repeat: String
+        get() = prefs.get(KEY_REPEAT, "OFF")
+        set(value) = prefs.put(KEY_REPEAT, value)
+
     /** The Custom theme as ARGB hex, "primary,secondary,tertiary,button"; empty until edited. */
     var customTheme: String
         get() = prefs.get(KEY_CUSTOM_THEME, "")
@@ -156,6 +165,8 @@ class DesktopSettings {
         const val KEY_STARS = "starry_background"
         const val KEY_BACKDROP = "backdrop_style"
         const val KEY_REACTIVE_MODE = "reactive_mode"
+        const val KEY_SHUFFLE = "shuffle"
+        const val KEY_REPEAT = "repeat"
         const val KEY_CUSTOM_THEME = "custom_theme"
         const val KEY_BACKDROP_COLOR = "backdrop_color"
         const val KEY_WALLPAPER = "wallpaper"

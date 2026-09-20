@@ -13,7 +13,9 @@ data class PlaybackStatus(
     val playing: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val error: String? = null
+    val error: String? = null,
+    /** Set once the file has been played to its end, and only then. */
+    val ended: Boolean = false
 ) {
     val progress: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -107,6 +109,9 @@ class PlaybackEngine {
 
     private fun run(track: DesktopTrack) {
         var decoder: Decoder? = null
+        // Whether the decoder ran out, as opposed to being stopped or failing:
+        // the difference between rolling on to the next track and not.
+        var reachedEnd = false
         try {
             decoder = Decoder.open(track.file)
             reopenLines()
@@ -145,7 +150,11 @@ class PlaybackEngine {
 
                 if (!playing) { Thread.sleep(40); continue }
 
-                val raw = decoder?.read(4096) ?: break
+                val raw = decoder?.read(4096)
+                if (raw == null) {
+                    reachedEnd = true
+                    break
+                }
 
                 val processed = effects.process(raw)
                 framesPlayed += raw.size / 2
@@ -166,7 +175,7 @@ class PlaybackEngine {
         } finally {
             runCatching { decoder?.close() }
             if (!stopRequested) {
-                _status.value = _status.value.copy(playing = false)
+                _status.value = _status.value.copy(playing = false, ended = reachedEnd)
             }
         }
     }
@@ -201,7 +210,10 @@ class PlaybackEngine {
         lastPublished = slot
         _status.value = _status.value.copy(
             positionMs = positionMs,
-            durationMs = if (duration > 0) duration else positionMs
+            // Unknown stays unknown. Reporting the position as the length made
+            // the seek bar scale against a moving target, so its middle landed
+            // near the start, and made every pause look like the end of a track.
+            durationMs = if (duration > 0) duration else 0L
         )
     }
 

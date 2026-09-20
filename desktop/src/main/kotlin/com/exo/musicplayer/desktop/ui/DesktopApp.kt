@@ -50,6 +50,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.drawWithContent
@@ -100,6 +103,7 @@ import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.desktop.data.CollectionKind
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.DownloadEntry
+import com.exo.musicplayer.desktop.data.RepeatMode
 import com.exo.musicplayer.desktop.data.SortMode
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.desktop.system.Explorer
@@ -1077,6 +1081,15 @@ private fun TransportBar(
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { controller.shuffle = !controller.shuffle }) {
+                        Icon(
+                            Icons.Default.Shuffle,
+                            if (controller.shuffle) "Shuffle on" else "Shuffle off",
+                            Modifier.size(17.dp),
+                            tint = if (controller.shuffle) Palette.Accent else Palette.TextFaint
+                        )
+                    }
+                    Spacer(Modifier.width(2.dp))
                     IconButton(onClick = { controller.previous() }) {
                         Icon(
                             Icons.Default.SkipPrevious, "Previous",
@@ -1104,6 +1117,19 @@ private fun TransportBar(
                         Icon(
                             Icons.Default.SkipNext, "Next",
                             Modifier.size(20.dp), tint = Palette.TextDim
+                        )
+                    }
+                    Spacer(Modifier.width(2.dp))
+                    IconButton(onClick = { controller.cycleRepeat() }) {
+                        Icon(
+                            if (controller.repeat == RepeatMode.ONE) {
+                                Icons.Default.RepeatOne
+                            } else {
+                                Icons.Default.Repeat
+                            },
+                            controller.repeat.label,
+                            Modifier.size(17.dp),
+                            tint = if (controller.repeat == RepeatMode.OFF) Palette.TextFaint else Palette.Accent
                         )
                     }
                 }

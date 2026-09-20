@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -172,6 +173,16 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
                     "Genius — keeping timed lyrics where they exist.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.LYRICS, redo) }
+
+            BulkOption(
+                kind = BulkKind.REPAIR,
+                icon = Icons.Default.Healing,
+                description = "Rebuilds files that came without a proper header — Telegram's " +
+                    "exports, mostly — so they show their length, seek properly and stop skipping " +
+                    "when paused. Fills in title and artist from \"Title   Artist\" filenames too. " +
+                    "The audio itself is copied across untouched.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.REPAIR, redo) }
 
             BulkOption(
                 kind = BulkKind.IDENTIFY,
