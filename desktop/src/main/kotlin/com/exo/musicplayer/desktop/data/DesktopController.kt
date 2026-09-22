@@ -59,6 +59,7 @@ import com.exo.musicplayer.desktop.audio.PlaybackEngine
 import com.exo.musicplayer.desktop.download.DownloadProgress
 import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
+import com.exo.musicplayer.desktop.library.FolderWatcher
 import com.exo.musicplayer.desktop.system.DuckKey
 import com.exo.musicplayer.desktop.system.Explorer
 import com.exo.musicplayer.desktop.system.GlobalHotkey
@@ -312,12 +313,14 @@ class DesktopController(parent: CoroutineScope) {
     fun addFolder(dir: File) {
         folders = (folders + dir.absolutePath).distinct()
         settings.folders = folders
+        watcher.watch(roots())
         rescan()
     }
 
     fun removeFolder(path: String) {
         folders = folders - path
         settings.folders = folders
+        watcher.watch(roots())
         rescan()
     }
 
@@ -339,6 +342,21 @@ class DesktopController(parent: CoroutineScope) {
             refreshAggregates()
         }
     }
+
+    /** Every folder the library reads from, the download folder included. */
+    private fun roots(): List<File> = (folders + settings.downloadDir)
+        .map(::File)
+        .filter { it.isDirectory }
+        .distinctBy { it.absoluteFile.normalize().path.lowercase() }
+
+    private val watcher = FolderWatcher {
+        // Arrives on the watcher's own thread, so it hops back before touching
+        // anything, and stays out of the way of a scan already under way.
+        scope.launch { if (!scanning) rescan() }
+    }
+
+    /** Whether the folders are being watched, for the Settings line that says so. */
+    val watchingFolders: Boolean get() = watcher.watching
 
     fun rescan() {
         // The download folder always counts, so anything downloaded is in the
@@ -2874,6 +2892,7 @@ class DesktopController(parent: CoroutineScope) {
         // scan even before any folder has been added by hand.
         applyMediaKeys()
         checkForUpdate(announce = true)
+        watcher.watch(roots())
         rescan()
         refreshPlaylists()
         refreshTools()
@@ -2882,6 +2901,7 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     fun release() {
+        watcher.stop()
         rememberPlace()
         mediaKeys.unbind()
         hotkey.unbind()
