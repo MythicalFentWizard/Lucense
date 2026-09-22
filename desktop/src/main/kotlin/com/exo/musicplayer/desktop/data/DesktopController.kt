@@ -279,13 +279,16 @@ class DesktopController(parent: CoroutineScope) {
     val visibleTracks: List<DesktopTrack> get() = visibleTracksState.value
 
     private val visibleTracksState = derivedStateOf {
-        val text = query.trim().lowercase(Locale.getDefault())
+        val search = SearchQuery.of(query)
         val filtered = tracks.filter { track ->
             (!favouritesOnly || track.file.absolutePath in favourites) &&
-                (text.isEmpty() ||
-                    track.title.lowercase().contains(text) ||
-                    track.displayArtist.lowercase().contains(text) ||
-                    track.displayAlbum.lowercase().contains(text))
+                (search.isEmpty || search.matches(
+                    title = track.title,
+                    artist = track.displayArtist,
+                    album = track.displayAlbum,
+                    favourite = track.file.absolutePath in favourites,
+                    plays = playCounts[track.file.absolutePath] ?: 0
+                ))
         }
         when (sort) {
             SortMode.ARTIST -> filtered.sortedWith(

@@ -655,7 +655,7 @@ private fun ContentHeader(
                 TextInput(
                     value = controller.query,
                     onValueChange = { controller.query = it },
-                    placeholder = "Search",
+                    placeholder = "Search · artist: album: fav:",
                     leading = Icons.Default.Search,
                     modifier = Modifier.width(240.dp)
                 )
