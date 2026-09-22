@@ -944,6 +944,7 @@ class DesktopController(parent: CoroutineScope) {
         val target = (status.positionMs + deltaMs).coerceAtLeast(0L)
         val end = status.durationMs
         engine.seekTo(if (end > 0L) target.coerceAtMost((end - 1000L).coerceAtLeast(0L)) else target)
+        tellDiscord()
     }
 
     // ---- Where playback left off ---------------------------------------------
@@ -1082,6 +1083,7 @@ class DesktopController(parent: CoroutineScope) {
     fun seekFraction(fraction: Float) {
         val duration = engine.status.value.durationMs
         if (duration > 0) engine.seekTo((duration * fraction.coerceIn(0f, 1f)).toLong())
+        tellDiscord()
     }
 
     /** Called when a track finishes on its own. */
@@ -2993,7 +2995,7 @@ class DesktopController(parent: CoroutineScope) {
 
     // ---- Discord --------------------------------------------------------------
 
-    private val presence = DiscordPresence()
+    private val presence = DiscordPresence { scope.launch { readDiscordState() } }
     private val discordState = mutableStateOf(settings.discord)
 
     var discord: Boolean
@@ -3008,7 +3010,17 @@ class DesktopController(parent: CoroutineScope) {
         private set
 
     /** Whether Discord has actually taken the handshake. */
-    val discordConnected: Boolean get() = presence.connected
+    var discordConnected by mutableStateOf(false)
+        private set
+
+    /** What Discord said about it, when it said anything. */
+    var discordNote by mutableStateOf<String?>(null)
+        private set
+
+    private fun readDiscordState() {
+        discordConnected = presence.connected
+        discordNote = presence.note
+    }
 
     fun changeDiscordId(id: String) {
         discordId = id.trim()
@@ -3019,6 +3031,7 @@ class DesktopController(parent: CoroutineScope) {
     private fun applyDiscord() {
         if (!discord || discordId.isBlank()) {
             presence.stop()
+            readDiscordState()
             return
         }
         presence.start(discordId)
@@ -3028,10 +3041,12 @@ class DesktopController(parent: CoroutineScope) {
     /** Called whenever what is playing changes. */
     private fun tellDiscord() {
         val status = engine.status.value
+        val startedAt = System.currentTimeMillis() - status.positionMs
         presence.show(
             title = status.track?.title,
             artist = status.track?.displayArtist,
-            startedAt = System.currentTimeMillis() - status.positionMs,
+            startedAt = startedAt,
+            endsAt = if (status.durationMs > 0L) startedAt + status.durationMs else 0L,
             playing = status.playing
         )
     }

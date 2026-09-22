@@ -411,11 +411,12 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             CheckRow(
                 label = "Show what you're playing on Discord",
                 checked = controller.discord,
-                note = if (controller.discordConnected) {
-                    "Connected. Your profile shows the song and artist while something is playing."
-                } else {
-                    "Needs the Discord desktop app running on this PC. Nothing leaves your machine."
-                }
+                note = controller.discordNote
+                    ?: if (controller.discordConnected) {
+                        "Connected. Your profile shows the song and artist while something is playing."
+                    } else {
+                        "Needs the Discord desktop app running on this PC. Nothing leaves your machine."
+                    }
             ) { controller.discord = it }
             if (controller.discord) {
                 Spacer(Modifier.height(8.dp))

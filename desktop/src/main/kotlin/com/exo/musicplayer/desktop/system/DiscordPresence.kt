@@ -15,29 +15,43 @@ import kotlin.concurrent.thread
  * protocol is a four byte opcode, a four byte length and then JSON: opcode 0
  * to say hello with the application's id, opcode 1 to set what is showing.
  *
+ * One thread owns the pipe, and every frame written is followed by reading the
+ * answer to it. That matters more than it looks. Windows serialises the two
+ * directions of a synchronous file handle, so a second thread sitting in a
+ * blocking read stops writes to the same handle dead - the handshake gets out,
+ * every song after it hangs in the write for ever, and nothing looks wrong from
+ * the outside. Reading each reply on the thread that wrote the frame avoids
+ * that, and has the happy side effect that Discord can tell us when it has
+ * refused something.
+ *
  * Everything here is best effort. Discord may not be running, may be a browser
- * tab, or may refuse the id; in each case this quietly does nothing rather than
+ * tab, or may refuse the id; in each case it says so through [note] rather than
  * getting in the way of playing music.
  */
-class DiscordPresence {
+class DiscordPresence(private val onState: () -> Unit = {}) {
 
     private class Showing(
         val title: String,
         val artist: String,
         val startedAt: Long,
+        val endsAt: Long,
         val playing: Boolean
     )
 
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
-    private var pipe: RandomAccessFile? = null
+    @Volatile private var pipe: RandomAccessFile? = null
 
     @Volatile private var wanted: Showing? = null
-    @Volatile private var sentAt = 0L
-    @Volatile private var lastSent: String? = null
+    private var sentAt = 0L
+    private var lastSent: String? = null
 
     /** True once Discord has accepted the handshake. */
     @Volatile var connected: Boolean = false
+        private set
+
+    /** Why it isn't showing, in words the settings panel can put on screen. */
+    @Volatile var note: String? = null
         private set
 
     fun start(applicationId: String) {
@@ -55,54 +69,57 @@ class DiscordPresence {
                 Thread.sleep(500)
             }
             clear()
-            runCatching { pipe?.close() }
-            pipe = null
-            connected = false
+            close()
         }
     }
 
     fun stop() {
         running.set(false)
-        worker?.let { runCatching { it.join(1_500) } }
+        val thread = worker
         worker = null
+        thread?.let { runCatching { it.join(1_500) } }
+        // If it never woke up it is parked waiting on a reply that is not
+        // coming; closing the handle is what frees it.
+        close()
+        report(false, null)
     }
 
     /** What should be on screen; the worker sends it when Discord will take it. */
-    fun show(title: String?, artist: String?, startedAt: Long, playing: Boolean) {
+    fun show(title: String?, artist: String?, startedAt: Long, endsAt: Long, playing: Boolean) {
         wanted = if (title.isNullOrBlank()) {
             null
         } else {
-            Showing(title, artist.orEmpty().ifBlank { "Unknown artist" }, startedAt, playing)
+            Showing(title, artist.orEmpty().ifBlank { "Unknown artist" }, startedAt, endsAt, playing)
         }
     }
 
     private fun open(applicationId: String) {
+        var sawPipe = false
         for (index in 0..9) {
-            val path = File("\\\\.\\pipe\\discord-ipc-" + index)
+            val path = File("""\\.\pipe\discord-ipc-""" + index)
             val opened = runCatching { RandomAccessFile(path, "rw") }.getOrNull() ?: continue
+            sawPipe = true
             val hello = "{" + quoted("v") + ":1," + quoted("client_id") + ":" + quoted(applicationId) + "}"
-            val ok = runCatching { write(opened, 0, hello) }.isSuccess
-            if (!ok) {
+            val reply = runCatching {
+                write(opened, 0, hello)
+                read(opened)
+            }.getOrNull()
+            if (reply == null) {
                 runCatching { opened.close() }
                 continue
             }
-            pipe = opened
-            connected = true
-            // Discord answers every frame. Nothing here needs the answers, but
-            // something has to read them or the pipe eventually fills up.
-            thread(name = "resonate-discord-drain", isDaemon = true) {
-                val header = ByteArray(8)
-                while (running.get() && pipe === opened) {
-                    val read = runCatching { opened.read(header) }.getOrNull() ?: break
-                    if (read < 8) break
-                    val length = ByteBuffer.wrap(header, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
-                    if (length <= 0 || length > 1 shl 20) break
-                    val body = ByteArray(length)
-                    if (runCatching { opened.readFully(body) }.isFailure) break
-                }
+            errorIn(reply)?.let {
+                runCatching { opened.close() }
+                report(false, "Discord turned down the application ID: $it")
+                return
             }
+            pipe = opened
+            lastSent = null
+            sentAt = 0L
+            report(true, null)
             return
         }
+        report(false, if (sawPipe) "Discord answered, but not in a way this understands." else null)
     }
 
     private fun push() {
@@ -112,31 +129,59 @@ class DiscordPresence {
         if (payload == lastSent) return
         // Discord throttles updates; sending faster than this just gets dropped.
         if (now - sentAt < MIN_GAP_MS) return
-        val frame = if (payload == null) clearFrame() else setFrame(payload)
         val handle = pipe ?: return
-        val sent = runCatching { write(handle, 1, frame) }.isSuccess
-        if (!sent) {
-            runCatching { handle.close() }
-            pipe = null
-            connected = false
-            lastSent = null
+        val frame = if (payload == null) clearFrame() else setFrame(payload)
+        val reply = runCatching {
+            write(handle, 1, frame)
+            read(handle)
+        }.getOrNull()
+        if (reply == null) {
+            close()
+            report(false, "Lost the connection to Discord; trying again shortly.")
             return
         }
         lastSent = payload
         sentAt = now
+        report(true, errorIn(reply)?.let { "Discord turned down the song: $it" })
     }
 
     private fun clear() {
         val handle = pipe ?: return
-        runCatching { write(handle, 1, clearFrame()) }
+        runCatching {
+            write(handle, 1, clearFrame())
+            read(handle)
+        }
     }
 
+    private fun close() {
+        val handle = pipe
+        pipe = null
+        lastSent = null
+        runCatching { handle?.close() }
+    }
+
+    private fun report(connected: Boolean, note: String?) {
+        if (this.connected == connected && this.note == note) return
+        this.connected = connected
+        this.note = note
+        runCatching { onState() }
+    }
+
+    /**
+     * Type 2 is "Listening to", which is what a music player ought to say. The
+     * two timestamps give the profile a progress bar rather than a stopwatch.
+     */
     private fun activity(showing: Showing): String = buildString {
-        append("{")
-        append(quoted("details")).append(":").append(quoted(showing.title.take(120))).append(",")
+        append("{").append(quoted("type")).append(":2,")
+        // Discord rejects a one character line, which a song really can have.
+        append(quoted("details")).append(":").append(quoted(showing.title.take(120).padEnd(2))).append(",")
         append(quoted("state")).append(":").append(quoted("by " + showing.artist.take(120))).append(",")
         append(quoted("timestamps")).append(":{").append(quoted("start")).append(":")
-        append(showing.startedAt / 1000).append("},")
+        append(showing.startedAt / 1000)
+        if (showing.endsAt > showing.startedAt) {
+            append(",").append(quoted("end")).append(":").append(showing.endsAt / 1000)
+        }
+        append("},")
         append(quoted("assets")).append(":{")
         append(quoted("large_image")).append(":").append(quoted(ASSET)).append(",")
         append(quoted("large_text")).append(":").append(quoted("Resonate"))
@@ -161,6 +206,26 @@ class DiscordPresence {
         frame.putInt(body.size)
         frame.put(body)
         handle.write(frame.array())
+    }
+
+    private fun read(handle: RandomAccessFile): String {
+        val header = ByteArray(8)
+        handle.readFully(header)
+        val length = ByteBuffer.wrap(header, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        require(length in 1..(1 shl 20)) { "a reply of $length bytes" }
+        val body = ByteArray(length)
+        handle.readFully(body)
+        return String(body, Charsets.UTF_8)
+    }
+
+    /** The message out of an error reply, or null if Discord was happy. */
+    private fun errorIn(reply: String): String? {
+        if (!reply.contains("\"evt\":\"ERROR\"")) return null
+        val key = "\"message\":\""
+        val at = reply.indexOf(key)
+        if (at < 0) return "no reason given"
+        val end = reply.indexOf('"', at + key.length)
+        return if (end < 0) "no reason given" else reply.substring(at + key.length, end)
     }
 
     /** A JSON string, with the few characters that would break one escaped. */
