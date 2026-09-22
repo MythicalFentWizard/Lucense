@@ -1193,6 +1193,12 @@ private fun TransportBar(
                 }
             }
             BarToggle(
+                icon = Icons.AutoMirrored.Filled.QueueMusic,
+                label = "Queue",
+                active = panel == SidePanelKind.QUEUE,
+                highlight = false
+            ) { controller.togglePanel(SidePanelKind.QUEUE) }
+            BarToggle(
                 icon = Icons.Default.Lyrics,
                 label = "Lyrics",
                 active = panel == SidePanelKind.LYRICS,

@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,13 +61,15 @@ import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.audio.EffectPreset
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.data.DesktopController
+import com.exo.musicplayer.desktop.data.RepeatMode
 import com.exo.musicplayer.desktop.library.DesktopTrack
+import com.exo.musicplayer.util.asDuration
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** Which side panel is showing, if any. */
-enum class SidePanelKind { EFFECTS, OUTPUT, LYRICS }
+enum class SidePanelKind { EFFECTS, OUTPUT, LYRICS, QUEUE }
 
 data class DesktopFxState(
     val speed: Float = 1f,
@@ -146,6 +151,7 @@ fun SidePanel(
                     SidePanelKind.EFFECTS -> "Effects"
                     SidePanelKind.OUTPUT -> "Output"
                     SidePanelKind.LYRICS -> "Lyrics"
+                    SidePanelKind.QUEUE -> "Up next"
                 },
                 style = MaterialTheme.typography.titleLarge,
                 color = Palette.Text,
@@ -170,7 +176,10 @@ fun SidePanel(
         // scrolling the header away takes the way out with it.
         Column(
             Modifier.then(
-                if (kind == SidePanelKind.LYRICS) {
+                // The lyrics and the queue scroll their own way; a list that
+                // scrolls inside a scrolling column is given infinite height,
+                // which is a crash rather than a layout.
+                if (kind == SidePanelKind.LYRICS || kind == SidePanelKind.QUEUE) {
                     Modifier
                 } else {
                     Modifier.verticalScroll(rememberScrollState())
@@ -178,6 +187,8 @@ fun SidePanel(
             )
         ) {
         when (kind) {
+            SidePanelKind.QUEUE -> QueueList(controller)
+
             SidePanelKind.EFFECTS -> EffectsControls(
                 fx = controller.fx,
                 spectrum = controller.engine.spectrum,
@@ -713,4 +724,78 @@ private fun EqualizerBands(gains: List<Float>, onChange: (Int, Float) -> Unit) {
 private fun dbAt(y: Float, height: Int): Float {
     val fraction = 1f - (y / height).coerceIn(0f, 1f)
     return ((fraction * 24f - 12f) * 2f).roundToInt() / 2f
+}
+
+
+/**
+ * What is coming next, in the order it will actually play - so with shuffle on
+ * it is the shuffled order, not the list on screen.
+ */
+@Composable
+private fun QueueList(controller: DesktopController) {
+    val status by controller.engine.status.collectAsState()
+    val coming = controller.upNext
+    when {
+        status.track == null -> Hint("Nothing is playing. Start a song and whatever follows it shows up here.")
+
+        coming.isEmpty() -> Hint(
+            if (controller.repeat == RepeatMode.ALL) {
+                "Last one in the queue — repeat will take it back to the top."
+            } else {
+                "Last one in the queue."
+            }
+        )
+
+        else -> {
+            Text(
+                "${coming.size} to go" + if (controller.shuffle) " · shuffled" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint
+            )
+            Spacer(Modifier.height(8.dp))
+            LazyColumn(Modifier.fillMaxSize()) {
+                itemsIndexed(coming) { index, track ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(7.dp))
+                            .clickable { controller.playFromQueue(track) }
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "${index + 1}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Palette.TextFaint,
+                            modifier = Modifier.width(22.dp)
+                        )
+                        Artwork(track, 30.dp, corner = 5.dp)
+                        Spacer(Modifier.width(9.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                track.title,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Palette.Text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                track.displayArtist,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Palette.TextDim,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            track.durationMs.asDuration(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Palette.TextFaint
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

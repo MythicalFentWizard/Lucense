@@ -481,10 +481,21 @@ class DesktopController(parent: CoroutineScope) {
         private set
 
     /** The list playback walks through — whatever the user is currently looking at. */
-    private var queue: List<DesktopTrack> = emptyList()
+    private var queue by mutableStateOf<List<DesktopTrack>>(emptyList())
 
     /** [queue] in the order it is played: the same list, or a shuffled one. */
-    private var order: List<DesktopTrack> = emptyList()
+    private var order by mutableStateOf<List<DesktopTrack>>(emptyList())
+
+    /** What follows whatever is playing, in the order it will play. */
+    val upNext: List<DesktopTrack>
+        get() {
+            val list = order.ifEmpty { queue }
+            val index = list.indexOfFirst { it.file == engine.status.value.track?.file }
+            return if (index < 0) emptyList() else list.drop(index + 1)
+        }
+
+    /** Jumps to something already in the queue, leaving the order alone. */
+    fun playFromQueue(track: DesktopTrack) = start(track)
 
     private val shuffleState = mutableStateOf(settings.shuffle)
 

@@ -318,6 +318,26 @@ enum class AccentChoice(
         Color(0xFF343B4D), Color(0xFF434A5C),
         Color(0xFFD9D7CF), Color(0xFFC0BEB5), Color(0xFF9AA1AB)
     ),
+    // The two light ones. The layering runs the other way - the page is the
+    // brightest surface and the chrome sits a shade behind it - and the text
+    // tones are the schemes' own dark ones.
+    LATTE(
+        "Latte", "Catppuccin Latte", Color(0xFF8839EF),
+        Color(0xFFDCE0E8), Color(0xFFE6E9EF), Color(0xFFEFF1F5), Color(0xFFE6E9EF),
+        Color(0xFFCCD0DA), Color(0xFFBCC0CC),
+        // A shade deeper than Latte's own text tone: the scheme's chrome shades
+        // sit darker than its page, and its published text does not clear 7:1
+        // on them.
+        Color(0xFF3C3F54), Color(0xFF5C5F77), Color(0xFF7C7F93)
+    ),
+    DAYLIGHT(
+        "Daylight", "Solarized Light", Color(0xFF1C6FA5),
+        Color(0xFFEEE8D5), Color(0xFFF3EDDC), Color(0xFFFDF6E3), Color(0xFFEEE8D5),
+        Color(0xFFE0D9C0), Color(0xFFCFC8AF),
+        // base02 for the text rather than Solarized's own base00, which is a
+        // deliberately soft grey and does not clear the contrast target.
+        Color(0xFF073642), Color(0xFF3F5B63), Color(0xFF6C7D7D)
+    ),
     CUSTOM(
         "Custom", "Yours", Color(0xFFCBA6F7),
         Color(0xFF11111B), Color(0xFF181825), Color(0xFF1E1E2E), Color(0xFF313244),
