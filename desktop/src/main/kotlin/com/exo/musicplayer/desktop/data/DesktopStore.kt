@@ -448,6 +448,17 @@ class DesktopStore(databaseFile: File) {
         }
     }
 
+    /** The songs played most recently, newest first and each one only once. */
+    fun recentPlays(limit: Int): List<String> = buildList {
+        connection.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT path, MAX(startedAt) AS last FROM play_events " +
+                    "WHERE listenedMs >= $QUALIFYING_MS GROUP BY path " +
+                    "ORDER BY last DESC LIMIT $limit"
+            ).use { rs -> while (rs.next()) add(rs.getString(1)) }
+        }
+    }
+
     /** Drops every trace of files that no longer exist, after a delete. */
     fun forgetPaths(paths: Collection<String>) {
         if (paths.isEmpty()) return

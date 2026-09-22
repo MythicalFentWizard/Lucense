@@ -629,3 +629,47 @@ fun EditTracksDialog(controller: DesktopController, tracks: List<DesktopTrack>, 
         }
     }
 }
+
+/** What the keys do, since nothing on screen says so. */
+@Composable
+fun ShortcutsDialog(onDismiss: () -> Unit) {
+    ScrimDialog(
+        title = "Keyboard shortcuts",
+        subtitle = "Live whenever the window has focus and you are not typing in a box",
+        onDismiss = onDismiss
+    ) {
+        listOf(
+            "Space" to "Play or pause",
+            "\u2190  \u2192" to "Back or forward five seconds",
+            "Ctrl + \u2190  \u2192" to "Previous or next song",
+            "\u2191  \u2193" to "Volume up or down",
+            "J" to "Jump the list to the song playing",
+            "S" to "Shuffle on or off",
+            "R" to "Repeat: all, then one, then off",
+            "Ctrl + A" to "Select every song in view",
+            "Esc" to "Clear the selection",
+            "Ctrl + click" to "Add one song to the selection",
+            "Shift + click" to "Select everything between",
+            "/" to "This list"
+        ).forEach { (keys, what) ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    keys,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.width(132.dp)
+                )
+                Text(what, style = MaterialTheme.typography.bodySmall, color = Palette.Text)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.weight(1f))
+            GhostButton("Close", onClick = onDismiss)
+        }
+    }
+}

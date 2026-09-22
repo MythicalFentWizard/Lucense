@@ -33,6 +33,22 @@ interface MetadataProvider {
  */
 class MetadataProviderChain(private val providers: List<MetadataProvider>) {
 
+    /** What the services are called, in the order they are normally asked. */
+    val labels: List<String> get() = providers.map { it.label }
+
+    /**
+     * The same services with [label] moved to the front.
+     *
+     * The others are still asked - a preference is about which answer wins a
+     * tie, not about throwing away the only cover anyone has. An unknown or
+     * blank label leaves the order alone.
+     */
+    fun preferring(label: String?): MetadataProviderChain {
+        if (label.isNullOrBlank()) return this
+        val first = providers.firstOrNull { it.label.equals(label, ignoreCase = true) } ?: return this
+        return MetadataProviderChain(listOf(first) + providers.filter { it !== first })
+    }
+
     /**
      * Queries every provider at once and merges the results.
      *

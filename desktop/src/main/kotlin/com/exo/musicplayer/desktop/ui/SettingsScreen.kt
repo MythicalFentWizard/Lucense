@@ -3,6 +3,7 @@ package com.exo.musicplayer.desktop.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.data.AppDirs
 import com.exo.musicplayer.desktop.data.DesktopController
+import com.exo.musicplayer.desktop.data.LyricsTerm
 import com.exo.musicplayer.desktop.data.ProxyMode
 import com.exo.musicplayer.desktop.system.DuckKey
 import kotlin.math.roundToInt
@@ -407,6 +410,51 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 note = "Plays every measured song at the same loudness. Run Level volumes in " +
                     "Bulk tools to measure them."
             ) { controller.levelling = it }
+            Spacer(Modifier.height(18.dp))
+            Text("Lyrics search", style = MaterialTheme.typography.titleSmall, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(controller.lyricsTerm.note)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = LyricsTerm.entries,
+                    selected = controller.lyricsTerm,
+                    label = { it.label },
+                    onSelect = { controller.lyricsTerm = it }
+                )
+            }
+            if (controller.lyricsTerm == LyricsTerm.CUSTOM) {
+                Spacer(Modifier.height(8.dp))
+                TextInput(
+                    value = controller.lyricsTermCustom,
+                    onValueChange = { controller.lyricsTermCustom = it },
+                    placeholder = "{artist} {title}",
+                    modifier = Modifier.width(320.dp)
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text("Cover art service", style = MaterialTheme.typography.titleSmall, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                "Asked first when covers are fetched in bulk. The others are still " +
+                    "tried when it has nothing, so a preference never costs you a cover."
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = listOf("") + controller.coverProviders,
+                    selected = controller.coverProvider,
+                    label = { if (it.isBlank()) "Automatic" else it },
+                    onSelect = { controller.coverProvider = it }
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            GhostButton("Keyboard shortcuts", icon = Icons.Default.Keyboard) {
+                controller.showShortcuts = true
+            }
+
             Spacer(Modifier.height(16.dp))
             CheckRow(
                 label = "Show what you're playing on Discord",

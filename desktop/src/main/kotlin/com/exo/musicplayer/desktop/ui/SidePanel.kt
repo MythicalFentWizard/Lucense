@@ -26,6 +26,8 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +51,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import com.exo.musicplayer.data.audio.SpectrumAnalyser
 import androidx.compose.ui.Alignment
@@ -747,11 +750,15 @@ private fun QueueList(controller: DesktopController) {
         )
 
         else -> {
-            Text(
-                "${coming.size} to go" + if (controller.shuffle) " · shuffled" else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = Palette.TextFaint
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${coming.size} to go" + if (controller.shuffle) " · shuffled" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.TextFaint,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Clear") { controller.clearQueue() }
+            }
             Spacer(Modifier.height(8.dp))
             LazyColumn(Modifier.fillMaxSize()) {
                 itemsIndexed(coming) { index, track ->
@@ -793,9 +800,40 @@ private fun QueueList(controller: DesktopController) {
                             style = MaterialTheme.typography.labelSmall,
                             color = Palette.TextFaint
                         )
+                        QueueButton(Icons.Default.KeyboardArrowUp, "Move up", index > 0) {
+                            controller.moveInQueue(index, index - 1)
+                        }
+                        QueueButton(
+                            Icons.Default.KeyboardArrowDown,
+                            "Move down",
+                            index < coming.lastIndex
+                        ) {
+                            controller.moveInQueue(index, index + 1)
+                        }
+                        QueueButton(Icons.Default.Close, "Take out of the queue", true) {
+                            controller.removeFromQueue(track)
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/** The small up, down and remove controls on a song that is waiting. */
+@Composable
+private fun QueueButton(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(24.dp)) {
+        Icon(
+            icon,
+            description,
+            tint = if (enabled) Palette.TextDim else Palette.Line,
+            modifier = Modifier.size(15.dp)
+        )
     }
 }

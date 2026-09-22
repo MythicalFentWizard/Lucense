@@ -59,7 +59,7 @@ import javax.swing.filechooser.FileNameExtensionFilter
  * snap layouts and window animations are what "native" actually looks like, and
  * a hand-drawn title bar loses all three.
  */
-fun main() = application {
+fun main(args: Array<String>) = application {
     // The folder picker is Swing; matching the OS look keeps it from standing out.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
 
@@ -136,6 +136,22 @@ fun main() = application {
                         controller.volume = (controller.volume - 0.05f).coerceAtLeast(0f)
                         true
                     }
+                    Key.J -> {
+                        controller.jumpToNowPlaying()
+                        true
+                    }
+                    Key.S -> {
+                        controller.shuffle = !controller.shuffle
+                        true
+                    }
+                    Key.R -> {
+                        controller.cycleRepeat()
+                        true
+                    }
+                    Key.Slash -> {
+                        controller.showShortcuts = !controller.showShortcuts
+                        true
+                    }
                     else -> false
                 }
             }
@@ -143,6 +159,8 @@ fun main() = application {
     ) {
         // The smallest window the scaled layout still fits in.
         LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
+        // Anything Windows handed over: a double-clicked file, or "Open with".
+        LaunchedEffect(Unit) { controller.openExternal(args.toList()) }
         ResonateDesktopTheme {
             ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
                 AppHost(controller)

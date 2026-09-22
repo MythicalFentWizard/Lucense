@@ -51,7 +51,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
@@ -306,6 +309,10 @@ fun DesktopApp(
 
         if (controller.editMany.isNotEmpty()) {
             EditTracksDialog(controller, controller.editMany) { controller.dismissEditMany() }
+        }
+
+        if (controller.showShortcuts) {
+            ShortcutsDialog { controller.showShortcuts = false }
         }
 
         when (dialog) {
@@ -665,6 +672,12 @@ private fun ContentHeader(
                     modifier = Modifier.width(240.dp)
                 )
                 Spacer(Modifier.width(10.dp))
+                IconButton(onClick = { controller.jumpToNowPlaying() }) {
+                    Icon(
+                        Icons.Default.MyLocation, "Jump to the song playing",
+                        tint = Palette.TextDim, modifier = Modifier.size(18.dp)
+                    )
+                }
                 IconButton(onClick = { controller.rescan() }) {
                     Icon(
                         Icons.Default.Refresh, "Rescan",
@@ -681,6 +694,40 @@ private fun ContentHeader(
                 GhostButton("Music folder", icon = Icons.Default.FolderOpen) {
                     controller.openMusicFolder()
                 }
+            }
+        }
+
+        // Kept after a pause rather than on every keystroke, so the list
+        // holds searches and not the first three letters of one.
+        LaunchedEffect(controller.query) {
+            val text = controller.query
+            if (text.isNotBlank()) {
+                delay(1_200)
+                controller.rememberSearch(text)
+            }
+        }
+
+        if (destination == Destination.LIBRARY && !showSettings &&
+            controller.query.isBlank() && controller.searchHistory.isNotEmpty()
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 10.dp)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Searched before",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.TextFaint
+                )
+                Spacer(Modifier.width(8.dp))
+                controller.searchHistory.forEach { past ->
+                    GhostButton(past) { controller.query = past }
+                    Spacer(Modifier.width(6.dp))
+                }
+                GhostButton("Forget") { controller.forgetSearches() }
             }
         }
 
@@ -797,6 +844,22 @@ private fun LibraryPane(
         if (controller.hasSelection) {
             SelectionBar(controller, tracks)
         }
+        controller.queueNote?.let { note ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Show queue") { controller.togglePanel(SidePanelKind.QUEUE) }
+                Spacer(Modifier.width(6.dp))
+                GhostButton("Dismiss") { controller.dismissQueueNote() }
+            }
+        }
         controller.selectionNote?.let { note ->
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
@@ -826,6 +889,13 @@ private fun LibraryPane(
         Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
 
         val listState = rememberLazyListState()
+        // Asked for by the J key or the crosshair button. A library of four
+        // thousand songs puts the one playing a very long way off screen.
+        LaunchedEffect(controller.jumpRequest) {
+            if (controller.jumpRequest == 0) return@LaunchedEffect
+            val at = tracks.indexOfFirst { it.file == nowPlaying?.file }
+            if (at >= 0) listState.animateScrollToItem(at)
+        }
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             itemsIndexed(tracks, key = { _, t -> t.file.absolutePath }) { index, track ->
                 TrackRow(
@@ -856,6 +926,8 @@ private val SortMode.trailingColumn: String
     get() = when (this) {
         SortMode.PLAYS -> "Plays"
         SortMode.LISTEN_TIME -> "Listened"
+        SortMode.RATING -> "Rating"
+        SortMode.YEAR -> "Year"
         else -> "Time"
     }
 
@@ -894,6 +966,8 @@ private fun TrackRow(
         items = {
             listOf(
                 ContextMenuItem("Play") { onPlay() },
+                ContextMenuItem("Play next") { controller.playNext(listOf(track)) },
+                ContextMenuItem("Add to queue") { controller.addToQueue(listOf(track)) },
                 ContextMenuItem(
                     if (isFavourite) "Remove from favourites" else "Add to favourites"
                 ) { controller.toggleFavourite(track) },
@@ -1026,6 +1100,8 @@ private fun trailingValue(controller: DesktopController, track: DesktopTrack): S
     when (controller.sort) {
         SortMode.PLAYS -> controller.playCountOf(track).toString()
         SortMode.LISTEN_TIME -> controller.listenedMsOf(track).asDuration()
+        SortMode.RATING -> "★".repeat(controller.ratingOf(track)).ifEmpty { "—" }
+        SortMode.YEAR -> track.year?.toString() ?: "—"
         else -> track.durationMs.asDuration()
     }
 
@@ -1437,6 +1513,14 @@ private fun SelectionBar(controller: DesktopController, visible: List<DesktopTra
 
         GhostButton("Play", icon = Icons.Default.PlayArrow) {
             controller.playSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Play next", icon = Icons.Default.QueuePlayNext) {
+            controller.playNext(controller.selectedTracks(visible))
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Queue", icon = Icons.Default.PlaylistAdd) {
+            controller.addToQueue(controller.selectedTracks(visible))
         }
         Spacer(Modifier.width(6.dp))
         GhostButton("Favourite", icon = Icons.Default.FavoriteBorder) {

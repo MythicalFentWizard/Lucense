@@ -101,7 +101,9 @@ enum class SortMode(val label: String) {
     DURATION("Duration"),
     PLAYS("Times played"),
     LISTEN_TIME("Time listened"),
-    ADDED("Date added")
+    ADDED("Date added"),
+    RATING("Rating"),
+    YEAR("Year")
 }
 
 /** Progress of one of the bulk tools. */
@@ -307,10 +309,46 @@ class DesktopController(parent: CoroutineScope) {
                 listenTimes[it.file.absolutePath] ?: 0L
             }
             SortMode.ADDED -> filtered.sortedByDescending { it.file.lastModified() }
+            SortMode.RATING -> filtered.sortedWith(
+                compareByDescending<DesktopTrack> { ratings[it.file.absolutePath] ?: 0 }
+                    .thenBy { it.title.lowercase() }
+            )
+            SortMode.YEAR -> filtered.sortedWith(
+                compareByDescending<DesktopTrack> { it.year ?: 0 }
+                    .thenBy { it.displayArtist.lowercase() }
+                    .thenBy { it.title.lowercase() }
+            )
         }
     }
 
     fun playCountOf(track: DesktopTrack): Int = playCounts[track.file.absolutePath] ?: 0
+
+    /** The library by path, for the lists that are kept as paths. */
+    private val byPath: Map<String, DesktopTrack>
+        get() = tracks.associateBy { it.file.absolutePath }
+
+    /** Paths of what was played most recently, newest first. */
+    var recentlyPlayed by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    /** The last few things typed into the search box, newest first. */
+    var searchHistory by mutableStateOf(settings.searchHistory)
+        private set
+
+    /** Keeps a search worth offering again; the trivial ones are not. */
+    fun rememberSearch(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.length < 2) return
+        val kept = (listOf(trimmed) + searchHistory.filter { !it.equals(trimmed, ignoreCase = true) })
+            .take(8)
+        searchHistory = kept
+        settings.searchHistory = kept
+    }
+
+    fun forgetSearches() {
+        searchHistory = emptyList()
+        settings.searchHistory = emptyList()
+    }
 
     // ---- Stars ----------------------------------------------------------------
 
@@ -560,6 +598,94 @@ class DesktopController(parent: CoroutineScope) {
     /** Jumps to something already in the queue, leaving the order alone. */
     fun playFromQueue(track: DesktopTrack) = start(track)
 
+    /** Said once after a queue change, so the button press visibly did something. */
+    var queueNote by mutableStateOf<String?>(null)
+        private set
+
+    fun dismissQueueNote() { queueNote = null }
+
+    /**
+     * Rewrites the play order around whatever is playing.
+     *
+     * The list handed to [change] is the order as it stands; the index is where
+     * the current song sits in it, or -1 when nothing is playing. Turning
+     * shuffle on or off rebuilds the order from the library, so anything queued
+     * by hand is lost at that point - which is what the shuffle button means.
+     */
+    private fun editOrder(change: (MutableList<DesktopTrack>, Int) -> Unit) {
+        val list = order.ifEmpty { queue }.toMutableList()
+        val playing = engine.status.value.track
+        change(list, list.indexOfFirst { it.file == playing?.file })
+        order = list
+        if (queue.isEmpty()) queue = list
+    }
+
+    /** Drops copies of [items] that are already waiting, so nothing queues twice. */
+    private fun MutableList<DesktopTrack>.removeQueued(items: List<DesktopTrack>, keep: Int) {
+        val paths = items.map { it.file.absolutePath }.toSet()
+        for (index in indices.reversed()) {
+            if (index != keep && this[index].file.absolutePath in paths) removeAt(index)
+        }
+    }
+
+    /** Puts these straight after whatever is playing. */
+    fun playNext(items: List<DesktopTrack>) {
+        if (items.isEmpty()) return
+        editOrder { list, index ->
+            val current = list.getOrNull(index)
+            list.removeQueued(items, index)
+            val at = list.indexOfFirst { it.file == current?.file }
+            list.addAll(if (at < 0) 0 else at + 1, items)
+        }
+        queueNote = if (items.size == 1) {
+            "\"${items.first().title}\" plays next."
+        } else {
+            "${items.size} songs play next."
+        }
+    }
+
+    /** Puts these at the end of what is already waiting. */
+    fun addToQueue(items: List<DesktopTrack>) {
+        if (items.isEmpty()) return
+        editOrder { list, index ->
+            list.removeQueued(items, index)
+            list.addAll(items)
+        }
+        queueNote = if (items.size == 1) {
+            "\"${items.first().title}\" added to the queue."
+        } else {
+            "${items.size} songs added to the queue."
+        }
+    }
+
+    /** Takes one out of the queue without touching what is playing. */
+    fun removeFromQueue(track: DesktopTrack) {
+        editOrder { list, index ->
+            val at = list.indexOfFirst { it.file == track.file }
+            if (at >= 0 && at != index) list.removeAt(at)
+        }
+    }
+
+    /** Moves the [from]th song waiting to the [to]th place, both counted from 0. */
+    fun moveInQueue(from: Int, to: Int) {
+        editOrder { list, index ->
+            val first = index + 1
+            val source = first + from
+            val target = (first + to).coerceIn(first, list.lastIndex)
+            if (source !in first..list.lastIndex || source == target) return@editOrder
+            list.add(target, list.removeAt(source))
+        }
+    }
+
+    fun clearQueue() {
+        editOrder { list, index ->
+            val current = list.getOrNull(index) ?: return@editOrder
+            list.clear()
+            list.add(current)
+        }
+        queueNote = "Queue cleared."
+    }
+
     /**
      * One of the made-for-you lists. Capped where the list would otherwise be
      * most of the library, which is a queue nobody asked for.
@@ -571,6 +697,7 @@ class DesktopController(parent: CoroutineScope) {
             .sortedByDescending { playCounts[it.file.absolutePath] ?: 0 }
             .take(60)
         AutoPlaylist.NEVER_PLAYED -> tracks.filter { (playCounts[it.file.absolutePath] ?: 0) == 0 }
+        AutoPlaylist.HISTORY -> recentlyPlayed.mapNotNull { path -> byPath[path] }
         AutoPlaylist.FAVOURITES -> tracks.filter { it.file.absolutePath in favourites }
         AutoPlaylist.TOP_RATED -> tracks
             .filter { ratingOf(it) >= 4 }
@@ -929,6 +1056,23 @@ class DesktopController(parent: CoroutineScope) {
         tellDiscord()
     }
 
+    /**
+     * Plays files handed over by Windows, from a double-click or "Open with".
+     *
+     * They are played where they lie rather than imported: someone opening one
+     * song from a folder did not ask for that folder to join the library.
+     */
+    fun openExternal(paths: List<String>) {
+        val files = paths.map(::File).filter { it.isFile && it.extension.lowercase() in PLAYABLE }
+        if (files.isEmpty()) return
+        scope.launch {
+            // readFiles does its own dispatch to IO, so this is already off
+            // the caller's thread.
+            val loaded = FolderLibrary.readFiles(files)
+            loaded.firstOrNull()?.let { play(it, loaded) }
+        }
+    }
+
     fun togglePlay() {
         engine.togglePlay()
         tellDiscord()
@@ -1071,6 +1215,14 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     fun previous() {
+        // Well into a song, the first press goes back to its start rather than
+        // to the one before it - which is what every other player does, and
+        // what people reach for when they missed the opening.
+        if (engine.status.value.track != null && engine.status.value.positionMs > RESTART_WINDOW_MS) {
+            engine.seekTo(0)
+            tellDiscord()
+            return
+        }
         val list = order.ifEmpty { queue }
         if (list.isEmpty()) return
         val index = list.indexOfFirst { it.file == engine.status.value.track?.file }
@@ -1078,6 +1230,17 @@ class DesktopController(parent: CoroutineScope) {
             index > 0 -> start(list[index - 1])
             index == 0 && repeat == RepeatMode.ALL -> start(list.last())
         }
+    }
+
+    /**
+     * Bumped to ask the library list to scroll to the current song. A counter
+     * rather than a flag, so asking twice in a row still moves the list.
+     */
+    var jumpRequest by mutableStateOf(0)
+        private set
+
+    fun jumpToNowPlaying() {
+        if (engine.status.value.track != null) jumpRequest++
     }
 
     fun seekFraction(fraction: Float) {
@@ -1115,7 +1278,10 @@ class DesktopController(parent: CoroutineScope) {
             val id = open.rowId.await()
             if (id < 0) return@launch
             io { store.updateListened(id, listened) }
-            if (listened >= DesktopStore.QUALIFYING_MS) refreshAggregates()
+            if (listened >= DesktopStore.QUALIFYING_MS) {
+                refreshAggregates()
+                refreshRecentlyPlayed()
+            }
         }
     }
 
@@ -1147,13 +1313,49 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
+    private val lyricsTermState = mutableStateOf(LyricsTerm.of(settings.lyricsTerm))
+
+    /** Which words go to the lyrics services when a song is looked up. */
+    var lyricsTerm: LyricsTerm
+        get() = lyricsTermState.value
+        set(value) {
+            lyricsTermState.value = value
+            settings.lyricsTerm = value.name
+        }
+
+    private val lyricsCustomState = mutableStateOf(settings.lyricsTermCustom)
+
+    /** The pattern used when [lyricsTerm] is CUSTOM: {artist}, {title}, {album}, {file}. */
+    var lyricsTermCustom: String
+        get() = lyricsCustomState.value
+        set(value) {
+            lyricsCustomState.value = value
+            settings.lyricsTermCustom = value
+        }
+
+    /**
+     * The title and artist to search for, which are not always the tagged ones.
+     *
+     * Downloaded files carry titles like "Song (Official Music Video) [HD]",
+     * and no lyrics service has heard of that song. Which cleanup helps depends
+     * on where a library came from, so it is a setting rather than a guess.
+     */
+    internal fun lyricsQueryFor(track: DesktopTrack): Pair<String, String?> = when (lyricsTerm) {
+        LyricsTerm.ARTIST_TITLE -> track.title to track.artist
+        LyricsTerm.CLEAN_TITLE -> LyricsTerm.clean(track.title) to track.artist
+        LyricsTerm.TITLE_ONLY -> LyricsTerm.clean(track.title) to null
+        LyricsTerm.FILENAME -> LyricsTerm.clean(track.file.nameWithoutExtension) to null
+        LyricsTerm.CUSTOM -> LyricsTerm.fill(lyricsTermCustom, track) to null
+    }
+
     fun fetchLyrics(track: DesktopTrack) {
         lyricsLoading = true
         lyricsNote = null
         scope.launch {
+            val (title, artist) = lyricsQueryFor(track)
             val (result, provider) = lyricsChain.fetch(
-                track.title,
-                track.artist,
+                title,
+                artist,
                 track.album,
                 track.durationMs
             )
@@ -1837,9 +2039,22 @@ class DesktopController(parent: CoroutineScope) {
         return if (mended) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
     }
 
+    /** The cover services, in the order they are normally asked. */
+    val coverProviders: List<String> get() = libraryLookup.labels
+
+    private val coverProviderState = mutableStateOf(settings.coverProvider)
+
+    /** Which of them to ask first; blank asks them all in their usual order. */
+    var coverProvider: String
+        get() = coverProviderState.value
+        set(value) {
+            coverProviderState.value = value
+            settings.coverProvider = value
+        }
+
     private suspend fun bulkCover(track: DesktopTrack): BulkOutcome {
         if (io { Covers.hasLocalArt(track) }) return BulkOutcome.ALREADY_HAD
-        val stored = libraryLookup.findArtwork(track.searchQuery) { url ->
+        val stored = libraryLookup.preferring(coverProvider).findArtwork(track.searchQuery) { url ->
             Covers.fetchAndStore(track, url, writeTags).takeIf { it }
         }
         return if (stored != null) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
@@ -1855,8 +2070,9 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     private suspend fun bulkLyrics(track: DesktopTrack): Boolean {
+        val (title, artist) = lyricsQueryFor(track)
         val (result, provider) = lyricsChain.fetch(
-            track.title, track.artist, track.album, track.durationMs
+            title, artist, track.album, track.durationMs
         )
         if (result !is LyricsFetch.Found) return false
         io {
@@ -2125,6 +2341,10 @@ class DesktopController(parent: CoroutineScope) {
         private set
     var statsByWeather by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
+
+    private fun refreshRecentlyPlayed() {
+        scope.launch { recentlyPlayed = io { store.recentPlays(80) } }
+    }
 
     fun refreshStats() {
         scope.launch {
@@ -3051,6 +3271,9 @@ class DesktopController(parent: CoroutineScope) {
         )
     }
 
+    /** Whether the list of keyboard shortcuts is on screen. */
+    var showShortcuts by mutableStateOf(false)
+
     // ---- Backups --------------------------------------------------------------
 
     var backupNote by mutableStateOf<String?>(null)
@@ -3098,6 +3321,7 @@ class DesktopController(parent: CoroutineScope) {
         // scan even before any folder has been added by hand.
         applyMediaKeys()
         applyDiscord()
+        refreshRecentlyPlayed()
         checkForUpdate(announce = true)
         refreshBackups()
         watcher.watch(roots())
@@ -3141,6 +3365,65 @@ private const val SONGS_AT_ONCE = 5
  */
 private const val TAGS_GIVE_UP_MS = 10_000L
 
+/** How far into a song the previous button restarts it rather than going back. */
+private const val RESTART_WINDOW_MS = 4_000L
+
+/** What Resonate will open when Windows hands it a file. */
+private val PLAYABLE = setOf(
+    "mp3", "m4a", "mp4", "m4b", "flac", "wav", "ogg", "oga", "opus", "aac", "wma", "aiff", "aif"
+)
+
+/**
+ * Which words go to the lyrics services when a song is looked up.
+ *
+ * A file downloaded from YouTube is called "Song (Official Music Video) [4K]",
+ * and no lyrics service has heard of that song. Which tidy-up helps depends
+ * entirely on where a library came from, so this is a setting rather than a
+ * guess made on everyone's behalf.
+ */
+enum class LyricsTerm(val label: String, val note: String) {
+    ARTIST_TITLE("Artist and title", "The tags exactly as they are. Right for a tidy library."),
+    CLEAN_TITLE(
+        "Tidied title",
+        "Artist and title, with \"(Official Video)\", \"[HD]\", \"feat. ...\" and the like removed."
+    ),
+    TITLE_ONLY("Title only", "For files whose artist tag is wrong, or missing."),
+    FILENAME("File name", "For files with no useful tags at all."),
+    CUSTOM("Custom", "Your own pattern from {artist}, {title}, {album} and {file}.");
+
+    companion object {
+        fun of(name: String): LyricsTerm = entries.firstOrNull { it.name == name } ?: ARTIST_TITLE
+
+        private val NOISE = Regex(
+            """\s*[(\[][^)\]]*\b(official|video|audio|lyrics?|hd|hq|4k|mv|remaster(ed)?|""" +
+                """visuali[sz]er|explicit|full song|with lyrics)\b[^)\]]*[)\]]""",
+            RegexOption.IGNORE_CASE
+        )
+        private val FEATURING = Regex(
+            """\s*[(\[]?\s*\b(feat|ft|featuring)\b\.?\s[^)\]]*[)\]]?""",
+            RegexOption.IGNORE_CASE
+        )
+        private val SPACES = Regex("""\s+""")
+
+        /** Strips the decoration a downloaded file carries in its title. */
+        fun clean(text: String): String {
+            val stripped = text.replace(NOISE, "").replace(FEATURING, "")
+            val tidy = stripped.replace(SPACES, " ").trim().trim('-', '_', ' ')
+            // Never hand back nothing: a title that was all decoration is
+            // still a better search than an empty string.
+            return tidy.ifBlank { text.trim() }
+        }
+
+        fun fill(pattern: String, track: DesktopTrack): String = pattern
+            .replace("{artist}", track.artist.orEmpty())
+            .replace("{title}", track.title)
+            .replace("{album}", track.album.orEmpty())
+            .replace("{file}", track.file.nameWithoutExtension)
+            .replace(SPACES, " ")
+            .trim()
+    }
+}
+
 enum class BulkKind(val label: String, val markColumn: String?) {
     COVERS("Covers", "artCheckedAt"),
     TAGS("Names & tags", "identifiedAt"),
@@ -3157,6 +3440,7 @@ enum class BulkKind(val label: String, val markColumn: String?) {
 /** Lists worked out from the library and what has been played, rather than kept. */
 enum class AutoPlaylist(val label: String, val note: String) {
     RECENT("Recently added", "The newest files in the library."),
+    HISTORY("Recently played", "What you actually listened to, most recent first."),
     MOST_PLAYED("Most played", "What you keep coming back to."),
     NEVER_PLAYED("Never played", "In the library, never started."),
     TOP_RATED("Top rated", "Four stars and up, best first."),

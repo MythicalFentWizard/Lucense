@@ -98,6 +98,25 @@ class DesktopSettings {
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
     /** The Discord application this shows up as; blank turns it off. */
+    /** How the lyrics search term is put together; see LyricsTerm. */
+    var lyricsTerm: String
+        get() = prefs.get(KEY_LYRICS_TERM, "ARTIST_TITLE")
+        set(value) = prefs.put(KEY_LYRICS_TERM, value)
+
+    var lyricsTermCustom: String
+        get() = prefs.get(KEY_LYRICS_CUSTOM, "{artist} {title}")
+        set(value) = prefs.put(KEY_LYRICS_CUSTOM, value)
+
+    /** The cover service to ask first; blank means try them all in order. */
+    var coverProvider: String
+        get() = prefs.get(KEY_COVER_PROVIDER, "")
+        set(value) = prefs.put(KEY_COVER_PROVIDER, value)
+
+    /** The last few library searches, newest first. */
+    var searchHistory: List<String>
+        get() = prefs.get(KEY_SEARCH_HISTORY, "").split('|').filter { it.isNotBlank() }
+        set(value) = prefs.put(KEY_SEARCH_HISTORY, value.take(8).joinToString("|"))
+
     var discordId: String
         get() = prefs.get(KEY_DISCORD_ID, DEFAULT_DISCORD_ID)
         set(value) = prefs.put(KEY_DISCORD_ID, value.trim())
@@ -199,6 +218,10 @@ class DesktopSettings {
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
         const val KEY_LEVELLING = "levelling"
+        const val KEY_LYRICS_TERM = "lyrics_term"
+        const val KEY_LYRICS_CUSTOM = "lyrics_term_custom"
+        const val KEY_COVER_PROVIDER = "cover_provider"
+        const val KEY_SEARCH_HISTORY = "search_history"
         const val KEY_DISCORD = "discord"
         const val KEY_DISCORD_ID = "discord_id"
 
