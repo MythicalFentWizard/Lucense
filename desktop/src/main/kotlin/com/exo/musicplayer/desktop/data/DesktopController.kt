@@ -60,6 +60,7 @@ import com.exo.musicplayer.desktop.download.DownloadProgress
 import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
 import com.exo.musicplayer.desktop.library.FolderWatcher
+import com.exo.musicplayer.desktop.system.DiscordPresence
 import com.exo.musicplayer.desktop.system.DuckKey
 import com.exo.musicplayer.desktop.system.Explorer
 import com.exo.musicplayer.desktop.system.GlobalHotkey
@@ -925,10 +926,12 @@ class DesktopController(parent: CoroutineScope) {
         engine.play(track)
         openListenEvent(track)
         loadLyricsFor(track)
+        tellDiscord()
     }
 
     fun togglePlay() {
         engine.togglePlay()
+        tellDiscord()
         // Saved on the way to paused, so closing the app from there comes back
         // to the same spot.
         if (!engine.status.value.playing) rememberPlace()
@@ -2988,6 +2991,51 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
+    // ---- Discord --------------------------------------------------------------
+
+    private val presence = DiscordPresence()
+    private val discordState = mutableStateOf(settings.discord)
+
+    var discord: Boolean
+        get() = discordState.value
+        set(value) {
+            discordState.value = value
+            settings.discord = value
+            applyDiscord()
+        }
+
+    var discordId by mutableStateOf(settings.discordId)
+        private set
+
+    /** Whether Discord has actually taken the handshake. */
+    val discordConnected: Boolean get() = presence.connected
+
+    fun changeDiscordId(id: String) {
+        discordId = id.trim()
+        settings.discordId = discordId
+        applyDiscord()
+    }
+
+    private fun applyDiscord() {
+        if (!discord || discordId.isBlank()) {
+            presence.stop()
+            return
+        }
+        presence.start(discordId)
+        tellDiscord()
+    }
+
+    /** Called whenever what is playing changes. */
+    private fun tellDiscord() {
+        val status = engine.status.value
+        presence.show(
+            title = status.track?.title,
+            artist = status.track?.displayArtist,
+            startedAt = System.currentTimeMillis() - status.positionMs,
+            playing = status.playing
+        )
+    }
+
     // ---- Backups --------------------------------------------------------------
 
     var backupNote by mutableStateOf<String?>(null)
@@ -3034,6 +3082,7 @@ class DesktopController(parent: CoroutineScope) {
         // The music folder is always part of the library, so there is something to
         // scan even before any folder has been added by hand.
         applyMediaKeys()
+        applyDiscord()
         checkForUpdate(announce = true)
         refreshBackups()
         watcher.watch(roots())
@@ -3045,6 +3094,7 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     fun release() {
+        presence.stop()
         watcher.stop()
         rememberPlace()
         mediaKeys.unbind()

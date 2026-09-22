@@ -407,6 +407,33 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 note = "Plays every measured song at the same loudness. Run Level volumes in " +
                     "Bulk tools to measure them."
             ) { controller.levelling = it }
+            Spacer(Modifier.height(16.dp))
+            CheckRow(
+                label = "Show what you're playing on Discord",
+                checked = controller.discord,
+                note = if (controller.discordConnected) {
+                    "Connected. Your profile shows the song and artist while something is playing."
+                } else {
+                    "Needs the Discord desktop app running on this PC. Nothing leaves your machine."
+                }
+            ) { controller.discord = it }
+            if (controller.discord) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Application ID",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim,
+                        modifier = Modifier.width(110.dp)
+                    )
+                    TextInput(
+                        value = controller.discordId,
+                        onValueChange = { controller.changeDiscordId(it) },
+                        placeholder = "From discord.com/developers",
+                        modifier = Modifier.width(260.dp)
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             CheckRow(
                 label = "Media keys",

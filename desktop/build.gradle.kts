@@ -97,6 +97,12 @@ compose.desktop {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "Resonate"
 
+            windows {
+                // Shown by the installer, the Start menu, the taskbar and the
+                // shortcut. jpackage wants a real .ico; a PNG is silently ignored.
+                iconFile.set(project.layout.projectDirectory.file("icons/resonate.ico"))
+            }
+
             // yt-dlp, ffmpeg and spotdl ship inside the app image rather than
             // being fetched on first use. They are the bulk of the installer,
             // but a music downloader that cannot download until you have found

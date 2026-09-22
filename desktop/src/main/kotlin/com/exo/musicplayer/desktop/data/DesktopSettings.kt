@@ -97,6 +97,15 @@ class DesktopSettings {
         get() = prefs.get(KEY_REACTIVE_MODE, "BALL")
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
+    /** The Discord application this shows up as; blank turns it off. */
+    var discordId: String
+        get() = prefs.get(KEY_DISCORD_ID, DEFAULT_DISCORD_ID)
+        set(value) = prefs.put(KEY_DISCORD_ID, value.trim())
+
+    var discord: Boolean
+        get() = prefs.getBoolean(KEY_DISCORD, true)
+        set(value) = prefs.putBoolean(KEY_DISCORD, value)
+
     var levelling: Boolean
         get() = prefs.getBoolean(KEY_LEVELLING, true)
         set(value) = prefs.putBoolean(KEY_LEVELLING, value)
@@ -190,6 +199,11 @@ class DesktopSettings {
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
         const val KEY_LEVELLING = "levelling"
+        const val KEY_DISCORD = "discord"
+        const val KEY_DISCORD_ID = "discord_id"
+
+        /** Resonate's own Discord application. */
+        const val DEFAULT_DISCORD_ID = "1552040009253523578"
         const val KEY_LAST_TRACK = "last_track"
         const val KEY_LAST_POSITION = "last_position"
         const val KEY_REPEAT = "repeat"

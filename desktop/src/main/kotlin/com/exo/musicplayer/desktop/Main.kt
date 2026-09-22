@@ -33,6 +33,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
@@ -72,7 +73,7 @@ fun main() = application {
     if (java.awt.SystemTray.isSupported()) {
         val playing by controller.engine.status.collectAsState()
         Tray(
-            icon = rememberVectorPainter(Icons.Default.PlayArrow),
+            icon = painterResource("icon.png"),
             tooltip = playing.track?.let { "${it.title} — Resonate" } ?: "Resonate",
             menu = {
                 Item(if (playing.playing) "Pause" else "Play") { controller.togglePlay() }
@@ -87,6 +88,7 @@ fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "Resonate",
+        icon = painterResource("icon.png"),
         state = rememberWindowState(width = 1280.dp, height = 820.dp),
         // Window level, not view level: Ctrl+A has to work whether or not the
         // track table happens to hold focus, and a text field that owns the
