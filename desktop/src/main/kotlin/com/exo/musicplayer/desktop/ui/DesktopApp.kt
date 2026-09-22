@@ -1100,7 +1100,7 @@ private fun TransportBar(
                             Icons.Default.Shuffle,
                             if (controller.shuffle) "Shuffle on" else "Shuffle off",
                             Modifier.size(17.dp),
-                            tint = if (controller.shuffle) Palette.Accent else Palette.TextFaint
+                            tint = if (controller.shuffle) Palette.Accent else Palette.TextDim
                         )
                     }
                     Spacer(Modifier.width(2.dp))
@@ -1143,7 +1143,7 @@ private fun TransportBar(
                             },
                             controller.repeat.label,
                             Modifier.size(17.dp),
-                            tint = if (controller.repeat == RepeatMode.OFF) Palette.TextFaint else Palette.Accent
+                            tint = if (controller.repeat == RepeatMode.OFF) Palette.TextDim else Palette.Accent
                         )
                     }
                 }
