@@ -358,6 +358,25 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 }
                 GhostButton("Contact") { openLink("https://t.me/Eth4wn") }
             }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Updates", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+                    Hint(controller.updateNote ?: "Looked up when Resonate starts.")
+                }
+                controller.update?.takeIf { controller.updateReady }?.let { release ->
+                    AccentButton("Get ${release.version}") { openLink(release.url) }
+                    Spacer(Modifier.width(8.dp))
+                }
+                GhostButton("Check now", enabled = !controller.updateChecking) { controller.checkForUpdate() }
+            }
+            Spacer(Modifier.height(12.dp))
+            CheckRow(
+                label = "Media keys",
+                checked = controller.mediaKeysEnabled,
+                note = "Play, pause, next and previous on the keyboard, from anywhere. " +
+                    "While this is on, other players won't see those keys."
+            ) { controller.mediaKeysEnabled = it }
             Spacer(Modifier.height(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

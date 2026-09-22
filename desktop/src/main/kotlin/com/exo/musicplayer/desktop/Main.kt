@@ -85,6 +85,37 @@ fun main() = application {
                 }
                 else -> false
             }
+        },
+        // Not a preview handler: a search box that has focus gets the space bar
+        // and the arrow keys first, and these only see what it didn't want.
+        onKeyEvent = { event ->
+            if (event.type != KeyEventType.KeyDown) {
+                false
+            } else {
+                when (event.key) {
+                    Key.Spacebar -> {
+                        controller.togglePlay()
+                        true
+                    }
+                    Key.DirectionRight -> {
+                        if (event.isCtrlPressed) controller.next() else controller.seekBy(5_000)
+                        true
+                    }
+                    Key.DirectionLeft -> {
+                        if (event.isCtrlPressed) controller.previous() else controller.seekBy(-5_000)
+                        true
+                    }
+                    Key.DirectionUp -> {
+                        controller.volume = (controller.volume + 0.05f).coerceAtMost(1f)
+                        true
+                    }
+                    Key.DirectionDown -> {
+                        controller.volume = (controller.volume - 0.05f).coerceAtLeast(0f)
+                        true
+                    }
+                    else -> false
+                }
+            }
         }
     ) {
         // The smallest window the scaled layout still fits in.

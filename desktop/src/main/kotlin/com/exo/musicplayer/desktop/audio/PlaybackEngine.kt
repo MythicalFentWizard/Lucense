@@ -58,6 +58,9 @@ class PlaybackEngine {
     @Volatile private var seekToMs: Long? = null
     @Volatile private var outputsDirty = false
     @Volatile private var framesPlayed = 0L
+
+    /** Where a prepared track will start from when play is pressed. */
+    @Volatile private var pendingStartMs = 0L
     private var lastPublished = -1L
 
     /** Devices to play through. The first is primary; the rest are mirrors. */
@@ -69,26 +72,55 @@ class PlaybackEngine {
         outputsDirty = true
     }
 
-    fun play(track: DesktopTrack) {
+    fun play(track: DesktopTrack, startMs: Long = 0L) {
         stop()
         stopRequested = false
         playing = true
-        framesPlayed = 0
+        val from = startMs.coerceAtLeast(0L)
+        framesPlayed = from * AudioDevices.FORMAT.sampleRate.toInt() / 1000
+        pendingStartMs = 0L
         lastPublished = -1
         effects.reset()
         spectrum.reset()
         beat.reset()
-        _status.value = PlaybackStatus(track = track, playing = true, durationMs = track.durationMs)
+        _status.value = PlaybackStatus(
+            track = track,
+            playing = true,
+            positionMs = from,
+            durationMs = track.durationMs
+        )
 
         // Above normal priority: a playback thread that loses its time slice to
         // the UI thread is an audible gap, and it does very little per wake-up.
         worker = thread(name = "resonate-playback", isDaemon = true, priority = Thread.MAX_PRIORITY) {
-            run(track)
+            run(track, framesPlayed)
         }
     }
 
+    /**
+     * Shows [track] paused at [positionMs] without opening it, which is how the
+     * app comes back to what was playing when it was last closed. Pressing play
+     * carries on from there.
+     */
+    fun prepare(track: DesktopTrack, positionMs: Long) {
+        stop()
+        pendingStartMs = positionMs.coerceAtLeast(0L)
+        _status.value = PlaybackStatus(
+            track = track,
+            playing = false,
+            positionMs = pendingStartMs,
+            durationMs = track.durationMs
+        )
+    }
+
     fun togglePlay() {
-        if (_status.value.track == null) return
+        val track = _status.value.track ?: return
+        // Nothing is open yet - the track is only being shown, as it is after a
+        // restart - so this press starts it where it left off.
+        if (worker?.isAlive != true) {
+            play(track, pendingStartMs)
+            return
+        }
         playing = !playing
         _status.value = _status.value.copy(playing = playing)
     }
@@ -107,13 +139,13 @@ class PlaybackEngine {
 
     fun setVolume(value: Float) { effects.volume = value.coerceIn(0f, 1f) }
 
-    private fun run(track: DesktopTrack) {
+    private fun run(track: DesktopTrack, startFrame: Long) {
         var decoder: Decoder? = null
         // Whether the decoder ran out, as opposed to being stopped or failing:
         // the difference between rolling on to the next track and not.
         var reachedEnd = false
         try {
-            decoder = Decoder.open(track.file)
+            decoder = Decoder.open(track.file, startFrame)
             reopenLines()
             if (lines.isEmpty()) {
                 _status.value = _status.value.copy(

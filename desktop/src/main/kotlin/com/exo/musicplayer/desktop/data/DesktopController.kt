@@ -42,6 +42,7 @@ import com.exo.musicplayer.data.weather.OpenMeteo
 import com.exo.musicplayer.data.weather.WeatherAffinity
 import com.exo.musicplayer.data.weather.WeatherCondition
 import com.exo.musicplayer.data.weather.WeatherSnapshot
+import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.audio.AudioDevices
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.audio.MediaAudio
@@ -63,6 +64,7 @@ import com.exo.musicplayer.desktop.system.Explorer
 import com.exo.musicplayer.desktop.system.GlobalHotkey
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.desktop.library.FolderLibrary
+import com.exo.musicplayer.desktop.system.MediaKeys
 import com.exo.musicplayer.desktop.ui.AccentChoice
 import com.exo.musicplayer.desktop.ui.BackdropStyle
 import com.exo.musicplayer.desktop.ui.DesktopFxState
@@ -83,6 +85,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -359,6 +362,7 @@ class DesktopController(parent: CoroutineScope) {
             tracks = found
             scanning = false
             refreshAggregates()
+            restorePlace()
         }
     }
 
@@ -826,7 +830,134 @@ class DesktopController(parent: CoroutineScope) {
         loadLyricsFor(track)
     }
 
-    fun togglePlay() = engine.togglePlay()
+    fun togglePlay() {
+        engine.togglePlay()
+        // Saved on the way to paused, so closing the app from there comes back
+        // to the same spot.
+        if (!engine.status.value.playing) rememberPlace()
+    }
+
+    /** Nudges playback by [deltaMs], for the arrow keys. */
+    fun seekBy(deltaMs: Long) {
+        val status = engine.status.value
+        if (status.track == null) return
+        val target = (status.positionMs + deltaMs).coerceAtLeast(0L)
+        val end = status.durationMs
+        engine.seekTo(if (end > 0L) target.coerceAtMost((end - 1000L).coerceAtLeast(0L)) else target)
+    }
+
+    // ---- Where playback left off ---------------------------------------------
+
+    private var restored = false
+
+    private fun rememberPlace() {
+        val status = engine.status.value
+        val track = status.track ?: return
+        settings.lastTrack = track.file.absolutePath
+        settings.lastPosition = status.positionMs
+    }
+
+    /**
+     * Comes back to whatever was playing when the app was last closed, paused
+     * where it stopped. Only once, and only if that file is still in the
+     * library, so a rescan later on doesn't drag the queue backwards.
+     */
+    private fun restorePlace() {
+        if (restored) return
+        restored = true
+        val path = settings.lastTrack.takeIf { it.isNotBlank() } ?: return
+        val track = tracks.firstOrNull { it.file.absolutePath == path } ?: return
+        engine.prepare(track, settings.lastPosition)
+        loadLyricsFor(track)
+    }
+
+    // ---- Sleep timer ----------------------------------------------------------
+
+    private var sleepJob: Job? = null
+
+    /** When the music stops, as a wall clock; null when no timer is set. */
+    var sleepEndsAt by mutableStateOf<Long?>(null)
+        private set
+
+    /** Minutes left on the timer, rounded up, or null when there isn't one. */
+    val sleepMinutesLeft: Int?
+        get() = sleepEndsAt?.let { ((it - System.currentTimeMillis()) / 60_000L + 1).toInt().coerceAtLeast(0) }
+
+    fun setSleepTimer(minutes: Int?) {
+        sleepJob?.cancel()
+        sleepJob = null
+        if (minutes == null) {
+            sleepEndsAt = null
+            return
+        }
+        val until = System.currentTimeMillis() + minutes * 60_000L
+        sleepEndsAt = until
+        sleepJob = scope.launch {
+            while (System.currentTimeMillis() < until) delay(1_000)
+            if (engine.status.value.playing) engine.togglePlay()
+            rememberPlace()
+            sleepEndsAt = null
+            sleepJob = null
+            dropNote = "Sleep timer: paused."
+        }
+    }
+
+    // ---- Media keys -----------------------------------------------------------
+
+    private val mediaKeys = MediaKeys()
+    private val mediaKeysState = mutableStateOf(settings.mediaKeys)
+
+    var mediaKeysEnabled: Boolean
+        get() = mediaKeysState.value
+        set(value) {
+            mediaKeysState.value = value
+            settings.mediaKeys = value
+            applyMediaKeys()
+        }
+
+    private fun applyMediaKeys() {
+        if (!mediaKeysEnabled) {
+            mediaKeys.unbind()
+            return
+        }
+        // The callbacks arrive on the media-key thread, so each of them hops
+        // back to the UI thread before touching anything.
+        mediaKeys.bind(
+            onPlayPause = { scope.launch { togglePlay() } },
+            onNext = { scope.launch { next() } },
+            onPrevious = { scope.launch { previous() } },
+            onStop = { scope.launch { engine.stop() } }
+        )
+    }
+
+    // ---- Updates --------------------------------------------------------------
+
+    var update by mutableStateOf<Updates.Release?>(null)
+        private set
+    var updateNote by mutableStateOf<String?>(null)
+        private set
+    var updateChecking by mutableStateOf(false)
+        private set
+
+    /** Whether what was found is actually newer than what is running. */
+    val updateReady: Boolean
+        get() = update?.let { Updates.isNewer(it.version, AppVersion.name) } == true
+
+    fun checkForUpdate(announce: Boolean = false) {
+        if (updateChecking) return
+        updateChecking = true
+        scope.launch {
+            val newest = io { Updates.newest() }
+            updateChecking = false
+            update = newest
+            updateNote = when {
+                newest == null -> "Could not reach GitHub."
+                Updates.isNewer(newest.version, AppVersion.name) -> "Version ${newest.version} is out."
+                else -> "Up to date."
+            }
+            if (announce && updateReady) dropNote = "Resonate ${newest?.version} is out — see Settings."
+        }
+    }
 
     fun next() {
         val list = order.ifEmpty { queue }
@@ -2709,6 +2840,8 @@ class DesktopController(parent: CoroutineScope) {
         applyDuckBinding()
         // The music folder is always part of the library, so there is something to
         // scan even before any folder has been added by hand.
+        applyMediaKeys()
+        checkForUpdate(announce = true)
         rescan()
         refreshPlaylists()
         refreshTools()
@@ -2717,6 +2850,8 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     fun release() {
+        rememberPlace()
+        mediaKeys.unbind()
         hotkey.unbind()
         closeListenEvent()
         engine.release()

@@ -97,6 +97,19 @@ class DesktopSettings {
         get() = prefs.get(KEY_REACTIVE_MODE, "BALL")
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
+    var mediaKeys: Boolean
+        get() = prefs.getBoolean(KEY_MEDIA_KEYS, true)
+        set(value) = prefs.putBoolean(KEY_MEDIA_KEYS, value)
+
+    /** What was playing when Resonate was last closed, and how far into it. */
+    var lastTrack: String
+        get() = prefs.get(KEY_LAST_TRACK, "")
+        set(value) = prefs.put(KEY_LAST_TRACK, value)
+
+    var lastPosition: Long
+        get() = prefs.getLong(KEY_LAST_POSITION, 0L)
+        set(value) = prefs.putLong(KEY_LAST_POSITION, value)
+
     var shuffle: Boolean
         get() = prefs.getBoolean(KEY_SHUFFLE, false)
         set(value) = prefs.putBoolean(KEY_SHUFFLE, value)
@@ -166,6 +179,9 @@ class DesktopSettings {
         const val KEY_BACKDROP = "backdrop_style"
         const val KEY_REACTIVE_MODE = "reactive_mode"
         const val KEY_SHUFFLE = "shuffle"
+        const val KEY_MEDIA_KEYS = "media_keys"
+        const val KEY_LAST_TRACK = "last_track"
+        const val KEY_LAST_POSITION = "last_position"
         const val KEY_REPEAT = "repeat"
         const val KEY_CUSTOM_THEME = "custom_theme"
         const val KEY_BACKDROP_COLOR = "backdrop_color"

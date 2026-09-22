@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Check
@@ -54,6 +55,8 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
@@ -1162,6 +1165,33 @@ private fun TransportBar(
 
             Spacer(Modifier.weight(1f))
 
+            var sleepMenu by remember { mutableStateOf(false) }
+            Box {
+                BarToggle(
+                    icon = Icons.Default.Bedtime,
+                    label = controller.sleepMinutesLeft?.let { "$it min" } ?: "Sleep",
+                    active = controller.sleepEndsAt != null,
+                    highlight = false
+                ) { sleepMenu = true }
+                DropdownMenu(expanded = sleepMenu, onDismissRequest = { sleepMenu = false }) {
+                    listOf(15, 30, 45, 60, 90).forEach { minutes ->
+                        DropdownMenuItem(
+                            text = { Text("$minutes minutes", color = Palette.Text) },
+                            onClick = {
+                                controller.setSleepTimer(minutes)
+                                sleepMenu = false
+                            }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Off", color = Palette.TextDim) },
+                        onClick = {
+                            controller.setSleepTimer(null)
+                            sleepMenu = false
+                        }
+                    )
+                }
+            }
             BarToggle(
                 icon = Icons.Default.Lyrics,
                 label = "Lyrics",
