@@ -3,6 +3,7 @@ package com.exo.musicplayer.desktop.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -50,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.playlist.ImportResult
+import com.exo.musicplayer.desktop.data.AutoPlaylist
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.StoredPlaylist
 import com.exo.musicplayer.desktop.library.DesktopTrack
@@ -73,6 +76,21 @@ fun PlaylistsScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+        SectionTitle("Made for you")
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AutoPlaylist.entries.forEach { kind ->
+                val songs = remember(controller.tracks, controller.playCounts, controller.favourites, kind) {
+                    controller.autoPlaylist(kind).size
+                }
+                AutoCard(kind, songs) { controller.playAuto(kind) }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionTitle("Your playlists") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -438,5 +456,44 @@ private fun PlaylistTrackRow(
                 Icon(Icons.Default.Delete, "Remove", Modifier.size(13.dp), tint = Palette.TextDim)
             }
         }
+    }
+}
+
+
+/** One made-for-you list: press it and it becomes the queue. */
+@Composable
+private fun AutoCard(kind: AutoPlaylist, songs: Int, onPlay: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Column(
+        Modifier
+            .width(196.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
+            .hoverable(interaction)
+            .clickable(enabled = songs > 0, onClick = onPlay)
+            .padding(14.dp)
+    ) {
+        Text(
+            kind.label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Palette.Text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            if (songs == 0) "Nothing here yet" else "$songs song${if (songs == 1) "" else "s"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (songs == 0) Palette.TextFaint else Palette.Accent
+        )
+        Spacer(Modifier.height(7.dp))
+        Text(
+            kind.note,
+            style = MaterialTheme.typography.labelSmall,
+            color = Palette.TextFaint,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

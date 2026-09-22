@@ -265,7 +265,8 @@ class DesktopController(parent: CoroutineScope) {
     var favouritesOnly by mutableStateOf(false)
 
     private var listenTimes by mutableStateOf<Map<String, Long>>(emptyMap())
-    private var playCounts by mutableStateOf<Map<String, Int>>(emptyMap())
+    var playCounts by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
 
     /**
      * The rows the table should show, after search, filter and sort.
@@ -496,6 +497,26 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Jumps to something already in the queue, leaving the order alone. */
     fun playFromQueue(track: DesktopTrack) = start(track)
+
+    /**
+     * One of the made-for-you lists. Capped where the list would otherwise be
+     * most of the library, which is a queue nobody asked for.
+     */
+    fun autoPlaylist(kind: AutoPlaylist): List<DesktopTrack> = when (kind) {
+        AutoPlaylist.RECENT -> tracks.sortedByDescending { it.file.lastModified() }.take(60)
+        AutoPlaylist.MOST_PLAYED -> tracks
+            .filter { (playCounts[it.file.absolutePath] ?: 0) > 0 }
+            .sortedByDescending { playCounts[it.file.absolutePath] ?: 0 }
+            .take(60)
+        AutoPlaylist.NEVER_PLAYED -> tracks.filter { (playCounts[it.file.absolutePath] ?: 0) == 0 }
+        AutoPlaylist.FAVOURITES -> tracks.filter { it.file.absolutePath in favourites }
+    }
+
+    /** Plays one of those lists, which becomes the queue. */
+    fun playAuto(kind: AutoPlaylist) {
+        val list = autoPlaylist(kind)
+        list.firstOrNull()?.let { play(it, list) }
+    }
 
     private val shuffleState = mutableStateOf(settings.shuffle)
 
@@ -2899,6 +2920,14 @@ enum class BulkKind(val label: String, val markColumn: String?) {
 
     /** Marks nothing: it only ever visits files that are still broken. */
     REPAIR("Mass fix Telegram songs", null)
+}
+
+/** Lists worked out from the library and what has been played, rather than kept. */
+enum class AutoPlaylist(val label: String, val note: String) {
+    RECENT("Recently added", "The newest files in the library."),
+    MOST_PLAYED("Most played", "What you keep coming back to."),
+    NEVER_PLAYED("Never played", "In the library, never started."),
+    FAVOURITES("Favourites", "Everything you hearted.")
 }
 
 /** What happens when a track, or the queue, runs out. */
