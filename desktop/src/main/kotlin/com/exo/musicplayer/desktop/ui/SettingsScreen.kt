@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -370,7 +371,36 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 }
                 GhostButton("Check now", enabled = !controller.updateChecking) { controller.checkForUpdate() }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("Backups", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                controller.backupNote
+                    ?: "Favourites, playlists and what you have played — everything the files " +
+                    "themselves don't hold. Settings are written down too, but restoring doesn't apply them."
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AccentButton("Back up now", icon = Icons.Default.Save) { controller.backUpNow() }
+                Spacer(Modifier.width(8.dp))
+                GhostButton("Show backups", icon = Icons.Default.FolderOpen) { controller.revealBackups() }
+            }
+            controller.backups.take(4).forEach { file ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        file.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    GhostButton("Restore") { controller.restoreBackup(file) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
             CheckRow(
                 label = "Media keys",
                 checked = controller.mediaKeysEnabled,

@@ -2885,6 +2885,43 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
+    // ---- Backups --------------------------------------------------------------
+
+    var backupNote by mutableStateOf<String?>(null)
+        private set
+
+    var backups by mutableStateOf<List<File>>(emptyList())
+        private set
+
+    fun refreshBackups() {
+        backups = Backup.existing()
+    }
+
+    fun backUpNow() {
+        scope.launch {
+            val file = io { Backup.take(store, settings) }
+            refreshBackups()
+            backupNote = "Saved ${file.name}."
+        }
+    }
+
+    fun restoreBackup(file: File) {
+        scope.launch {
+            val snapshot = io { Backup.read(file) }
+            if (snapshot == null) {
+                backupNote = "${file.name} could not be read."
+                return@launch
+            }
+            val summary = io { Backup.restore(store, snapshot) }
+            favourites = io { store.favourites() }
+            refreshPlaylists()
+            refreshAggregates()
+            backupNote = "Restored $summary from ${file.name}."
+        }
+    }
+
+    fun revealBackups() = Explorer.reveal(Backup.folder)
+
     // ---- Lifecycle ----------------------------------------------------------
 
     fun start() {
@@ -2895,6 +2932,7 @@ class DesktopController(parent: CoroutineScope) {
         // scan even before any folder has been added by hand.
         applyMediaKeys()
         checkForUpdate(announce = true)
+        refreshBackups()
         watcher.watch(roots())
         rescan()
         refreshPlaylists()

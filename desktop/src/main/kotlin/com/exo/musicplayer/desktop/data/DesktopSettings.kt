@@ -161,6 +161,11 @@ class DesktopSettings {
         get() = prefs.getInt(KEY_PROXY_PORT, 0)
         set(value) = prefs.putInt(KEY_PROXY_PORT, value)
 
+    /** Every setting as it stands, for writing into a backup. */
+    fun all(): Map<String, String> = runCatching {
+        prefs.keys().associateWith { prefs.get(it, "") }
+    }.getOrDefault(emptyMap())
+
     private companion object {
         const val KEY_FOLDERS = "library_folders"
         const val KEY_OUTPUTS = "audio_outputs"
