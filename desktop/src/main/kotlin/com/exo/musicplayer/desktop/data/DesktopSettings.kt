@@ -97,6 +97,10 @@ class DesktopSettings {
         get() = prefs.get(KEY_REACTIVE_MODE, "BALL")
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
+    var levelling: Boolean
+        get() = prefs.getBoolean(KEY_LEVELLING, true)
+        set(value) = prefs.putBoolean(KEY_LEVELLING, value)
+
     var mediaKeys: Boolean
         get() = prefs.getBoolean(KEY_MEDIA_KEYS, true)
         set(value) = prefs.putBoolean(KEY_MEDIA_KEYS, value)
@@ -185,6 +189,7 @@ class DesktopSettings {
         const val KEY_REACTIVE_MODE = "reactive_mode"
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
+        const val KEY_LEVELLING = "levelling"
         const val KEY_LAST_TRACK = "last_track"
         const val KEY_LAST_POSITION = "last_position"
         const val KEY_REPEAT = "repeat"

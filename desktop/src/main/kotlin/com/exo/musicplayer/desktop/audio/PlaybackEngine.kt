@@ -49,6 +49,12 @@ class PlaybackEngine {
     /** The bass as it reaches the speakers, for the reactive backgrounds. */
     val beat = BeatTap()
 
+    /**
+     * What this track is multiplied by so it sits at the same loudness as the
+     * rest. One when nothing has been measured, or when levelling is off.
+     */
+    @Volatile var trackGain = 1f
+
     private var worker: Thread? = null
     private var lines = listOf<SourceDataLine>()
     private var outputs = listOf<DesktopAudioOutput>()
@@ -186,6 +192,14 @@ class PlaybackEngine {
                 if (raw == null) {
                     reachedEnd = true
                     break
+                }
+
+                // Before the effects rather than after: the meter, the reverb
+                // and the limiter downstream should all see the level that is
+                // actually going out.
+                val gain = trackGain
+                if (gain < 0.999f || gain > 1.001f) {
+                    for (i in raw.indices) raw[i] *= gain
                 }
 
                 val processed = effects.process(raw)

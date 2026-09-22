@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,12 +27,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -62,6 +66,23 @@ fun main() = application {
     // recomposition and the window's key handler can reach it.
     val scope = rememberCoroutineScope()
     val controller = remember { DesktopController(scope) }
+
+    // A tray icon, so the keys and the transport are there while the window is
+    // behind something else. Not every desktop has a tray; Windows always does.
+    if (java.awt.SystemTray.isSupported()) {
+        val playing by controller.engine.status.collectAsState()
+        Tray(
+            icon = rememberVectorPainter(Icons.Default.PlayArrow),
+            tooltip = playing.track?.let { "${it.title} — Resonate" } ?: "Resonate",
+            menu = {
+                Item(if (playing.playing) "Pause" else "Play") { controller.togglePlay() }
+                Item("Next") { controller.next() }
+                Item("Previous") { controller.previous() }
+                Separator()
+                Item("Quit Resonate") { exitApplication() }
+            }
+        )
+    }
 
     Window(
         onCloseRequest = ::exitApplication,

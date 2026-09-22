@@ -402,6 +402,13 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
 
             Spacer(Modifier.height(16.dp))
             CheckRow(
+                label = "Even out volumes",
+                checked = controller.levelling,
+                note = "Plays every measured song at the same loudness. Run Level volumes in " +
+                    "Bulk tools to measure them."
+            ) { controller.levelling = it }
+            Spacer(Modifier.height(12.dp))
+            CheckRow(
                 label = "Media keys",
                 checked = controller.mediaKeysEnabled,
                 note = "Play, pause, next and previous on the keyboard, from anywhere. " +

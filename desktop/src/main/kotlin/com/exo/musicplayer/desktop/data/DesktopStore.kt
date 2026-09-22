@@ -59,6 +59,23 @@ class DesktopStore(databaseFile: File) {
             )
             st.executeUpdate(
                 """
+                CREATE TABLE IF NOT EXISTS levels (
+                    path TEXT PRIMARY KEY,
+                    dbfs REAL NOT NULL,
+                    peak REAL NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS ratings (
+                    path TEXT PRIMARY KEY,
+                    stars INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
                 CREATE TABLE IF NOT EXISTS marks (
                     path TEXT PRIMARY KEY,
                     artCheckedAt INTEGER,
@@ -342,6 +359,54 @@ class DesktopStore(databaseFile: File) {
     }
 
     // ---- Favourites ----
+
+    fun saveLevel(path: String, dbfs: Float, peak: Float) {
+        connection.prepareStatement(
+            "INSERT OR REPLACE INTO levels(path, dbfs, peak) VALUES(?, ?, ?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setDouble(2, dbfs.toDouble())
+            ps.setDouble(3, peak.toDouble())
+            ps.executeUpdate()
+        }
+    }
+
+    /** Every measured level, as loudness and peak. */
+    fun levels(): Map<String, Pair<Float, Float>> = buildMap {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path, dbfs, peak FROM levels").use { rs ->
+                while (rs.next()) {
+                    put(rs.getString(1), rs.getDouble(2).toFloat() to rs.getDouble(3).toFloat())
+                }
+            }
+        }
+    }
+
+    /** Stars out of five; zero clears it. */
+    fun setRating(path: String, stars: Int) {
+        if (stars <= 0) {
+            connection.prepareStatement("DELETE FROM ratings WHERE path = ?").use { ps ->
+                ps.setString(1, path)
+                ps.executeUpdate()
+            }
+            return
+        }
+        connection.prepareStatement(
+            "INSERT OR REPLACE INTO ratings(path, stars) VALUES(?, ?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setInt(2, stars.coerceAtMost(5))
+            ps.executeUpdate()
+        }
+    }
+
+    fun ratings(): Map<String, Int> = buildMap {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path, stars FROM ratings").use { rs ->
+                while (rs.next()) put(rs.getString(1), rs.getInt(2))
+            }
+        }
+    }
 
     fun favourites(): Set<String> = buildSet {
         connection.createStatement().use { st ->

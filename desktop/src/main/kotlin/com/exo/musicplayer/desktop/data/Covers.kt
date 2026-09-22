@@ -203,6 +203,7 @@ object TagWriter {
         change.artist?.let { tag.setField(FieldKey.ARTIST, it) }
         change.album?.let { tag.setField(FieldKey.ALBUM, it) }
         change.albumArtist?.let { tag.setField(FieldKey.ALBUM_ARTIST, it) }
+        change.year?.let { tag.setField(FieldKey.YEAR, it) }
         audio.commit()
     }
 }

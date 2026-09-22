@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -173,6 +174,15 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
                     "Genius — keeping timed lyrics where they exist.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.LYRICS, redo) }
+
+            BulkOption(
+                kind = BulkKind.LEVELS,
+                icon = Icons.Default.Tune,
+                description = "Measures how loud each song actually is, so they all play at the " +
+                    "same level instead of one arriving twice the volume of the last. Ninety " +
+                    "seconds of each is read; nothing is written to the files.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.LEVELS, redo) }
 
             BulkOption(
                 kind = BulkKind.REPAIR,
@@ -579,4 +589,43 @@ private fun FieldLabel(text: String) {
         color = Palette.TextFaint,
         modifier = Modifier.padding(bottom = 4.dp)
     )
+}
+
+
+/** Setting one thing about a lot of songs at once. */
+@Composable
+fun EditTracksDialog(controller: DesktopController, tracks: List<DesktopTrack>, onDismiss: () -> Unit) {
+    var artist by remember(tracks) { mutableStateOf("") }
+    var album by remember(tracks) { mutableStateOf("") }
+    var year by remember(tracks) { mutableStateOf("") }
+    val anything = artist.isNotBlank() || album.isNotBlank() || year.isNotBlank()
+
+    ScrimDialog(
+        title = "Edit ${tracks.size} songs",
+        subtitle = "Anything left blank stays as it is",
+        onDismiss = onDismiss
+    ) {
+        FieldLabel("Artist")
+        TextInput(artist, { artist = it }, "Leave unchanged", Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        FieldLabel("Album")
+        TextInput(album, { album = it }, "Leave unchanged", Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        FieldLabel("Year")
+        TextInput(year, { year = it }, "Leave unchanged", Modifier.width(140.dp))
+        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Written into the files' own tags",
+                style = MaterialTheme.typography.bodySmall,
+                color = Palette.TextDim,
+                modifier = Modifier.weight(1f)
+            )
+            GhostButton("Cancel", onClick = onDismiss)
+            Spacer(Modifier.width(8.dp))
+            AccentButton("Apply to ${tracks.size}", enabled = anything) {
+                controller.applyToMany(artist, album, year)
+            }
+        }
+    }
 }

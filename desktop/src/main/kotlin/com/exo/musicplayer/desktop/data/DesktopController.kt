@@ -311,6 +311,42 @@ class DesktopController(parent: CoroutineScope) {
 
     fun playCountOf(track: DesktopTrack): Int = playCounts[track.file.absolutePath] ?: 0
 
+    // ---- Stars ----------------------------------------------------------------
+
+    var ratings by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
+    fun ratingOf(track: DesktopTrack): Int = ratings[track.file.absolutePath] ?: 0
+
+    fun setRating(track: DesktopTrack, stars: Int) {
+        val path = track.file.absolutePath
+        ratings = if (stars <= 0) ratings - path else ratings + (path to stars)
+        scope.launch { io { store.setRating(path, stars) } }
+    }
+
+    // ---- Levelling --------------------------------------------------------------
+
+    /** Loudness and peak per track, as far as they have been measured. */
+    var levels by mutableStateOf<Map<String, Pair<Float, Float>>>(emptyMap())
+        private set
+
+    private val levellingState = mutableStateOf(settings.levelling)
+
+    var levelling: Boolean
+        get() = levellingState.value
+        set(value) {
+            levellingState.value = value
+            settings.levelling = value
+            engine.trackGain = gainFor(engine.status.value.track)
+        }
+
+    /** What a track is multiplied by, or 1 when it has not been measured. */
+    fun gainFor(track: DesktopTrack?): Float {
+        if (!levelling || track == null) return 1f
+        val measured = levels[track.file.absolutePath] ?: return 1f
+        return Loudness.gainFor(measured.first, measured.second)
+    }
+
     fun listenedMsOf(track: DesktopTrack): Long = listenTimes[track.file.absolutePath] ?: 0L
 
     fun addFolder(dir: File) {
@@ -392,9 +428,13 @@ class DesktopController(parent: CoroutineScope) {
         val listen = io { store.listenTimeByPath() }
         val plays = io { store.playCountByPath() }
         val favs = io { store.favourites() }
+        val stars = io { store.ratings() }
+        val measured = io { store.levels() }
         listenTimes = listen
         playCounts = plays
         favourites = favs
+        ratings = stars
+        levels = measured
     }
 
     fun toggleFavourite(track: DesktopTrack) {
@@ -531,6 +571,9 @@ class DesktopController(parent: CoroutineScope) {
             .take(60)
         AutoPlaylist.NEVER_PLAYED -> tracks.filter { (playCounts[it.file.absolutePath] ?: 0) == 0 }
         AutoPlaylist.FAVOURITES -> tracks.filter { it.file.absolutePath in favourites }
+        AutoPlaylist.TOP_RATED -> tracks
+            .filter { ratingOf(it) >= 4 }
+            .sortedByDescending { ratingOf(it) }
     }
 
     /** Plays one of those lists, which becomes the queue. */
@@ -878,6 +921,7 @@ class DesktopController(parent: CoroutineScope) {
     /** Plays [track] without disturbing the order the queue is already in. */
     private fun start(track: DesktopTrack) {
         closeListenEvent()
+        engine.trackGain = gainFor(track)
         engine.play(track)
         openListenEvent(track)
         loadLyricsFor(track)
@@ -1613,6 +1657,8 @@ class DesktopController(parent: CoroutineScope) {
             val already = if (redo || column == null) emptySet() else io { store.markedPaths(column) }
             val queue = if (kind == BulkKind.REPAIR) {
                 io { tracks.filter { needsRepair(it) } }
+            } else if (kind == BulkKind.LEVELS) {
+                tracks.filter { redo || it.file.absolutePath !in levels }
             } else {
                 tracks.filter { redo || it.file.absolutePath !in already }
             }
@@ -1651,6 +1697,7 @@ class DesktopController(parent: CoroutineScope) {
                                     BulkKind.LYRICS -> bulkLyrics(track).asOutcome()
                                     BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
                                     BulkKind.REPAIR -> bulkRepair(track)
+                                    BulkKind.LEVELS -> bulkLevel(track)
                                 }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
@@ -1757,6 +1804,17 @@ class DesktopController(parent: CoroutineScope) {
         Files.move(rewritten.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
         true
     }.getOrDefault(false)
+
+    private suspend fun bulkLevel(track: DesktopTrack): BulkOutcome {
+        val path = track.file.absolutePath
+        val reading = io { Loudness.measure(track.file) } ?: return BulkOutcome.NOTHING_FOUND
+        io { store.saveLevel(path, reading.dbfs, reading.peak) }
+        levels = levels + (path to (reading.dbfs to reading.peak))
+        if (engine.status.value.track?.file?.absolutePath == path) {
+            engine.trackGain = gainFor(track)
+        }
+        return BulkOutcome.UPDATED
+    }
 
     private suspend fun bulkRepair(track: DesktopTrack): BulkOutcome {
         val file = track.file
@@ -2511,6 +2569,51 @@ class DesktopController(parent: CoroutineScope) {
         startArchive("Selection", chosen)
     }
 
+    /** The songs the multi-edit dialog is working on. */
+    var editMany by mutableStateOf<List<DesktopTrack>>(emptyList())
+        private set
+
+    fun editSelection(visible: List<DesktopTrack>) {
+        editMany = selectedTracks(visible)
+    }
+
+    fun dismissEditMany() {
+        editMany = emptyList()
+    }
+
+    /**
+     * Writes whichever fields were filled in to every song being edited. A
+     * field left blank is left alone rather than cleared: the whole point of
+     * editing thirty files at once is to set one thing about them.
+     */
+    fun applyToMany(artist: String, album: String, year: String) {
+        val targets = editMany
+        if (targets.isEmpty()) return
+        editMany = emptyList()
+        val change = Triple(
+            artist.trim().takeIf { it.isNotEmpty() },
+            album.trim().takeIf { it.isNotEmpty() },
+            year.trim().takeIf { it.isNotEmpty() }
+        )
+        if (change.first == null && change.second == null && change.third == null) return
+        scope.launch {
+            val written = io {
+                targets.count { track ->
+                    TagWriter.change(
+                        TagChange(
+                            file = track.file,
+                            artist = change.first,
+                            album = change.second,
+                            year = change.third
+                        )
+                    ).isSuccess
+                }
+            }
+            rescan()
+            dropNote = "Updated $written of ${targets.size} songs."
+        }
+    }
+
     /** Opens the containing folder, selecting the first of them. */
     fun revealSelection(visible: List<DesktopTrack>) {
         val first = selectedTracks(visible).firstOrNull() ?: return
@@ -2980,7 +3083,10 @@ enum class BulkKind(val label: String, val markColumn: String?) {
     IDENTIFY("Identify by sound", "fingerprintedAt"),
 
     /** Marks nothing: it only ever visits files that are still broken. */
-    REPAIR("Mass fix Telegram songs", null)
+    REPAIR("Mass fix Telegram songs", null),
+
+    /** Marks nothing either: a measured track is skipped by its own reckoning. */
+    LEVELS("Level volumes", null)
 }
 
 /** Lists worked out from the library and what has been played, rather than kept. */
@@ -2988,6 +3094,7 @@ enum class AutoPlaylist(val label: String, val note: String) {
     RECENT("Recently added", "The newest files in the library."),
     MOST_PLAYED("Most played", "What you keep coming back to."),
     NEVER_PLAYED("Never played", "In the library, never started."),
+    TOP_RATED("Top rated", "Four stars and up, best first."),
     FAVOURITES("Favourites", "Everything you hearted.")
 }
 

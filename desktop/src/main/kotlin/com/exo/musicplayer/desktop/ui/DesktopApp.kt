@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Repeat
@@ -301,6 +302,10 @@ fun DesktopApp(
         // Identify screen, and neither should have to know about the other.
         controller.editTarget?.let { track ->
             EditTrackDialog(controller, track) { controller.dismissEdit() }
+        }
+
+        if (controller.editMany.isNotEmpty()) {
+            EditTracksDialog(controller, controller.editMany) { controller.dismissEditMany() }
         }
 
         when (dialog) {
@@ -896,6 +901,12 @@ private fun TrackRow(
                 ContextMenuItem("Identify this track") { onIdentify() },
                 ContextMenuItem("Edit details...") { controller.editTarget = track },
                 ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) },
+                ContextMenuItem("Rate ★★★★★") { controller.setRating(track, 5) },
+                ContextMenuItem("Rate ★★★★") { controller.setRating(track, 4) },
+                ContextMenuItem("Rate ★★★") { controller.setRating(track, 3) },
+                ContextMenuItem("Rate ★★") { controller.setRating(track, 2) },
+                ContextMenuItem("Rate ★") { controller.setRating(track, 1) },
+                ContextMenuItem("Clear rating") { controller.setRating(track, 0) },
                 ContextMenuItem("Delete (move to Recycle Bin)") {
                     controller.deleteTracks(listOf(track))
                 }
@@ -1434,6 +1445,10 @@ private fun SelectionBar(controller: DesktopController, visible: List<DesktopTra
         Spacer(Modifier.width(6.dp))
         GhostButton("Zip and ship", icon = Icons.Default.Archive) {
             controller.zipSelection(visible)
+        }
+        Spacer(Modifier.width(6.dp))
+        GhostButton("Edit details", icon = Icons.Default.Edit) {
+            controller.editSelection(visible)
         }
         Spacer(Modifier.width(6.dp))
         GhostButton("Show in Explorer", icon = Icons.Default.FolderOpen) {
