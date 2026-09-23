@@ -2128,6 +2128,12 @@ class DesktopController(parent: CoroutineScope) {
                 io { tracks.filter { needsRepair(it) } }
             } else if (kind == BulkKind.LEVELS) {
                 tracks.filter { redo || it.file.absolutePath !in levels }
+            } else if (kind == BulkKind.FOLDERS) {
+                // Only what is actually missing something, unless asked for all.
+                tracks.filter {
+                    redo || it.artist.isNullOrBlank() || it.album.isNullOrBlank() ||
+                        it.title == it.file.nameWithoutExtension
+                }
             } else {
                 tracks.filter { redo || it.file.absolutePath !in already }
             }
@@ -2167,6 +2173,7 @@ class DesktopController(parent: CoroutineScope) {
                                     BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
                                     BulkKind.REPAIR -> bulkRepair(track)
                                     BulkKind.LEVELS -> bulkLevel(track)
+                                    BulkKind.FOLDERS -> bulkFolders(track).asOutcome()
                                 }
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
@@ -2344,6 +2351,30 @@ class DesktopController(parent: CoroutineScope) {
                 album = details.album.takeIf { tags },
                 year = details.year.takeIf { tags },
                 genre = details.genre.takeIf { tags }
+            ).isSuccess
+        }
+    }
+
+    /**
+     * Fills in what the folder tree already says, for a song whose tags do not.
+     *
+     * Only ever fills a blank. Somebody who tagged their library by hand did
+     * not ask for their folder names to win an argument with it, and the title
+     * is only replaced when it is nothing but the file name, which is what an
+     * untagged file shows.
+     */
+    private suspend fun bulkFolders(track: DesktopTrack): Boolean {
+        val path = track.file.absoluteFile.normalize().path.lowercase()
+        val root = roots().firstOrNull { path.startsWith(it.absoluteFile.normalize().path.lowercase()) }
+        val derived = FolderNames.of(track.file, root)
+        val untitled = track.title.isBlank() || track.title == track.file.nameWithoutExtension
+        val title = derived.title?.takeIf { untitled && it != track.title }
+        val artist = derived.artist?.takeIf { track.artist.isNullOrBlank() }
+        val album = derived.album?.takeIf { track.album.isNullOrBlank() }
+        if (title == null && artist == null && album == null) return false
+        return io {
+            TagWriter.change(
+                TagChange(file = track.file, title = title, artist = artist, album = album)
             ).isSuccess
         }
     }
@@ -3922,7 +3953,10 @@ enum class BulkKind(val label: String, val markColumn: String?) {
     REPAIR("Mass fix Telegram songs", null),
 
     /** Marks nothing either: a measured track is skipped by its own reckoning. */
-    LEVELS("Level volumes", null)
+    LEVELS("Level volumes", null),
+
+    /** Marks nothing: it only ever visits songs that are still missing something. */
+    FOLDERS("Names from folders", null)
 }
 
 /** Lists worked out from the library and what has been played, rather than kept. */

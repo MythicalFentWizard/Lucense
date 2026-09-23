@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Tune
@@ -199,6 +200,15 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
                     "with no usable name at all.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.IDENTIFY, redo) }
+
+            BulkOption(
+                kind = BulkKind.FOLDERS,
+                icon = Icons.Default.FolderOpen,
+                description = "Reads the names out of the folders: Artist, Album, then " +
+                    "01 Title. Fills in blanks only, and never argues with a tag that is " +
+                    "already there. Nothing is looked up online.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.FOLDERS, redo) }
 
             BulkGroup("Artwork and words")
             BulkOption(
