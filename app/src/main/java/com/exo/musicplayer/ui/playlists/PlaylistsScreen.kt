@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -33,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.exo.musicplayer.data.db.SmartPlaylist
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +61,14 @@ fun PlaylistsScreen(
     onExport: (PlaylistSummary) -> Unit,
     onImport: () -> Unit,
     note: String? = null,
+    smartLists: List<SmartPlaylist> = emptyList(),
+    prompt: String = "",
+    onPrompt: (String) -> Unit = {},
+    onPlayPrompt: () -> Unit = {},
+    onSavePrompt: () -> Unit = {},
+    onKeepAsRule: (String) -> Unit = {},
+    onPlaySmart: (SmartPlaylist) -> Unit = {},
+    onDeleteSmart: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var creating by remember { mutableStateOf(false) }
@@ -80,6 +91,61 @@ fun PlaylistsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
+        }
+
+        // ---- A list built from a word ------------------------------------
+        //
+        // The same rules the desktop app takes, answered by the same parser:
+        // a bare word is tried as a genre first, and falls back to an ordinary
+        // search so typing an artist still does the obvious thing.
+        Text(
+            text = "Genres and rules",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
+        )
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = onPrompt,
+            label = { Text("A genre, an artist, or a rule like year:2020+") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onPlayPrompt, enabled = prompt.isNotBlank()) { Text("Play") }
+            OutlinedButton(onClick = onSavePrompt, enabled = prompt.isNotBlank()) {
+                Text("Save as playlist")
+            }
+            OutlinedButton(onClick = { onKeepAsRule(prompt) }, enabled = prompt.isNotBlank()) {
+                Text("Keep as a rule")
+            }
+        }
+        if (smartLists.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            smartLists.forEach { list ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlaySmart(list) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(list.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            list.rule,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { onDeleteSmart(list.id) }) {
+                        Icon(Icons.Default.Delete, "Delete this rule", Modifier.size(18.dp))
+                    }
+                }
+            }
         }
 
         Row(

@@ -1,4 +1,4 @@
-package com.exo.musicplayer.desktop.data
+package com.exo.musicplayer.data.library
 
 import java.text.Normalizer
 import java.util.Locale

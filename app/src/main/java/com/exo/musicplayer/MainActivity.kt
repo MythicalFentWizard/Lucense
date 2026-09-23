@@ -203,6 +203,9 @@ private fun AppScaffold(
     val sort by viewModel.sort.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val playlistNote by viewModel.playlistNote.collectAsStateWithLifecycle()
+    val genreNote by viewModel.genreNote.collectAsStateWithLifecycle()
+    val smartLists by viewModel.smartPlaylists.collectAsStateWithLifecycle()
+    val genrePrompt by viewModel.genrePrompt.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
     val archiveState by viewModel.archive.collectAsStateWithLifecycle()
     var selectionForPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -557,7 +560,20 @@ private fun AppScaffold(
                                 }
                             },
                             onImport = { playlistImportLauncher.launch(arrayOf("text/*")) },
-                            note = playlistNote
+                            note = playlistNote ?: genreNote,
+                            smartLists = smartLists,
+                            prompt = genrePrompt,
+                            onPrompt = { viewModel.setGenrePrompt(it) },
+                            onPlayPrompt = { viewModel.playPrompt() },
+                            onSavePrompt = { viewModel.savePromptAsPlaylist() },
+                            onKeepAsRule = { rule ->
+                                viewModel.createSmartPlaylist(
+                                    rule.replaceFirstChar { it.uppercase() },
+                                    rule
+                                )
+                            },
+                            onPlaySmart = { viewModel.playSmartPlaylist(it) },
+                            onDeleteSmart = { viewModel.deleteSmartPlaylist(it) }
                         )
                     } else {
                         PlaylistDetailScreen(
@@ -865,9 +881,10 @@ private fun AppScaffold(
     editTarget?.let { track ->
         EditTrackDialog(
             track = track,
-            onSave = { title, artist, album, year ->
-                viewModel.saveTrackDetails(track, title, artist, album, year)
+            onSave = { title, artist, album, year, genre ->
+                viewModel.saveTrackDetails(track, title, artist, album, year, genre)
             },
+            onRevert = { viewModel.revertTrackToFile(track) },
             onDismiss = { viewModel.dismissEdit() }
         )
     }

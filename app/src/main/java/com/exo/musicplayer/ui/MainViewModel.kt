@@ -12,6 +12,7 @@ import com.exo.musicplayer.data.db.PlaylistSummary
 import com.exo.musicplayer.data.playlist.ImportResult as PlaylistImport
 import com.exo.musicplayer.data.playlist.PlaylistEntry
 import com.exo.musicplayer.data.playlist.PlaylistFile
+import com.exo.musicplayer.data.db.SmartPlaylist
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.db.TrackListenTime
 import com.exo.musicplayer.data.db.WeatherBucket
@@ -716,6 +717,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Editing a track by hand ----
 
+    // ---- Genres, rules, and going back to the file --------------------------
+
+    init {
+        // A library imported before the app read genres has none. One bounded
+        // pass fills them in, and writes an empty genre for files that carry
+        // none so the same songs are not re-read on every launch.
+        viewModelScope.launch { runCatching { library.fillMissingGenres() } }
+    }
+
+    val smartPlaylists: StateFlow<List<SmartPlaylist>> = library.observeSmartPlaylists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _genrePrompt = MutableStateFlow("")
+    val genrePrompt: StateFlow<String> = _genrePrompt.asStateFlow()
+
+    private val _genreNote = MutableStateFlow<String?>(null)
+    val genreNote: StateFlow<String?> = _genreNote.asStateFlow()
+
+    fun setGenrePrompt(text: String) { _genrePrompt.value = text }
+
+    fun dismissGenreNote() { _genreNote.value = null }
+
+    fun playPrompt() {
+        val prompt = _genrePrompt.value
+        viewModelScope.launch {
+            val list = library.promptTracks(prompt)
+            if (list.isEmpty()) {
+                _genreNote.value = "Nothing matches \"${prompt.trim()}\"."
+            } else {
+                playFrom(list, 0)
+                _genreNote.value = "Playing ${list.size} songs."
+            }
+        }
+    }
+
+    /** Freezes what a prompt matches right now into an ordinary playlist. */
+    fun savePromptAsPlaylist() {
+        val prompt = _genrePrompt.value.trim()
+        viewModelScope.launch {
+            val list = library.promptTracks(prompt)
+            if (list.isEmpty()) {
+                _genreNote.value = "Nothing matches \"$prompt\"."
+                return@launch
+            }
+            val id = library.createPlaylist(prompt.replaceFirstChar { it.uppercase() })
+            library.addToPlaylist(id, list.map { it.id })
+            _genreNote.value = "Saved ${list.size} songs as a playlist."
+        }
+    }
+
+    fun createSmartPlaylist(name: String, rule: String) {
+        viewModelScope.launch {
+            if (rule.isBlank()) {
+                _genreNote.value = "A smart list needs a rule — try rating:4+ or year:2015-2020."
+                return@launch
+            }
+            library.createSmartPlaylist(name, rule)
+            _genreNote.value = "\"$name\" holds ${library.smartTracks(rule).size} songs."
+        }
+    }
+
+    fun deleteSmartPlaylist(id: Long) {
+        viewModelScope.launch { library.deleteSmartPlaylist(id) }
+    }
+
+    fun playSmartPlaylist(list: SmartPlaylist) {
+        viewModelScope.launch {
+            val songs = library.smartTracks(list.rule)
+            if (songs.isEmpty()) {
+                _genreNote.value = "\"${list.name}\" matches nothing right now."
+            } else {
+                playFrom(songs, 0)
+            }
+        }
+    }
+
+    /** Puts a song's details back to whatever its own file says. */
+    fun revertTrackToFile(track: Track) {
+        _editTarget.value = null
+        viewModelScope.launch {
+            val back = library.revertToFile(track)
+            _genreNote.value = if (back == null) {
+                "That file is not where it used to be."
+            } else {
+                "\"${back.title}\" is back to what the file says."
+            }
+        }
+    }
+
     private val _editTarget = MutableStateFlow<Track?>(null)
     val editTarget: StateFlow<Track?> = _editTarget.asStateFlow()
 
@@ -728,11 +818,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         title: String,
         artist: String,
         album: String,
-        year: Int?
+        year: Int?,
+        genre: String
     ) {
         _editTarget.value = null
         viewModelScope.launch {
-            runCatching { library.saveDetails(track, title, artist, album, year) }
+            runCatching { library.saveDetails(track, title, artist, album, year, genre) }
         }
     }
 

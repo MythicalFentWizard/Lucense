@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.library
 
+import com.exo.musicplayer.data.library.SearchQuery
+import com.exo.musicplayer.data.library.Genres
 import androidx.compose.runtime.Immutable
 import com.exo.musicplayer.desktop.data.ToolPaths
 import com.exo.musicplayer.util.AudioTypes

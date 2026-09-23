@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.data.library.SearchQuery
+import com.exo.musicplayer.data.library.Genres
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue

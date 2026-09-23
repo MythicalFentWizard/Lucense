@@ -4,7 +4,11 @@ import android.content.Context
 import com.exo.musicplayer.data.db.MusicDatabase
 import com.exo.musicplayer.data.db.Playlist
 import com.exo.musicplayer.data.db.PlaylistSummary
+import com.exo.musicplayer.data.db.SmartPlaylist
 import com.exo.musicplayer.data.db.Track
+import com.exo.musicplayer.data.ingest.FileTags
+import com.exo.musicplayer.data.library.Genres
+import com.exo.musicplayer.data.library.SearchQuery
 import com.exo.musicplayer.data.recognition.MusicMatch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +32,7 @@ class LibraryRepository(context: Context) {
     private val db = MusicDatabase.get(appContext)
     private val trackDao = db.trackDao()
     private val playlistDao = db.playlistDao()
+    private val smartDao = db.smartPlaylistDao()
 
     fun observeTracks(sort: SortMode): Flow<List<Track>> = when (sort) {
         SortMode.TITLE -> trackDao.observeByTitle()
@@ -101,7 +106,8 @@ class LibraryRepository(context: Context) {
         title: String,
         artist: String,
         album: String,
-        year: Int?
+        year: Int?,
+        genre: String
     ): Track = withContext(Dispatchers.IO) {
         val updated = track.copy(
             title = title.trim().ifBlank {
@@ -109,10 +115,126 @@ class LibraryRepository(context: Context) {
             },
             artist = artist.trim().takeIf { it.isNotEmpty() },
             album = album.trim().takeIf { it.isNotEmpty() },
-            year = year
+            year = year,
+            genre = genre.trim()
         )
         trackDao.update(updated)
         updated
+    }
+
+    /**
+     * Puts a song's details back to what its own file says.
+     *
+     * Nothing is ever written into the file - editing a song changes the row
+     * and leaves the bytes alone - so the file is still the record of what the
+     * song originally claimed to be. No snapshot had to be kept for this, and
+     * it works for songs imported long before the button existed.
+     */
+    suspend fun revertToFile(track: Track): Track? = withContext(Dispatchers.IO) {
+        val file = File(track.filePath)
+        if (!file.isFile) return@withContext null
+        val tags = FileTags.of(file)
+        val updated = track.copy(
+            title = tags.title?.takeIf { it.isNotBlank() }
+                ?: file.nameWithoutExtension.ifBlank { track.title },
+            artist = tags.artist,
+            album = tags.album,
+            albumArtist = tags.albumArtist,
+            trackNumber = tags.trackNumber,
+            year = tags.year,
+            genre = tags.genre.orEmpty()
+        )
+        trackDao.update(updated)
+        updated
+    }
+
+    /**
+     * Reads genres for songs imported before the app looked for them.
+     *
+     * Bounded per call and written back even when the file has none, so a
+     * library of songs without genres settles after one pass instead of being
+     * re-read on every launch.
+     */
+    suspend fun fillMissingGenres(limit: Int = 300): Int = withContext(Dispatchers.IO) {
+        val pending = trackDao.allOnce().filter { it.genre == null }.take(limit)
+        var read = 0
+        pending.forEach { track ->
+            val file = File(track.filePath)
+            val genre = if (file.isFile) FileTags.of(file).genre.orEmpty() else ""
+            trackDao.update(track.copy(genre = genre))
+            read++
+        }
+        read
+    }
+
+    /** Every genre in the library with how many songs carry it, commonest first. */
+    suspend fun genres(): List<Pair<String, Int>> = withContext(Dispatchers.IO) {
+        trackDao.allOnce()
+            .flatMap { Genres.split(it.genre) }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { it.value }
+                    .thenBy { it.key.lowercase() }
+            )
+            .map { it.key to it.value }
+    }
+
+    // ---- Lists kept as a rule ----------------------------------------------------
+
+    fun observeSmartPlaylists(): Flow<List<SmartPlaylist>> = smartDao.observeAll()
+
+    suspend fun createSmartPlaylist(name: String, rule: String): Long =
+        smartDao.insert(SmartPlaylist(name = name.trim().ifBlank { "Smart list" }, rule = rule.trim()))
+
+    suspend fun deleteSmartPlaylist(id: Long) = smartDao.delete(id)
+
+    /**
+     * Whether a song answers a rule.
+     *
+     * The same parser the desktop app uses, so a rule written on one reads the
+     * same on the other. Star ratings are the one thing it cannot answer here,
+     * because this app has never had them - a rule mentioning them simply
+     * matches nothing rather than pretending.
+     */
+    fun matches(query: SearchQuery, track: Track): Boolean = query.matches(
+        title = track.title,
+        artist = track.artist.orEmpty(),
+        album = track.album.orEmpty(),
+        favourite = track.isFavorite,
+        plays = track.playCount,
+        rating = 0,
+        year = track.year,
+        addedAt = track.addedAt,
+        genre = track.genre
+    )
+
+    /** The songs a rule picks out right now, in the library's own order. */
+    suspend fun smartTracks(rule: String): List<Track> = withContext(Dispatchers.IO) {
+        val query = SearchQuery.of(rule)
+        if (query.isEmpty) return@withContext emptyList()
+        trackDao.allOnce().filter { matches(query, it) }
+    }
+
+    /**
+     * The songs behind something typed into the genre box.
+     *
+     * A bare word is tried as a genre first, because that is what the box is
+     * for, and falls back to an ordinary search so typing an artist still does
+     * the obvious thing rather than nothing at all.
+     */
+    suspend fun promptTracks(prompt: String): List<Track> = withContext(Dispatchers.IO) {
+        val text = prompt.trim()
+        if (text.isEmpty()) return@withContext emptyList()
+        val all = trackDao.allOnce()
+        if (!text.contains(':')) {
+            val asGenre = SearchQuery.of("genre:\"" + text + "\"")
+            val byGenre = all.filter { matches(asGenre, it) }
+            if (byGenre.isNotEmpty()) return@withContext byGenre
+        }
+        val free = SearchQuery.of(text)
+        if (free.isEmpty) emptyList() else all.filter { matches(free, it) }
     }
 
     private fun downloadArtwork(url: String, contentHash: String): String? = runCatching {

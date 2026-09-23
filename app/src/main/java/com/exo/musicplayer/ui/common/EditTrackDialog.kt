@@ -35,13 +35,15 @@ import com.exo.musicplayer.data.db.Track
 @Composable
 fun EditTrackDialog(
     track: Track,
-    onSave: (title: String, artist: String, album: String, year: Int?) -> Unit,
+    onSave: (title: String, artist: String, album: String, year: Int?, genre: String) -> Unit,
+    onRevert: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var title by remember(track.id) { mutableStateOf(track.title) }
     var artist by remember(track.id) { mutableStateOf(track.artist.orEmpty()) }
     var album by remember(track.id) { mutableStateOf(track.album.orEmpty()) }
     var year by remember(track.id) { mutableStateOf(track.year?.toString().orEmpty()) }
+    var genre by remember(track.id) { mutableStateOf(track.genre.orEmpty()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -73,6 +75,14 @@ fun EditTrackDialog(
                 )
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
+                    value = genre,
+                    onValueChange = { genre = it },
+                    label = { Text("Genre") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
                     value = year,
                     onValueChange = { entered ->
                         // Digits only, and no longer than a year: the keyboard
@@ -97,6 +107,14 @@ fun EditTrackDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(Modifier.height(4.dp))
+                // Because the file was never written to, it is still the record
+                // of what this song originally said it was. Nothing had to be
+                // kept aside to make this possible, and it works for songs
+                // imported long before the button existed.
+                TextButton(onClick = onRevert) {
+                    Text("Revert to the file's own details")
+                }
             }
         },
         confirmButton = {
@@ -106,7 +124,8 @@ fun EditTrackDialog(
                         title.trim(),
                         artist.trim(),
                         album.trim(),
-                        year.trim().toIntOrNull()
+                        year.trim().toIntOrNull(),
+                        genre.trim()
                     )
                 }
             ) { Text("Save") }
