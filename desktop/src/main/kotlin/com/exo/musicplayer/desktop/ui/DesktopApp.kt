@@ -1483,8 +1483,15 @@ private fun SeekBar(
                     .background(Palette.Accent)
             )
         }
-        // Something to actually take hold of, once the pointer is over the bar.
-        if (active) {
+        // The handle sits on the line at all times rather than appearing under
+        // the pointer, so the position is readable at a glance and there is
+        // always something obvious to take hold of. It grows when the pointer
+        // is on the bar or dragging it.
+        //
+        // The layer is inset by the handle's own radius so that the ends of the
+        // travel put it fully on the bar: without that, a song at the very
+        // start has half a ball hanging off the left of the track.
+        Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
             Box(
                 Modifier
                     .fillMaxWidth(shown)
@@ -1493,7 +1500,7 @@ private fun SeekBar(
             ) {
                 Box(
                     Modifier
-                        .size(11.dp)
+                        .size(if (active) 12.dp else 8.dp)
                         .clip(CircleShape)
                         .background(Palette.Accent)
                 )
