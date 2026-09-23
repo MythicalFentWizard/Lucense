@@ -59,11 +59,11 @@ private enum class ColourField(val label: String, val note: String) {
 fun ThemeEditorWindow(controller: DesktopController, onClose: () -> Unit) {
     DialogWindow(
         onCloseRequest = onClose,
-        title = "Colours · Resonate",
+        title = "Colours · Lucense",
         state = rememberDialogState(size = DpSize(640.dp, 700.dp))
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(460, 460) }
-        ResonateDesktopTheme {
+        LucenseDesktopTheme {
             ScaledToWindow(designWidth = 640.dp, designHeight = 700.dp) { ThemeEditor(controller, onClose) }
         }
     }

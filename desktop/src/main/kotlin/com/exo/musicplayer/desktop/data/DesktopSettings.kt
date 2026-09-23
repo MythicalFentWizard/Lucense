@@ -4,23 +4,68 @@ import java.io.File
 import java.util.prefs.Preferences
 
 /**
- * Where Resonate keeps its own files on Windows.
+ * Where Lucense keeps its own files on Windows.
  *
- * `%LOCALAPPDATA%\Resonate` — the correct home for a per-user cache and
+ * `%LOCALAPPDATA%\Lucense` — the correct home for a per-user cache and
  * database on this platform, and specifically not next to the executable, which
  * is normally under Program Files and not writable.
+ *
+ * It was `\Resonate` before the app was renamed, and that folder holds every
+ * play, rating, playlist and favourite anyone has ever accumulated. So the old
+ * one is moved rather than abandoned, and if it cannot be moved it is used
+ * where it stands — an inconsistent folder name is a far smaller problem than
+ * a library that has forgotten everything about itself.
  */
 object AppDirs {
     val root: File by lazy {
-        val local = System.getenv("LOCALAPPDATA")
-            ?: System.getProperty("user.home") + File.separator + ".resonate"
-        File(local, "Resonate").also { it.mkdirs() }
+        home(
+            File(
+                System.getenv("LOCALAPPDATA")
+                    ?: (System.getProperty("user.home") + File.separator + ".lucense")
+            )
+        )
+    }
+
+    /**
+     * Picks the folder, moving the old one over if that is what is there.
+     *
+     * Split out from [root] so the move can be exercised against a scratch
+     * folder instead of against somebody's actual profile.
+     */
+    internal fun home(local: File): File {
+        val home = File(local, "Lucense")
+        val before = File(local, "Resonate")
+        return when {
+            home.isDirectory -> home
+            !before.isDirectory -> home.also { it.mkdirs() }
+            // A plain rename within the same parent, which is instant.
+            before.renameTo(home) -> home
+            // Windows may have a handle open somewhere in there; copying leaves
+            // the original alone, so nothing is lost if this half-finishes.
+            runCatching { before.copyRecursively(home, overwrite = false) }.getOrDefault(false) -> home
+            else -> before
+        }
     }
 
     val covers: File by lazy { File(root, "covers").also { it.mkdirs() } }
     val tools: File by lazy { File(root, "tools").also { it.mkdirs() } }
     val downloads: File by lazy { File(root, "downloads").also { it.mkdirs() } }
-    val database: File by lazy { File(root, "resonate.db") }
+    /**
+     * The database, carried over from its old name along with its journal
+     * files - an orphaned -wal beside a renamed database is a corrupt database.
+     */
+    val database: File by lazy { databaseIn(root) }
+
+    internal fun databaseIn(root: File): File {
+        val now = File(root, "lucense.db")
+        if (!now.exists()) {
+            root.listFiles { file -> file.name.startsWith("resonate.db") }?.forEach { old ->
+                val carried = File(root, old.name.replaceFirst("resonate.db", "lucense.db"))
+                runCatching { old.renameTo(carried) }
+            }
+        }
+        return now
+    }
 }
 
 /** Small key/value settings, in the Windows registry via java.util.prefs. */
@@ -148,7 +193,7 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_MEDIA_KEYS, true)
         set(value) = prefs.putBoolean(KEY_MEDIA_KEYS, value)
 
-    /** What was playing when Resonate was last closed, and how far into it. */
+    /** What was playing when Lucense was last closed, and how far into it. */
     var lastTrack: String
         get() = prefs.get(KEY_LAST_TRACK, "")
         set(value) = prefs.put(KEY_LAST_TRACK, value)
@@ -176,7 +221,7 @@ class DesktopSettings {
         get() = prefs.get(KEY_BACKDROP_COLOR, "")
         set(value) = prefs.put(KEY_BACKDROP_COLOR, value)
 
-    /** Whether a wallpaper is set; the picture itself is kept in Resonate's own folder. */
+    /** Whether a wallpaper is set; the picture itself is kept in Lucense's own folder. */
     var hasWallpaper: Boolean
         get() = prefs.getBoolean(KEY_WALLPAPER, false)
         set(value) = prefs.putBoolean(KEY_WALLPAPER, value)
@@ -195,7 +240,7 @@ class DesktopSettings {
         get() = prefs.get(KEY_LYRICS_INACTIVE, "")
         set(value) = prefs.put(KEY_LYRICS_INACTIVE, value)
 
-    /** A ProxyMode name. System by default, which is how Resonate behaved before there was a choice. */
+    /** A ProxyMode name. System by default, which is how Lucense behaved before there was a choice. */
     var proxyMode: String
         get() = prefs.get(KEY_PROXY_MODE, "SYSTEM")
         set(value) = prefs.put(KEY_PROXY_MODE, value)
@@ -243,7 +288,7 @@ class DesktopSettings {
         const val KEY_DISCORD = "discord"
         const val KEY_DISCORD_ID = "discord_id"
 
-        /** Resonate's own Discord application. */
+        /** Lucense's own Discord application. */
         const val DEFAULT_DISCORD_ID = "1552040009253523578"
         const val KEY_LAST_TRACK = "last_track"
         const val KEY_LAST_POSITION = "last_position"

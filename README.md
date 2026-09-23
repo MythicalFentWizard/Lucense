@@ -1,4 +1,4 @@
-# Resonate
+# Lucense
 
 A music player for **Android** and **Windows** that works on files you actually
 own, identifies songs it doesn't recognise, and asks no service for an account.
@@ -63,7 +63,7 @@ heuristic, the same Shazam fingerprinter, the same weather maths.
 task, revoked when it goes away, and impossible to make persistent
 (`takePersistableUriPermission()` only works for `ACTION_OPEN_DOCUMENT`, not for
 a share). A player that stores the URI has a library of dead links within
-minutes. Resonate reads the bytes while the grant is live and writes its own
+minutes. Lucense reads the bytes while the grant is live and writes its own
 copy, which is why
 [`ShareReceiverActivity`](app/src/main/java/com/exo/musicplayer/share/ShareReceiverActivity.kt)
 shows a progress card and doesn't finish until the copy completes.

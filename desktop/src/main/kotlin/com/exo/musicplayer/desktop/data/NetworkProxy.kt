@@ -11,7 +11,7 @@ import java.net.SocketAddress
 import java.net.URI
 import java.net.URL
 
-/** How Resonate reaches the internet. */
+/** How Lucense reaches the internet. */
 enum class ProxyMode(val label: String) {
     SYSTEM("System"),
     DIRECT("No proxy"),
@@ -41,7 +41,7 @@ data class ProxyConfig(
 /**
  * The one proxy setting, applied to everything that goes online.
  *
- * Resonate reaches the internet three ways, and each has to be told separately:
+ * Lucense reaches the internet three ways, and each has to be told separately:
  *
  *  - Its own requests (lyrics, cover art, song metadata, identification, weather,
  *    the Piped search) all go through HttpURLConnection, which asks the JVM-wide

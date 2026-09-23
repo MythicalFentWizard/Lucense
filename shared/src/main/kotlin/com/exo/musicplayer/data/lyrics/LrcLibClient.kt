@@ -137,7 +137,7 @@ class LrcLibClient {
 
     private companion object {
         const val TAG = "LrcLibClient"
-        const val USER_AGENT = "Resonate/1.6 (Android music player)"
+        const val USER_AGENT = "Lucense/1.6 (Android music player)"
     }
 }
 

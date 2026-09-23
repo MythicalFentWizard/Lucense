@@ -6,7 +6,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * What Resonate knows that the files themselves do not: which songs are
+ * What Lucense knows that the files themselves do not: which songs are
  * favourites, what has been played and how much of it, and the playlists.
  *
  * All of that lives in one database in one folder, which is fine until the
@@ -20,7 +20,10 @@ import java.util.Locale
  */
 object Backup {
 
-    private const val HEADER = "resonate-backup"
+    private const val HEADER = "lucense-backup"
+
+    /** What the header said before the app was renamed. */
+    private const val WAS = "resonate-backup"
     private const val VERSION = 1
 
     class Snapshot(
@@ -66,7 +69,10 @@ object Backup {
 
     fun read(file: File): Snapshot? = runCatching {
         val lines = file.readLines()
-        if (lines.firstOrNull()?.startsWith(HEADER) != true) return null
+        // Anything written before the rename carries the old marker and is
+        // otherwise identical; refusing it would cost somebody their history.
+        val marker = lines.firstOrNull()
+        if (marker?.startsWith(HEADER) != true && marker?.startsWith(WAS) != true) return null
         var takenAt = file.lastModified()
         val favourites = mutableListOf<String>()
         val plays = mutableMapOf<String, Int>()

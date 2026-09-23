@@ -133,7 +133,7 @@ class SongGraph(private val engine: PlaybackEngine) : SongShape {
         slices = target
         filled = 0
         loudest = 0f
-        reader = thread(name = "resonate-song-graph", isDaemon = true, priority = Thread.MIN_PRIORITY) {
+        reader = thread(name = "lucense-song-graph", isDaemon = true, priority = Thread.MIN_PRIORITY) {
             runCatching {
                 Decoder.open(track.file).use { decoder ->
                     var slice = 0

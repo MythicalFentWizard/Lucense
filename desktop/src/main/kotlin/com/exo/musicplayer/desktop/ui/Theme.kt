@@ -238,7 +238,7 @@ data class ThemeColors(
  * Each is a published scheme rather than a hue this app invented: the people
  * who made them picked the surface and text tones against each other, which is
  * what keeps text readable at every layer. Purple still leads, because that is
- * what Resonate has always been. Custom takes its colours from the editor; the
+ * what Lucense has always been. Custom takes its colours from the editor; the
  * values here are only where it starts.
  */
 enum class AccentChoice(
@@ -421,7 +421,7 @@ private val DesktopShapes = Shapes(
 )
 
 @Composable
-fun ResonateDesktopTheme(content: @Composable () -> Unit) {
+fun LucenseDesktopTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = desktopColors(),
         typography = DesktopTypography,

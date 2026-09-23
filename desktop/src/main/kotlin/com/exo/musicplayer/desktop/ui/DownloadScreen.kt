@@ -204,9 +204,9 @@ private fun ToolsPanel(controller: DesktopController) {
         }
         Spacer(Modifier.height(4.dp))
         Hint(
-            "All three ship with Resonate — nothing to install. yt-dlp is the only " +
+            "All three ship with Lucense — nothing to install. yt-dlp is the only " +
                 "one worth updating by hand: extractors break whenever a site changes " +
-                "its player, usually faster than Resonate ships."
+                "its player, usually faster than Lucense ships."
         )
         Spacer(Modifier.height(14.dp))
 

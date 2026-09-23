@@ -43,7 +43,7 @@ class FolderWatcher(private val onChanged: () -> Unit) {
         val watcher = runCatching { FileSystems.getDefault().newWatchService() }.getOrNull() ?: return
         service = watcher
         running.set(true)
-        worker = thread(name = "resonate-folder-watch", isDaemon = true) {
+        worker = thread(name = "lucense-folder-watch", isDaemon = true) {
             folders.forEach { register(watcher, it, 0) }
             watching = true
             var waiting = false

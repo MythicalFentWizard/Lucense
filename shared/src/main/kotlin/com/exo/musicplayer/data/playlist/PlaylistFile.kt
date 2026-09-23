@@ -47,7 +47,7 @@ data class ImportResult<T>(
 object PlaylistFile {
 
     const val EXTENSION = "txt"
-    private const val MAGIC = "#RESONATE-PLAYLIST"
+    private const val MAGIC = "#LUCENSE-PLAYLIST"
     private const val VERSION = 1
 
     fun export(name: String, entries: List<PlaylistEntry>): String = buildString {

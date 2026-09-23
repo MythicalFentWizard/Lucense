@@ -13,7 +13,7 @@ import kotlin.concurrent.thread
  * machine - but four of them sharing one message loop, because registration and
  * that loop have to live on the same thread.
  *
- * Windows gives these keys to whoever asks first, so while Resonate holds them
+ * Windows gives these keys to whoever asks first, so while Lucense holds them
  * another player will not see them. That is why this can be turned off.
  */
 class MediaKeys {
@@ -45,7 +45,7 @@ class MediaKeys {
     ) {
         unbind()
         running.set(true)
-        worker = thread(name = "resonate-media-keys", isDaemon = true) {
+        worker = thread(name = "lucense-media-keys", isDaemon = true) {
             val user32 = User32.INSTANCE
             val keys = intArrayOf(VK_MEDIA_PLAY_PAUSE, VK_MEDIA_NEXT, VK_MEDIA_PREVIOUS, VK_MEDIA_STOP)
             val actions = listOf(onPlayPause, onNext, onPrevious, onStop)

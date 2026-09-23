@@ -784,7 +784,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val stamp = java.time.LocalDate.now().toString()
             val destination = File(
                 File(root, "archives"),
-                MusicArchive.safeName("Resonate $label $stamp") + ".zip"
+                MusicArchive.safeName("Lucense $label $stamp") + ".zip"
             )
 
             // Numbered so a playlist keeps its order once unpacked, and named

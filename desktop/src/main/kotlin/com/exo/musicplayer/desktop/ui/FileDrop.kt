@@ -8,7 +8,7 @@ import java.awt.datatransfer.DataFlavor
 import java.io.File
 
 /**
- * Takes what is dragged onto the window from outside Resonate: files and
+ * Takes what is dragged onto the window from outside Lucense: files and
  * folders from Explorer, or text such as a link dragged out of a browser.
  *
  * Files are taken first when both are offered. [onText] says whether it could

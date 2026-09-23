@@ -5,15 +5,15 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val resonateVersion = providers.gradleProperty("resonateVersion").get()
+val lucenseVersion = providers.gradleProperty("lucenseVersion").get()
 
 // Android wants a single increasing integer, so major.minor.patch is folded
 // into one: 1.6.0 becomes 10600. Two digits each for minor and patch, which
 // keeps the number readable next to the versionName it came from.
-val resonateVersionCode = resonateVersion.split(".")
+val lucenseVersionCode = lucenseVersion.split(".")
     .also {
         require(it.size == 3) {
-            "resonateVersion must be major.minor.patch, but was '$resonateVersion'"
+            "lucenseVersion must be major.minor.patch, but was '$lucenseVersion'"
         }
     }
     .let { (major, minor, patch) ->
@@ -30,8 +30,8 @@ android {
         applicationId = "com.exo.musicplayer"
         minSdk = 26
         targetSdk = 35
-        versionCode = resonateVersionCode
-        versionName = resonateVersion
+        versionCode = lucenseVersionCode
+        versionName = lucenseVersion
 
         // yt-dlp ships a Python runtime and ffmpeg as native libraries. Building
         // every ABI would roughly triple the APK; arm64 covers every Android

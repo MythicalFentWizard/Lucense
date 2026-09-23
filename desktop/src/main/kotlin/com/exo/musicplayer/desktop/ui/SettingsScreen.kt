@@ -78,7 +78,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 }
             }
             Spacer(Modifier.height(4.dp))
-            Hint("Resonate reads these folders. Your files are never copied or moved.")
+            Hint("Lucense reads these folders. Your files are never copied or moved.")
             Spacer(Modifier.height(12.dp))
 
             if (controller.folders.isEmpty()) {
@@ -149,7 +149,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             CheckRow(
                 label = "Write tags and cover art into files",
                 checked = controller.writeTags,
-                note = "Off means identified names and covers stay inside Resonate " +
+                note = "Off means identified names and covers stay inside Lucense " +
                     "and your files aren't modified"
             ) { controller.writeTags = it }
         }
@@ -449,7 +449,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     checked = controller.discordCover,
                     note = "Discord fetches the picture itself, so the cover has to be one " +
                         "with a web address: the ones the cover tool found, or one looked up " +
-                        "once per song. Off shows the Resonate icon instead."
+                        "once per song. Off shows the Lucense icon instead."
                 ) { controller.discordCover = it }
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -474,7 +474,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Resonate for Windows",
+                        "Lucense for Windows",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Palette.Text
                     )
@@ -486,7 +486,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Updates", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
-                    Hint(controller.updateNote ?: "Looked up when Resonate starts.")
+                    Hint(controller.updateNote ?: "Looked up when Lucense starts.")
                 }
                 controller.update?.takeIf { controller.updateReady }?.let { release ->
                     AccentButton("Get ${release.version}") { openLink(release.url) }
@@ -599,7 +599,7 @@ private fun WeatherSettings(controller: DesktopController) {
         Spacer(Modifier.height(4.dp))
         Hint(
             "Moods needs to know what the sky is doing. Windows has no GPS, so " +
-                "Resonate works your city out from your IP address — or you can name it. " +
+                "Lucense works your city out from your IP address — or you can name it. " +
                 "Conditions come from Open-Meteo, which needs no account."
         )
         Spacer(Modifier.height(12.dp))
@@ -689,7 +689,7 @@ private fun openFolder(dir: File) {
 }
 
 /**
- * The proxy for everything Resonate does online.
+ * The proxy for everything Lucense does online.
  *
  * One address box and one port box rather than a URL field: the kind of proxy
  * is already chosen above it, and a pasted "socks5://" would only be something
@@ -741,13 +741,13 @@ private fun ProxySettings(controller: DesktopController) {
                 Hint(
                     when {
                         proxy.port > 65535 ->
-                            "Ports go up to 65535. Until then Resonate connects directly."
+                            "Ports go up to 65535. Until then Lucense connects directly."
                         proxy.incomplete ->
-                            "Fill in both the address and the port. Until then Resonate connects directly."
+                            "Fill in both the address and the port. Until then Lucense connects directly."
                         proxy.mode == ProxyMode.HTTPS ->
                             "Reaches the proxy the same way as HTTP and tunnels secure sites through it."
                         proxy.mode == ProxyMode.SOCKS5 ->
-                            "Recommended: carries every kind of connection Resonate makes."
+                            "Recommended: carries every kind of connection Lucense makes."
                         else ->
                             "Applied straight away to every new connection."
                     }

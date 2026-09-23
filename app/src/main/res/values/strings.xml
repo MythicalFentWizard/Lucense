@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Resonate</string>
-    <string name="share_target_label">Add to Resonate</string>
-    <string name="open_target_label">Play in Resonate</string>
+    <string name="app_name">Lucense</string>
+    <string name="share_target_label">Add to Lucense</string>
+    <string name="open_target_label">Play in Lucense</string>
 
     <string name="notif_channel_playback">Playback</string>
     <string name="notif_channel_playback_desc">Controls for the currently playing track</string>

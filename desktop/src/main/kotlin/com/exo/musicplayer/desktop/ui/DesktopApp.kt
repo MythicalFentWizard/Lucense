@@ -403,7 +403,7 @@ private fun NavigationRail(
             ) {
                 Box(Modifier.size(9.dp).clip(CircleShape).background(Palette.Accent))
                 Spacer(Modifier.width(10.dp))
-                Text("Resonate", style = MaterialTheme.typography.titleLarge, color = Palette.Text)
+                Text("Lucense", style = MaterialTheme.typography.titleLarge, color = Palette.Text)
             }
 
             Spacer(Modifier.height(14.dp))
@@ -829,7 +829,7 @@ private fun LibraryPane(
             EmptyState(
                 icon = Icons.Default.FolderOpen,
                 title = "No music yet",
-                body = "Point Resonate at a folder and it reads what's inside.\n" +
+                body = "Point Lucense at a folder and it reads what's inside.\n" +
                     "Your files stay exactly where they are.",
                 action = { AccentButton("Choose folder", onClick = onAddFolder) }
             )

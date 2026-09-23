@@ -11,7 +11,7 @@ import kotlin.concurrent.thread
  * What Discord shows other people while music is playing.
  *
  * Discord listens on a named pipe on the same machine - nothing is sent over
- * the network by Resonate, and a proxy or VPN makes no difference to it. The
+ * the network by Lucense, and a proxy or VPN makes no difference to it. The
  * protocol is a four byte opcode, a four byte length and then JSON: opcode 0
  * to say hello with the application's id, opcode 1 to set what is showing.
  *
@@ -61,7 +61,7 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         stop()
         if (applicationId.isBlank()) return
         running.set(true)
-        worker = thread(name = "resonate-discord", isDaemon = true) {
+        worker = thread(name = "lucense-discord", isDaemon = true) {
             var nextTry = 0L
             while (running.get()) {
                 if (pipe == null && System.currentTimeMillis() > nextTry) {
@@ -209,10 +209,10 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         // having been uploaded to the application beforehand.
         append(quoted("large_image")).append(":").append(quoted(showing.image ?: ASSET)).append(",")
         append(quoted("large_text")).append(":")
-        append(quoted(showing.album ?: "Resonate")).append(",")
+        append(quoted(showing.album ?: "Lucense")).append(",")
         // The little round badge on the corner of the cover.
         append(quoted("small_image")).append(":").append(quoted(ASSET)).append(",")
-        append(quoted("small_text")).append(":").append(quoted("Resonate"))
+        append(quoted("small_text")).append(":").append(quoted("Lucense"))
         append("}}")
     }
 
@@ -274,7 +274,14 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
     }
 
     private companion object {
-        /** The image uploaded to the Discord application under this name. */
+        /**
+         * The image uploaded to the Discord application under this name.
+         *
+         * Deliberately left as it was through the rename: this is the key the
+         * picture was uploaded under, which nobody viewing a profile ever sees.
+         * Renaming it here without renaming it there would simply lose the
+         * image. Change both together, or neither.
+         */
         const val ASSET = "resonate"
         const val MIN_GAP_MS = 4_000L
         const val RETRY_MS = 20_000L

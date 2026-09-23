@@ -5,7 +5,7 @@ import java.io.File
 /**
  * Where the bundled command-line tools live.
  *
- * All three ship inside the app image, so downloading works the moment Resonate
+ * All three ship inside the app image, so downloading works the moment Lucense
  * is installed. A copy under [AppDirs.tools] takes precedence when one exists,
  * which is what makes updating possible: the app image sits in Program Files and
  * is not writable, so `yt-dlp -U` would fail in place. Updating copies the

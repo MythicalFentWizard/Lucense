@@ -56,7 +56,7 @@ class GlobalHotkey {
         running.set(true)
         lastError = null
 
-        worker = thread(name = "resonate-hotkey", isDaemon = true) {
+        worker = thread(name = "lucense-hotkey", isDaemon = true) {
             val user32 = User32.INSTANCE
             val registered = user32.RegisterHotKey(
                 null, HOTKEY_ID, pendingModifiers, pendingKey

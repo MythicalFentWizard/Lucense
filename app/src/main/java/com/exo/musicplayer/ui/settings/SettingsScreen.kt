@@ -86,7 +86,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(36.dp))
         Text(
-            text = "Resonate ${BuildConfig.VERSION_NAME}\nmade by lucent",
+            text = "Lucense ${BuildConfig.VERSION_NAME}\nmade by lucent",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

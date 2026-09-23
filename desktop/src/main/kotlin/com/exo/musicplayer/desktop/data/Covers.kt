@@ -21,7 +21,7 @@ import java.security.MessageDigest
  * Three places art can come from, in the order they are cheapest to reach: the
  * downloaded cache, the tag embedded in the file, and a `cover.jpg` sitting next
  * to it — the convention every ripper and downloader already follows, so a
- * folder-based library usually has art before Resonate fetches anything.
+ * folder-based library usually has art before Lucense fetches anything.
  *
  * Decoding happens off the UI thread and results are held in a bounded
  * memory cache. This is the same lesson the Android build learned the hard way:
@@ -125,7 +125,7 @@ object Covers {
     }
 
     private fun embed(file: File, bytes: ByteArray) {
-        val temp = File.createTempFile("resonate-art", ".jpg")
+        val temp = File.createTempFile("lucense-art", ".jpg")
         try {
             temp.writeBytes(bytes)
             val audio = AudioFileIO.read(file)
@@ -143,7 +143,7 @@ object Covers {
             connectTimeout = 15_000
             readTimeout = 20_000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "Resonate/1.0 (desktop)")
+            setRequestProperty("User-Agent", "Lucense/1.0 (desktop)")
         }
         try {
             if (connection.responseCode !in 200..299) return null

@@ -173,7 +173,7 @@ class DesktopController(parent: CoroutineScope) {
                 youtubeBusy = false
                 identifyBusy = false
                 merging = false
-                System.err.println("Resonate: a background job failed: ${error.stackTraceToString()}")
+                System.err.println("Lucense: a background job failed: ${error.stackTraceToString()}")
             }
     )
 
@@ -915,7 +915,7 @@ class DesktopController(parent: CoroutineScope) {
     var wallpaperNote by mutableStateOf<String?>(null)
         private set
 
-    /** Resonate's own copy, so moving or deleting the original doesn't take the wallpaper with it. */
+    /** Lucense's own copy, so moving or deleting the original doesn't take the wallpaper with it. */
     private val wallpaperFile: File get() = File(AppDirs.root, "wallpaper.img")
 
     fun setWallpaper(file: File) {
@@ -1317,7 +1317,7 @@ class DesktopController(parent: CoroutineScope) {
                 Updates.isNewer(newest.version, AppVersion.name) -> "Version ${newest.version} is out."
                 else -> "Up to date."
             }
-            if (announce && updateReady) dropNote = "Resonate ${newest?.version} is out — see Settings."
+            if (announce && updateReady) dropNote = "Lucense ${newest?.version} is out — see Settings."
         }
     }
 
@@ -2169,7 +2169,7 @@ class DesktopController(parent: CoroutineScope) {
         } else {
             listOf("-movflags", "+faststart")
         }
-        val rewritten = File(file.parentFile, file.nameWithoutExtension + ".resonate-fix." + file.extension)
+        val rewritten = File(file.parentFile, file.nameWithoutExtension + ".lucense-fix." + file.extension)
         val process = ProcessBuilder(
             listOf(
                 ffmpeg.absolutePath, "-hide_banner", "-loglevel", "error", "-y",
@@ -3162,7 +3162,7 @@ class DesktopController(parent: CoroutineScope) {
             val stamp = java.time.LocalDate.now().toString()
             val destination = File(
                 File(settings.downloadDir, "archives"),
-                MusicArchive.safeName("Resonate $label $stamp") + ".zip"
+                MusicArchive.safeName("Lucense $label $stamp") + ".zip"
             )
             val digits = chosen.size.toString().length
             val entries = chosen.mapIndexed { index, track ->
@@ -3370,7 +3370,7 @@ class DesktopController(parent: CoroutineScope) {
      * Retags the songs in [plans] so that each set becomes one album or artist,
      * then re-reads only those files.
      *
-     * Written into the files themselves: a merge kept only in Resonate would
+     * Written into the files themselves: a merge kept only in Lucense would
      * come apart at the next scan, and would show in no other player.
      */
     fun merge(plans: List<MergePlan>) {
@@ -3770,7 +3770,7 @@ private fun decodeFx(text: String): DesktopFxState? {
 /** How far into a song the previous button restarts it rather than going back. */
 private const val RESTART_WINDOW_MS = 4_000L
 
-/** What Resonate will open when Windows hands it a file. */
+/** What Lucense will open when Windows hands it a file. */
 private val PLAYABLE = setOf(
     "mp3", "m4a", "mp4", "m4b", "flac", "wav", "ogg", "oga", "opus", "aac", "wma", "aiff", "aif"
 )

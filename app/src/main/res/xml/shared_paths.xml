@@ -6,7 +6,7 @@
     and in internal storage when it is not, so both roots are listed - the
     importer picks at runtime and sharing must work either way.
 
-    Deliberately narrow: only the two directories Resonate writes audio and
+    Deliberately narrow: only the two directories Lucense writes audio and
     artwork into. A provider rooted at "." would expose the whole data
     directory, including the database, to anything holding a granted URI.
 -->

@@ -8,7 +8,7 @@ plugins {
 
 // Read from gradle.properties rather than written here, so the desktop
 // installer and the APK can never disagree about which release they are.
-val resonateVersion = providers.gradleProperty("resonateVersion").get()
+val lucenseVersion = providers.gradleProperty("lucenseVersion").get()
 
 // Targets Java 17 bytecode using whichever JDK is running, rather than
 // demanding a JDK 17 toolchain be installed. :app consumes this module and
@@ -66,7 +66,7 @@ compose.desktop {
         // The About panel reads this back. Baking it in at package time means
         // the number on screen is the number the installer registered with
         // Windows, rather than a second copy that can drift.
-        jvmArgs("-Dresonate.version=$resonateVersion")
+        jvmArgs("-Dlucense.version=$lucenseVersion")
 
         // Memory behaviour, deliberately without -Xmx.
         //
@@ -95,12 +95,12 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
-            packageName = "Resonate"
+            packageName = "Lucense"
 
             windows {
                 // Shown by the installer, the Start menu, the taskbar and the
                 // shortcut. jpackage wants a real .ico; a PNG is silently ignored.
-                iconFile.set(project.layout.projectDirectory.file("icons/resonate.ico"))
+                iconFile.set(project.layout.projectDirectory.file("icons/lucense.ico"))
             }
 
             // yt-dlp, ffmpeg and spotdl ship inside the app image rather than
@@ -126,9 +126,9 @@ compose.desktop {
             // existing install instead of offering to remove it. jpackage
             // derives a fresh ProductCode from name plus version, so bumping
             // this is also what makes the new build a distinct product.
-            packageVersion = resonateVersion
+            packageVersion = lucenseVersion
             windows {
-                menuGroup = "Resonate"
+                menuGroup = "Lucense"
                 shortcut = true
                 // Stable UUID so upgrades replace rather than stack.
                 upgradeUuid = "6E3F1C42-6B7B-4C3E-9A1F-2B7D5E0A9C11"

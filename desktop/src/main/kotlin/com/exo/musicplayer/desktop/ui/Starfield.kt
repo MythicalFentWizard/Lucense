@@ -41,7 +41,7 @@ private const val CYCLE_SECONDS = 9f
  * window that stays open all day needs. It advances about fifteen times a
  * second instead of on every frame, because a full redraw sixty times a second
  * is exactly the standing GPU cost this app has been trimmed to avoid. It stops
- * advancing while the window is not focused, so a Resonate left in the
+ * advancing while the window is not focused, so a Lucense left in the
  * background draws nothing at all. And it lives in a graphics layer of its own
  * behind the content, with the time read inside the draw call, so each tick
  * repaints the stars without recomposing or re-recording anything in front of

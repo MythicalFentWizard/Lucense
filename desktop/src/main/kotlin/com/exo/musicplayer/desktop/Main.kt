@@ -44,7 +44,7 @@ import com.exo.musicplayer.desktop.ui.DesktopApp
 import com.exo.musicplayer.desktop.ui.LyricsWindow
 import com.exo.musicplayer.desktop.ui.MiniPlayer
 import com.exo.musicplayer.desktop.ui.Palette
-import com.exo.musicplayer.desktop.ui.ResonateDesktopTheme
+import com.exo.musicplayer.desktop.ui.LucenseDesktopTheme
 import com.exo.musicplayer.desktop.ui.ScaledToWindow
 import com.exo.musicplayer.desktop.ui.Typing
 import kotlinx.coroutines.delay
@@ -76,20 +76,20 @@ fun main(args: Array<String>) = application {
         val playing by controller.engine.status.collectAsState()
         Tray(
             icon = painterResource("icon.png"),
-            tooltip = playing.track?.let { "${it.title} — Resonate" } ?: "Resonate",
+            tooltip = playing.track?.let { "${it.title} — Lucense" } ?: "Lucense",
             menu = {
                 Item(if (playing.playing) "Pause" else "Play") { controller.togglePlay() }
                 Item("Next") { controller.next() }
                 Item("Previous") { controller.previous() }
                 Separator()
-                Item("Quit Resonate") { exitApplication() }
+                Item("Quit Lucense") { exitApplication() }
             }
         )
     }
 
     Window(
         onCloseRequest = ::exitApplication,
-        title = "Resonate",
+        title = "Lucense",
         icon = painterResource("icon.png"),
         state = rememberWindowState(width = 1280.dp, height = 820.dp),
         // Window level, not view level: Ctrl+A has to work whether or not the
@@ -167,7 +167,7 @@ fun main(args: Array<String>) = application {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
         // Anything Windows handed over: a double-clicked file, or "Open with".
         LaunchedEffect(Unit) { controller.openExternal(args.toList()) }
-        ResonateDesktopTheme {
+        LucenseDesktopTheme {
             ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
                 AppHost(controller)
             }
@@ -177,24 +177,24 @@ fun main(args: Array<String>) = application {
     if (controller.miniPlayer) {
         Window(
             onCloseRequest = { controller.miniPlayer = false },
-            title = "Resonate",
+            title = "Lucense",
             icon = painterResource("icon.png"),
             state = rememberWindowState(width = 400.dp, height = 156.dp),
             resizable = false,
             alwaysOnTop = true
         ) {
-            ResonateDesktopTheme { MiniPlayer(controller) }
+            LucenseDesktopTheme { MiniPlayer(controller) }
         }
     }
 
     if (controller.lyricsDetached) {
         Window(
             onCloseRequest = { controller.lyricsDetached = false },
-            title = "Lyrics · Resonate",
+            title = "Lyrics · Lucense",
             state = rememberWindowState(width = 460.dp, height = 700.dp)
         ) {
             LaunchedEffect(Unit) { window.minimumSize = Dimension(300, 360) }
-            ResonateDesktopTheme {
+            LucenseDesktopTheme {
                 ScaledToWindow(designWidth = 420.dp, designHeight = 560.dp) { LyricsWindow(controller) }
             }
         }
@@ -254,7 +254,7 @@ private fun BootScreen() {
             Box(Modifier.size(14.dp).clip(CircleShape).background(Palette.Accent))
             Spacer(Modifier.height(20.dp))
             Text(
-                "Resonate",
+                "Lucense",
                 style = MaterialTheme.typography.headlineMedium,
                 color = Palette.Text
             )

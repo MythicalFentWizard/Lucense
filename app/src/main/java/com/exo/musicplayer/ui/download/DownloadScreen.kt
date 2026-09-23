@@ -82,7 +82,7 @@ fun DownloadScreen(
 
         Text(
             text = "Paste a YouTube, SoundCloud or Bandcamp link, or just type an artist " +
-                "and song name and Resonate finds the song on YouTube first. Either way " +
+                "and song name and Lucense finds the song on YouTube first. Either way " +
                 "the audio arrives as an mp3, tagged and added to your library. Spotify " +
                 "links work too, by finding the same track.",
             style = MaterialTheme.typography.bodySmall,

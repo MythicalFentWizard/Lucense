@@ -282,7 +282,7 @@ fun RecognitionScreen(
                                 "Type anything and press Go. Every result can be previewed " +
                                     "before you take it, and downloads land as tagged mp3 files."
                             } else {
-                                "Search above, or pick a video or audio file and Resonate " +
+                                "Search above, or pick a video or audio file and Lucense " +
                                     "will listen to it."
                             },
                             style = MaterialTheme.typography.bodyMedium,
@@ -394,7 +394,7 @@ private fun Header(showBlurb: Boolean, onPickVideo: () -> Unit, onPickAudio: () 
         if (showBlurb) {
             Text(
                 text = "Search by name or lyrics, paste a link, search YouTube, or let " +
-                    "Resonate listen to a video or audio file.",
+                    "Lucense listen to a video or audio file.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp, end = 8.dp)

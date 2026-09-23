@@ -165,7 +165,7 @@ private object RemoteImages {
                     connectTimeout = 12_000
                     readTimeout = 15_000
                     instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "Resonate/1.0 (desktop)")
+                    setRequestProperty("User-Agent", "Lucense/1.0 (desktop)")
                 }
                 try {
                     // Cover Art Archive 404s for releases with no art, which is

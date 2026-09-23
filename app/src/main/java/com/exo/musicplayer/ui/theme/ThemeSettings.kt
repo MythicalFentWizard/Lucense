@@ -34,7 +34,7 @@ class ThemeSettings(context: Context) {
     private val prefs =
         appContext.getSharedPreferences("appearance", Context.MODE_PRIVATE)
 
-    /** Resonate's own copy of the wallpaper, so moving or deleting the original doesn't lose it. */
+    /** Lucense's own copy of the wallpaper, so moving or deleting the original doesn't lose it. */
     val wallpaperFile: File get() = File(appContext.filesDir, "wallpaper.img")
 
     private val _state = MutableStateFlow(

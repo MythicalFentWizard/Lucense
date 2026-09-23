@@ -53,7 +53,7 @@ data class DownloadProgress(
  * the feature.
  *
  * yt-dlp still updates itself — extractors break whenever a site changes, often
- * faster than Resonate ships — but it cannot rewrite a binary under Program
+ * faster than Lucense ships — but it cannot rewrite a binary under Program
  * Files, so updating copies it somewhere writable first.
  */
 object YtDlp {

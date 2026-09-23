@@ -319,7 +319,7 @@ private fun EmptyLibrary(
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "Open a song in Telegram, tap Share, and pick Resonate. " +
+            text = "Open a song in Telegram, tap Share, and pick Lucense. " +
                 "It gets copied here and stays in your library.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

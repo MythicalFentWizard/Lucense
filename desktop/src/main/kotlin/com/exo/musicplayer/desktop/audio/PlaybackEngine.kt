@@ -130,7 +130,7 @@ class PlaybackEngine {
 
         // Above normal priority: a playback thread that loses its time slice to
         // the UI thread is an audible gap, and it does very little per wake-up.
-        worker = thread(name = "resonate-playback", isDaemon = true, priority = Thread.MAX_PRIORITY) {
+        worker = thread(name = "lucense-playback", isDaemon = true, priority = Thread.MAX_PRIORITY) {
             run(track, framesPlayed)
         }
     }
