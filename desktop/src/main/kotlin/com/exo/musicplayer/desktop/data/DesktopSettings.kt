@@ -143,6 +143,11 @@ class DesktopSettings {
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
     /** The Discord application this shows up as; blank turns it off. */
+    /** Whether the cover is shown large, with the rest of the window making room. */
+    var bigCover: Boolean
+        get() = prefs.getBoolean(KEY_BIG_COVER, false)
+        set(value) = prefs.putBoolean(KEY_BIG_COVER, value)
+
     /** Whether the song's own cover is shown on Discord rather than the app icon. */
     var discordCover: Boolean
         get() = prefs.getBoolean(KEY_DISCORD_COVER, true)
@@ -278,6 +283,7 @@ class DesktopSettings {
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
         const val KEY_LEVELLING = "levelling"
+        const val KEY_BIG_COVER = "big_cover"
         const val KEY_DISCORD_COVER = "discord_cover"
         const val KEY_CROSSFADE = "crossfade_ms"
         const val KEY_SLEEP_FADE = "sleep_fade"

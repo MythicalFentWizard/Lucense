@@ -776,6 +776,7 @@ fun ShortcutsDialog(onDismiss: () -> Unit) {
             "Ctrl + \u2190  \u2192" to "Previous or next song",
             "\u2191  \u2193" to "Volume up or down",
             "J" to "Jump the list to the song playing",
+            "C" to "Make the cover big, or small again",
             "S" to "Shuffle on or off",
             "R" to "Repeat: all, then one, then off",
             "Ctrl + A" to "Select every song in view",

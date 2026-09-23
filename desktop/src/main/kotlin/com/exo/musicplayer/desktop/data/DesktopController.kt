@@ -3671,6 +3671,26 @@ class DesktopController(parent: CoroutineScope) {
         )
     }
 
+    private val bigCoverState = mutableStateOf(settings.bigCover)
+
+    /**
+     * Whether the cover is shown large.
+     *
+     * The transport bar simply gets taller and the content above it is on a
+     * weight, so making the cover big takes room from the list rather than
+     * being drawn over the top of it. Nothing overlaps anything.
+     */
+    var bigCover: Boolean
+        get() = bigCoverState.value
+        set(value) {
+            bigCoverState.value = value
+            settings.bigCover = value
+        }
+
+    fun toggleBigCover() {
+        bigCover = !bigCover
+    }
+
     /** Whether the small always-on-top player is open. */
     var miniPlayer by mutableStateOf(false)
 

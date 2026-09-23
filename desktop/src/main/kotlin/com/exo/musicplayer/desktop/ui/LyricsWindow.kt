@@ -6,8 +6,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloseFullscreen
+import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,10 +60,33 @@ fun LyricsWindow(controller: DesktopController) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = { controller.toggleBigCover() }) {
+                    Icon(
+                        if (controller.bigCover) {
+                            Icons.Default.CloseFullscreen
+                        } else {
+                            Icons.Default.OpenInFull
+                        },
+                        if (controller.bigCover) "Hide the cover" else "Show the cover",
+                        Modifier.size(15.dp),
+                        tint = Palette.TextDim
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
                 GhostButton("Dock") { controller.togglePanel(SidePanelKind.LYRICS) }
             }
+            if (controller.bigCover && status.track != null) {
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Artwork(status.track, 190.dp, corner = 12.dp)
+                }
+            }
             Spacer(Modifier.height(10.dp))
-            LyricsPanel(controller, status.track, status.positionMs)
+            // On a weight so the words take whatever is left once the cover has
+            // had its share, rather than running off the bottom of the window.
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                LyricsPanel(controller, status.track, status.positionMs)
+            }
         }
     }
 }
