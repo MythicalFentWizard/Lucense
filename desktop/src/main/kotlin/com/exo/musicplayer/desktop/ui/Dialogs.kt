@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -682,6 +683,12 @@ fun EditTrackDialog(
 
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (controller.canRevert(track)) {
+                GhostButton("Revert to the file's own", icon = Icons.Default.Undo) {
+                    controller.revertToOriginal(listOf(track))
+                    onDismiss()
+                }
+            }
             Spacer(Modifier.weight(1f))
             GhostButton("Cancel", onClick = onDismiss)
             Spacer(Modifier.width(8.dp))

@@ -250,6 +250,23 @@ class DesktopController(parent: CoroutineScope) {
     private val shazam = ShazamClient()
 
     init {
+        // Every path that writes a tag goes through TagWriter, so this is the
+        // one place that has to remember what was there first.
+        TagWriter.beforeChange = { file, original ->
+            val path = file.absolutePath
+            runCatching {
+                store.rememberOriginal(
+                    path = path,
+                    title = original.title,
+                    artist = original.artist,
+                    album = original.album,
+                    year = original.year,
+                    genre = original.genre
+                )
+            }
+            if (originals.add(path)) revertable = originals.size
+        }
+
         // The engine rolls into the next song by itself now, so everything that
         // used to happen when the controller started a track has to happen here
         // too. This arrives on the playback thread, so nothing may block: the
@@ -337,6 +354,68 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     fun playCountOf(track: DesktopTrack): Int = playCounts[track.file.absolutePath] ?: 0
+
+    // ---- Going back to what the file itself said --------------------------------
+
+    /** Paths that have a snapshot to go back to. */
+    private val originals = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /**
+     * Bumped whenever [originals] grows, purely so the menu re-reads it.
+     *
+     * The set itself is written from the tag-writing threads and cannot be
+     * Compose state; this counter is the part composition watches.
+     */
+    var revertable by mutableStateOf(0)
+        private set
+
+    fun canRevert(track: DesktopTrack): Boolean {
+        revertable
+        return track.file.absolutePath in originals
+    }
+
+    var revertNote by mutableStateOf<String?>(null)
+
+    fun dismissRevertNote() { revertNote = null }
+
+    /**
+     * Puts a song's details back to whatever its own file said before the app
+     * first changed them.
+     *
+     * Written with blanks cleared, so a field that was empty to begin with goes
+     * back to being empty rather than keeping whatever was guessed for it. The
+     * snapshot is kept afterwards: a second bad guess should be just as
+     * undoable as the first.
+     */
+    fun revertToOriginal(tracks: List<DesktopTrack>) {
+        val targets = tracks.filter { it.file.absolutePath in originals }
+        if (targets.isEmpty()) {
+            revertNote = "Nothing to go back to — the app has not changed these."
+            return
+        }
+        scope.launch {
+            val put = io {
+                targets.count { track ->
+                    val was = store.originalFor(track.file.absolutePath) ?: return@count false
+                    TagWriter.write(
+                        file = track.file,
+                        title = was.title,
+                        artist = was.artist,
+                        album = was.album,
+                        year = was.year?.take(4)?.toIntOrNull(),
+                        genre = was.genre,
+                        clearBlanks = true
+                    ).isSuccess
+                }
+            }
+            rescan()
+            revertNote = if (targets.size == 1) {
+                "\"${targets.first().title}\" is back to what the file said."
+            } else {
+                "$put of ${targets.size} songs put back to what their files said."
+            }
+        }
+    }
 
     /**
      * Whether a song answers a rule.
@@ -497,11 +576,18 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
+    private suspend fun loadOriginals() {
+        val known = io { store.pathsWithOriginals() }
+        originals.addAll(known)
+        revertable = originals.size
+    }
+
     private suspend fun refreshAggregates() {
         val listen = io { store.listenTimeByPath() }
         val plays = io { store.playCountByPath() }
         val favs = io { store.favourites() }
         val stars = io { store.ratings() }
+        loadOriginals()
         val measured = io { store.levels() }
         listenTimes = listen
         playCounts = plays

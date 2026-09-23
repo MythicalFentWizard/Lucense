@@ -83,6 +83,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -845,6 +846,20 @@ private fun LibraryPane(
         if (controller.hasSelection) {
             SelectionBar(controller, tracks)
         }
+        controller.revertNote?.let { note ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Dismiss") { controller.dismissRevertNote() }
+            }
+        }
         controller.queueNote?.let { note ->
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
@@ -943,6 +958,23 @@ private fun HeaderCell(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * The revert entry, and only when there is something to go back to.
+ *
+ * A menu offering an action that cannot do anything is worse than one that does
+ * not mention it, and a context menu item has no disabled state to use instead.
+ */
+private fun revertItems(controller: DesktopController, track: DesktopTrack): List<ContextMenuItem> =
+    if (!controller.canRevert(track)) {
+        emptyList()
+    } else {
+        listOf(
+            ContextMenuItem("Revert to the file's own details") {
+                controller.revertToOriginal(listOf(track))
+            }
+        )
+    }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TrackRow(
@@ -981,7 +1013,8 @@ private fun TrackRow(
                 ContextMenuItem("Rate ★★") { controller.setRating(track, 2) },
                 ContextMenuItem("Rate ★") { controller.setRating(track, 1) },
                 ContextMenuItem("Clear rating") { controller.setRating(track, 0) },
-                ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) },
+                ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) }
+            ) + revertItems(controller, track) + listOf(
                 ContextMenuItem("Delete (move to Recycle Bin)") {
                     controller.deleteTracks(listOf(track))
                 }
@@ -1550,6 +1583,10 @@ private fun SelectionBar(controller: DesktopController, visible: List<DesktopTra
                 controller.editSelection(visible)
             }
             Spacer(Modifier.width(14.dp))
+            GhostButton("Revert details", icon = Icons.Default.Undo) {
+                controller.revertToOriginal(controller.selectedTracks(visible))
+            }
+            Spacer(Modifier.width(6.dp))
             GhostButton("Show in Explorer", icon = Icons.Default.FolderOpen) {
                 controller.revealSelection(visible)
             }

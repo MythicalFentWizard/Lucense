@@ -14,6 +14,15 @@ data class StoredLyrics(
 
 data class ListenRow(val path: String, val totalMs: Long, val plays: Int)
 
+/** What a song's own file said, before the app wrote over it. */
+data class StoredOriginal(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val year: String?,
+    val genre: String?
+)
+
 /** A list written as a rule rather than as a set of songs. */
 data class StoredSmartPlaylist(val id: Long, val name: String, val rule: String)
 
@@ -56,6 +65,19 @@ class DesktopStore(databaseFile: File) {
                     name TEXT NOT NULL,
                     rule TEXT NOT NULL,
                     createdAt INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS original_tags (
+                    path TEXT PRIMARY KEY,
+                    title TEXT,
+                    artist TEXT,
+                    album TEXT,
+                    year TEXT,
+                    genre TEXT,
+                    capturedAt INTEGER NOT NULL
                 )
                 """.trimIndent()
             )
@@ -528,6 +550,63 @@ class DesktopStore(databaseFile: File) {
         }
     }
 
+    /**
+     * Keeps a song's own tags, the first time anything overwrites them.
+     *
+     * Only the first time: the second write is the app changing its own work,
+     * and the point of this is what the file said before the app ever touched
+     * it. INSERT OR IGNORE is exactly that rule.
+     */
+    fun rememberOriginal(
+        path: String,
+        title: String?,
+        artist: String?,
+        album: String?,
+        year: String?,
+        genre: String?
+    ) {
+        connection.prepareStatement(
+            "INSERT OR IGNORE INTO original_tags(path, title, artist, album, year, genre, capturedAt) " +
+                "VALUES (?,?,?,?,?,?,?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setString(2, title)
+            ps.setString(3, artist)
+            ps.setString(4, album)
+            ps.setString(5, year)
+            ps.setString(6, genre)
+            ps.setLong(7, System.currentTimeMillis())
+            ps.executeUpdate()
+        }
+    }
+
+    fun originalFor(path: String): StoredOriginal? {
+        connection.prepareStatement(
+            "SELECT title, artist, album, year, genre FROM original_tags WHERE path = ?"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.executeQuery().use { rs ->
+                return if (rs.next()) {
+                    StoredOriginal(
+                        rs.getString(1), rs.getString(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5)
+                    )
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    /** Which songs have something to go back to, for the menu to offer it. */
+    fun pathsWithOriginals(): Set<String> = buildSet {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path FROM original_tags").use { rs ->
+                while (rs.next()) add(rs.getString(1))
+            }
+        }
+    }
+
     /** Where this song's cover was found on the web, if it was. */
     fun coverUrl(path: String): String? {
         connection.prepareStatement("SELECT url FROM cover_urls WHERE path = ?").use { ps ->
@@ -577,7 +656,7 @@ class DesktopStore(databaseFile: File) {
         if (paths.isEmpty()) return
         for (table in listOf(
             "play_events", "lyrics", "marks", "playlist_items", "favourites", "track_fx",
-            "cover_urls"
+            "cover_urls", "original_tags"
         )) {
             connection.prepareStatement("DELETE FROM $table WHERE path = ?").use { ps ->
                 for (path in paths) { ps.setString(1, path); ps.addBatch() }

@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
+import org.jaudiotagger.tag.Tag
 import org.jaudiotagger.tag.images.ArtworkFactory
 import java.io.File
 import java.net.HttpURLConnection
@@ -167,7 +168,44 @@ object Covers {
  * a field, because correcting a wrong album name to nothing is a legitimate
  * edit and a writer that silently ignored it would look broken.
  */
+/** A song's tags exactly as its own file had them. */
+data class OriginalTags(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val year: String?,
+    val genre: String?
+)
+
 object TagWriter {
+
+    /**
+     * Told what a file's tags say, immediately before anything changes them.
+     *
+     * A hook here rather than a call at each of the seven places tags get
+     * written: the entire value of the snapshot is that it is never missed,
+     * and a write path added later would otherwise quietly not be covered.
+     */
+    var beforeChange: ((File, OriginalTags) -> Unit)? = null
+
+    private fun snapshot(file: File, tag: Tag) {
+        val hook = beforeChange ?: return
+        fun field(key: FieldKey): String? =
+            runCatching { tag.getFirst(key)?.trim()?.takeIf { it.isNotEmpty() } }.getOrNull()
+        // Never let remembering the old tags stop the new ones being written.
+        runCatching {
+            hook(
+                file,
+                OriginalTags(
+                    title = field(FieldKey.TITLE),
+                    artist = field(FieldKey.ARTIST),
+                    album = field(FieldKey.ALBUM),
+                    year = field(FieldKey.YEAR),
+                    genre = field(FieldKey.GENRE)
+                )
+            )
+        }
+    }
 
     fun write(
         file: File,
@@ -180,6 +218,7 @@ object TagWriter {
     ): Result<Unit> = runCatching {
         val audio = AudioFileIO.read(file)
         val tag = audio.tagOrCreateAndSetDefault
+        snapshot(file, tag)
 
         fun apply(key: FieldKey, value: String?) {
             val text = value?.trim()
@@ -201,6 +240,7 @@ object TagWriter {
     fun change(change: TagChange): Result<Unit> = runCatching {
         val audio = AudioFileIO.read(change.file)
         val tag = audio.tagOrCreateAndSetDefault
+        snapshot(change.file, tag)
         change.title?.let { tag.setField(FieldKey.TITLE, it) }
         change.artist?.let { tag.setField(FieldKey.ARTIST, it) }
         change.album?.let { tag.setField(FieldKey.ALBUM, it) }
