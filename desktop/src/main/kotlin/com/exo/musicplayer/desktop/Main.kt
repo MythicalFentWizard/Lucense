@@ -27,6 +27,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -35,6 +38,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.FrameWindowScope
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -47,6 +51,11 @@ import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.LucenseDesktopTheme
 import com.exo.musicplayer.desktop.ui.ScaledToWindow
 import com.exo.musicplayer.desktop.ui.Typing
+import java.awt.GraphicsEnvironment
+import java.awt.SystemTray
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
+import kotlin.math.ceil
 import kotlinx.coroutines.delay
 import java.awt.Dimension
 import java.io.File
@@ -72,10 +81,10 @@ fun main(args: Array<String>) = application {
 
     // A tray icon, so the keys and the transport are there while the window is
     // behind something else. Not every desktop has a tray; Windows always does.
-    if (java.awt.SystemTray.isSupported()) {
+    if (SystemTray.isSupported()) {
         val playing by controller.engine.status.collectAsState()
         Tray(
-            icon = painterResource("icon.png"),
+            icon = remember { trayIcon() },
             tooltip = playing.track?.let { "${it.title} — Lucense" } ?: "Lucense",
             menu = {
                 Item(if (playing.playing) "Pause" else "Play") { controller.togglePlay() }
@@ -90,7 +99,7 @@ fun main(args: Array<String>) = application {
     Window(
         onCloseRequest = ::exitApplication,
         title = "Lucense",
-        icon = painterResource("icon.png"),
+        icon = painterResource(FALLBACK_ICON),
         state = rememberWindowState(width = 1280.dp, height = 820.dp),
         // Window level, not view level: Ctrl+A has to work whether or not the
         // track table happens to hold focus, and a text field that owns the
@@ -167,6 +176,7 @@ fun main(args: Array<String>) = application {
             }
         }
     ) {
+        EveryIconSize()
         // The smallest window the scaled layout still fits in.
         LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
         // Anything Windows handed over: a double-clicked file, or "Open with".
@@ -182,11 +192,12 @@ fun main(args: Array<String>) = application {
         Window(
             onCloseRequest = { controller.miniPlayer = false },
             title = "Lucense",
-            icon = painterResource("icon.png"),
+            icon = painterResource(FALLBACK_ICON),
             state = rememberWindowState(width = 400.dp, height = 156.dp),
             resizable = false,
             alwaysOnTop = true
         ) {
+            EveryIconSize()
             LucenseDesktopTheme { MiniPlayer(controller) }
         }
     }
@@ -195,14 +206,60 @@ fun main(args: Array<String>) = application {
         Window(
             onCloseRequest = { controller.lyricsDetached = false },
             title = "Lyrics · Lucense",
+            icon = painterResource(FALLBACK_ICON),
             state = rememberWindowState(width = 460.dp, height = 700.dp)
         ) {
+            EveryIconSize()
             LaunchedEffect(Unit) { window.minimumSize = Dimension(300, 360) }
             LucenseDesktopTheme {
                 ScaledToWindow(designWidth = 420.dp, designHeight = 560.dp) { LyricsWindow(controller) }
             }
         }
     }
+}
+
+/**
+ * The sizes the icon is drawn at, the same set as the installer's .ico. Below
+ * 128 pixels they show the cat alone, because the wordmark can't be read that
+ * small.
+ */
+private val ICON_SIZES = listOf(16, 20, 24, 32, 40, 48, 64, 128, 256)
+
+/** What a window shows for the moment before [EveryIconSize] takes over. */
+private const val FALLBACK_ICON = "icons/lucense-64.png"
+
+private val iconImages: List<BufferedImage> by lazy {
+    ICON_SIZES.mapNotNull { size ->
+        Thread.currentThread().contextClassLoader
+            ?.getResourceAsStream("icons/lucense-$size.png")
+            ?.use { ImageIO.read(it) }
+    }
+}
+
+/**
+ * Hands the window its icon at every size, so Windows picks one instead of
+ * shrinking a single picture itself.
+ *
+ * Windows does that shrink in one step, and it is where the speckle came from.
+ * Measured against a clean box-filtered shrink, one step is 13 levels out at
+ * 16 pixels; these images, halved down to size, are under one level out.
+ */
+@Composable
+private fun FrameWindowScope.EveryIconSize() {
+    LaunchedEffect(Unit) {
+        if (iconImages.isNotEmpty()) window.iconImages = iconImages
+    }
+}
+
+/** The tray's picture, at the size the tray shows it on this screen. */
+private fun trayIcon(): Painter {
+    val scale = runCatching {
+        GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice
+            .defaultConfiguration.defaultTransform.scaleX
+    }.getOrDefault(1.0)
+    val wanted = ceil(SystemTray.getSystemTray().trayIconSize.width * scale).toInt()
+    val image = iconImages.firstOrNull { it.width >= wanted } ?: iconImages.last()
+    return BitmapPainter(image.toComposeImageBitmap())
 }
 
 @Composable

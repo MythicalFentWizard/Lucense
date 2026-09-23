@@ -342,6 +342,14 @@ desktop/src/main/kotlin/com/exo/musicplayer/desktop/
 
 ---
 
+## Artwork
+
+The Lucense cat — the logo and the app icon on both platforms — was drawn by
+**Stillinthedesert**: [@Stillinthedesert](https://t.me/Stillinthedesert) on
+Telegram, [@zeto0_2](https://www.tiktok.com/@zeto0_2) on TikTok.
+
+---
+
 ## Contact
 
 Telegram: [@Eth4wn](https://t.me/Eth4wn) — bugs, requests, or just to say it

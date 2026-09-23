@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#1B1523</color>
+    <!-- The artwork's own top edge, for anywhere a launcher lets the background show. -->
+    <color name="ic_launcher_background">#1C0135</color>
 </resources>
