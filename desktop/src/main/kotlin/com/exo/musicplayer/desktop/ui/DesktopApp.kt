@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.onClick
@@ -38,6 +39,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeMute
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Archive
@@ -1258,11 +1261,15 @@ private fun TransportBar(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
+                // Where the drag currently is, or null when nobody is dragging.
+                // The clock on the left follows this while it is set, so the
+                // number and the bar say the same thing mid-drag.
+                var scrubbing by remember { mutableStateOf<Float?>(null) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        positionMs.asDuration(),
+                        (scrubbing?.let { (it * durationMs).toLong() } ?: positionMs).asDuration(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Palette.TextFaint,
+                        color = if (scrubbing != null) Palette.Accent else Palette.TextFaint,
                         modifier = Modifier.width(38.dp)
                     )
                     SeekBar(
@@ -1272,6 +1279,7 @@ private fun TransportBar(
                             0f
                         },
                         enabled = track != null,
+                        onScrub = { scrubbing = it },
                         onSeek = { controller.seekFraction(it) }
                     )
                     Text(
@@ -1355,13 +1363,20 @@ private fun TransportBar(
             Spacer(Modifier.width(6.dp))
             // Ducking happens while another window has focus, so there has to
             // be something to look at afterwards that says it worked.
+            // The minus sits beside the speaker rather than replacing it. The
+            // speaker is busy saying how loud the music is, and one glyph
+            // cannot carry that and "ducked" at the same time without losing
+            // one of them. A fixed width keeps the slider still either way.
+            Text(
+                if (controller.ducked) "−" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.Accent,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(9.dp)
+            )
             Icon(
-                if (controller.ducked) {
-                    Icons.AutoMirrored.Filled.VolumeDown
-                } else {
-                    Icons.AutoMirrored.Filled.VolumeUp
-                },
-                if (controller.ducked) "Ducked for gaming" else null,
+                volumeIcon(controller.volume),
+                if (controller.ducked) "Ducked for gaming" else "Volume",
                 Modifier.size(16.dp),
                 tint = if (controller.ducked) Palette.Accent else Palette.TextDim
             )
@@ -1379,11 +1394,41 @@ private fun TransportBar(
     }
 }
 
-/** Click anywhere on the bar to jump there — a desktop expectation. */
+/**
+ * Which speaker the slider is currently worth.
+ *
+ * Four steps rather than two, so the icon is telling you something across the
+ * whole travel instead of only at the very bottom.
+ */
+private fun volumeIcon(level: Float): ImageVector = when {
+    level <= 0.001f -> Icons.AutoMirrored.Filled.VolumeOff
+    level < 0.34f -> Icons.AutoMirrored.Filled.VolumeMute
+    level < 0.67f -> Icons.AutoMirrored.Filled.VolumeDown
+    else -> Icons.AutoMirrored.Filled.VolumeUp
+}
+
+/**
+ * Click anywhere on the bar to jump there, or hold and drag to move through
+ * the song.
+ *
+ * While a drag is happening the bar shows where the drag is rather than where
+ * the song is, so the handle does not fight the playhead as it advances
+ * underneath. The seek itself waits for the button to come up: seeking
+ * backwards reopens the file, and doing that on every pixel of a drag stutters
+ * far worse than the drag is worth.
+ */
 @Composable
-private fun SeekBar(fraction: Float, enabled: Boolean, onSeek: (Float) -> Unit) {
+private fun SeekBar(
+    fraction: Float,
+    enabled: Boolean,
+    onScrub: (Float?) -> Unit,
+    onSeek: (Float) -> Unit
+) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val shown = dragging ?: fraction
+    val active = hovered || dragging != null
 
     Box(
         Modifier
@@ -1392,24 +1437,67 @@ private fun SeekBar(fraction: Float, enabled: Boolean, onSeek: (Float) -> Unit) 
             .hoverable(interaction)
             .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
-                detectTapGestures { offset -> onSeek(offset.x / size.width.toFloat()) }
+                detectTapGestures { offset ->
+                    onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
+                }
+            }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        val at = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        dragging = at
+                        onScrub(at)
+                    },
+                    onHorizontalDrag = { change, _ ->
+                        val at = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        dragging = at
+                        onScrub(at)
+                        change.consume()
+                    },
+                    onDragEnd = {
+                        dragging?.let { onSeek(it) }
+                        dragging = null
+                        onScrub(null)
+                    },
+                    onDragCancel = {
+                        dragging = null
+                        onScrub(null)
+                    }
+                )
             },
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(if (hovered) 5.dp else 3.dp)
+                .height(if (active) 5.dp else 3.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .background(Palette.Line)
         ) {
             Box(
                 Modifier
-                    .fillMaxWidth(fraction)
+                    .fillMaxWidth(shown)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(3.dp))
                     .background(Palette.Accent)
             )
+        }
+        // Something to actually take hold of, once the pointer is over the bar.
+        if (active) {
+            Box(
+                Modifier
+                    .fillMaxWidth(shown)
+                    .height(14.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Box(
+                    Modifier
+                        .size(11.dp)
+                        .clip(CircleShape)
+                        .background(Palette.Accent)
+                )
+            }
         }
     }
 }

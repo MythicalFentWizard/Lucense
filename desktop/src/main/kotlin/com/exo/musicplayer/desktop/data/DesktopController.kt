@@ -58,6 +58,7 @@ import com.exo.musicplayer.desktop.audio.PreviewPlayer
 import com.exo.musicplayer.desktop.audio.SongGraph
 import com.exo.musicplayer.desktop.download.DesktopYouTubeBackend
 import com.exo.musicplayer.desktop.audio.PlaybackEngine
+import com.exo.musicplayer.desktop.audio.Volume
 import com.exo.musicplayer.desktop.download.DownloadProgress
 import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
@@ -710,8 +711,11 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Volume actually sent to the engine, after any ducking. */
     private fun pushVolume() {
+        // The duck is a share of the gain, not of the slider's position:
+        // "turn it down to a third" means a third as loud, not a third of the
+        // way along a scale whose bottom is forty decibels down.
         val factor = if (ducked) (100 - duckPercent) / 100f else 1f
-        engine.setVolume(volume * factor)
+        engine.setVolume(Volume.gainFor(volume) * factor)
     }
 
     private fun applyDuckBinding() {
@@ -1340,7 +1344,9 @@ class DesktopController(parent: CoroutineScope) {
                 // Ramped on the engine rather than through `volume`, so the
                 // slider and the saved setting are left where the user put them.
                 if (sleepFade && left <= SLEEP_FADE_MS) {
-                    engine.setVolume(volume * (left.toFloat() / SLEEP_FADE_MS).coerceIn(0f, 1f))
+                    engine.setVolume(
+                        Volume.gainFor(volume) * (left.toFloat() / SLEEP_FADE_MS).coerceIn(0f, 1f)
+                    )
                 }
                 delay(if (sleepFade && left <= SLEEP_FADE_MS) 200 else 1_000)
             }
