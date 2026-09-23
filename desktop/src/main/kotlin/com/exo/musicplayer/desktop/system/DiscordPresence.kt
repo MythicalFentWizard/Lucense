@@ -277,12 +277,12 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         /**
          * The image uploaded to the Discord application under this name.
          *
-         * Deliberately left as it was through the rename: this is the key the
-         * picture was uploaded under, which nobody viewing a profile ever sees.
-         * Renaming it here without renaming it there would simply lose the
-         * image. Change both together, or neither.
+         * Nobody viewing a profile ever sees this key, but it has to match what
+         * the picture was uploaded as exactly: a wrong name is not an error,
+         * Discord simply shows no image, which is the quietest possible way for
+         * both the badge and the fallback to disappear at once.
          */
-        const val ASSET = "resonate"
+        const val ASSET = "lucense"
         const val MIN_GAP_MS = 4_000L
         const val RETRY_MS = 20_000L
     }
