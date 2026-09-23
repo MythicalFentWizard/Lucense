@@ -973,15 +973,15 @@ private fun TrackRow(
                     if (isFavourite) "Remove from favourites" else "Add to favourites"
                 ) { controller.toggleFavourite(track) },
                 ContextMenuItem("Add to playlist...") { onAddToPlaylist() },
-                ContextMenuItem("Identify this track") { onIdentify() },
                 ContextMenuItem("Edit details...") { controller.editTarget = track },
-                ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) },
+                ContextMenuItem("Identify this track") { onIdentify() },
                 ContextMenuItem("Rate ★★★★★") { controller.setRating(track, 5) },
                 ContextMenuItem("Rate ★★★★") { controller.setRating(track, 4) },
                 ContextMenuItem("Rate ★★★") { controller.setRating(track, 3) },
                 ContextMenuItem("Rate ★★") { controller.setRating(track, 2) },
                 ContextMenuItem("Rate ★") { controller.setRating(track, 1) },
                 ContextMenuItem("Clear rating") { controller.setRating(track, 0) },
+                ContextMenuItem("Show in Explorer") { revealInExplorer(track.file) },
                 ContextMenuItem("Delete (move to Recycle Bin)") {
                     controller.deleteTracks(listOf(track))
                 }
@@ -1518,42 +1518,48 @@ private fun SelectionBar(controller: DesktopController, visible: List<DesktopTra
             style = MaterialTheme.typography.titleMedium,
             color = Palette.Text
         )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            "Ctrl+click to add · Shift+click for a range · Ctrl+A for all · Esc to clear",
-            style = MaterialTheme.typography.labelSmall,
-            color = Palette.TextFaint,
-            modifier = Modifier.weight(1f)
-        )
+        Spacer(Modifier.width(16.dp))
 
-        GhostButton("Play", icon = Icons.Default.PlayArrow) {
-            controller.playSelection(visible)
+        // Nine buttons do not fit beside each other once a side panel is open,
+        // and a Row answers that by squeezing its children until their labels
+        // wrap a letter at a time. The same answer as the sort chips above:
+        // the middle scrolls, and the two that must always be reachable sit
+        // outside it where they keep their own width. The click hints that used
+        // to live here are in the shortcut list on the / key now.
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GhostButton("Play", icon = Icons.Default.PlayArrow) {
+                controller.playSelection(visible)
+            }
+            Spacer(Modifier.width(6.dp))
+            GhostButton("Play next", icon = Icons.Default.QueuePlayNext) {
+                controller.playNext(controller.selectedTracks(visible))
+            }
+            Spacer(Modifier.width(6.dp))
+            GhostButton("Queue", icon = Icons.Default.PlaylistAdd) {
+                controller.addToQueue(controller.selectedTracks(visible))
+            }
+            Spacer(Modifier.width(14.dp))
+            GhostButton("Favourite", icon = Icons.Default.FavoriteBorder) {
+                controller.favouriteSelection(visible)
+            }
+            Spacer(Modifier.width(6.dp))
+            GhostButton("Edit details", icon = Icons.Default.Edit) {
+                controller.editSelection(visible)
+            }
+            Spacer(Modifier.width(14.dp))
+            GhostButton("Show in Explorer", icon = Icons.Default.FolderOpen) {
+                controller.revealSelection(visible)
+            }
+            Spacer(Modifier.width(6.dp))
+            GhostButton("Zip and ship", icon = Icons.Default.Archive) {
+                controller.zipSelection(visible)
+            }
+            Spacer(Modifier.width(6.dp))
         }
-        Spacer(Modifier.width(6.dp))
-        GhostButton("Play next", icon = Icons.Default.QueuePlayNext) {
-            controller.playNext(controller.selectedTracks(visible))
-        }
-        Spacer(Modifier.width(6.dp))
-        GhostButton("Queue", icon = Icons.Default.PlaylistAdd) {
-            controller.addToQueue(controller.selectedTracks(visible))
-        }
-        Spacer(Modifier.width(6.dp))
-        GhostButton("Favourite", icon = Icons.Default.FavoriteBorder) {
-            controller.favouriteSelection(visible)
-        }
-        Spacer(Modifier.width(6.dp))
-        GhostButton("Zip and ship", icon = Icons.Default.Archive) {
-            controller.zipSelection(visible)
-        }
-        Spacer(Modifier.width(6.dp))
-        GhostButton("Edit details", icon = Icons.Default.Edit) {
-            controller.editSelection(visible)
-        }
-        Spacer(Modifier.width(6.dp))
-        GhostButton("Show in Explorer", icon = Icons.Default.FolderOpen) {
-            controller.revealSelection(visible)
-        }
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(10.dp))
         GhostButton("Delete", icon = Icons.Default.Delete) {
             controller.deleteSelection(visible)
         }

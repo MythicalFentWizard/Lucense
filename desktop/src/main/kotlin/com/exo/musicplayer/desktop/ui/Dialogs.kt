@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Album
@@ -50,6 +52,7 @@ import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.DesktopDuplicateGroup
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
+import java.util.Locale
 
 /** Which modal is open, if any. */
 enum class DialogKind { BULK, DUPLICATES, ADD_TO_PLAYLIST, MERGE }
@@ -118,7 +121,14 @@ fun ScrimDialog(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            content()
+            // The heading stays put and the body scrolls under it. Nothing here
+            // is taller than the window today - the tallest, Bulk tools, is
+            // 553px of the 576px a dialog is given - but a job in progress adds
+            // a panel to that one, and without this the bottom of it would
+            // simply be cut off with no way to reach it.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                content()
+            }
         }
     }
 }
@@ -148,59 +158,63 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
             note = "Off means each tool only visits tracks it hasn't seen before"
         ) { redo = it }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(18.dp))
 
+        // Grouped by what they are for, and within that cheapest first. Repair
+        // comes last on purpose: it is the only one that rewrites the files
+        // rather than reading them or writing a tag.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            BulkOption(
-                kind = BulkKind.COVERS,
-                icon = Icons.Default.Album,
-                description = "Finds missing cover art, five songs at a time, asking six " +
-                    "sources at once, YouTube first. Tracks that already have art are left alone.",
-                enabled = !job.running
-            ) { controller.runBulk(BulkKind.COVERS, redo) }
-
+            BulkGroup("Naming")
             BulkOption(
                 kind = BulkKind.TAGS,
                 icon = Icons.AutoMirrored.Filled.Label,
-                description = "Looks songs up by name, five at a time, and fills in artist, " +
-                    "album and year, each from the best source that has it.",
+                description = "Looks songs up by name and fills in artist, album and year, " +
+                    "each from the best source that has it.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.TAGS, redo) }
 
             BulkOption(
+                kind = BulkKind.IDENTIFY,
+                icon = Icons.Default.Fingerprint,
+                description = "Fingerprints the audio itself. Slower, but it works on files " +
+                    "with no usable name at all.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.IDENTIFY, redo) }
+
+            BulkGroup("Artwork and words")
+            BulkOption(
+                kind = BulkKind.COVERS,
+                icon = Icons.Default.Album,
+                description = "Finds missing cover art, asking six sources at once. Songs " +
+                    "that already have art are left alone.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.COVERS, redo) }
+
+            BulkOption(
                 kind = BulkKind.LYRICS,
                 icon = Icons.Default.Lyrics,
-                description = "Four services in turn — LRCLIB, NetEase, lyrics.ovh, " +
-                    "Genius — keeping timed lyrics where they exist.",
+                description = "Four services in turn, keeping timed lyrics where they exist.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.LYRICS, redo) }
 
+            BulkGroup("Sound")
             BulkOption(
                 kind = BulkKind.LEVELS,
                 icon = Icons.Default.Tune,
-                description = "Measures how loud each song actually is, so they all play at the " +
-                    "same level instead of one arriving twice the volume of the last. Ninety " +
-                    "seconds of each is read; nothing is written to the files.",
+                description = "Measures how loud each song really is, so they all play at the " +
+                    "same level. Nothing is written to the files.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.LEVELS, redo) }
 
+            BulkGroup("Repair")
             BulkOption(
                 kind = BulkKind.REPAIR,
                 icon = Icons.Default.Healing,
-                description = "Rebuilds files that came without a proper header — Telegram's " +
-                    "exports, mostly — so they show their length, seek properly and stop skipping " +
-                    "when paused. Fills in title and artist from \"Title   Artist\" filenames too. " +
-                    "The audio itself is copied across untouched.",
+                description = "Rebuilds files that came without a proper header — Telegram " +
+                    "exports, mostly — so they show their length and seek properly. The audio " +
+                    "itself is copied across untouched.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.REPAIR, redo) }
-
-            BulkOption(
-                kind = BulkKind.IDENTIFY,
-                icon = Icons.Default.Fingerprint,
-                description = "Fingerprints the audio itself. Slower, but it works on " +
-                    "files with no usable name at all.",
-                enabled = !job.running
-            ) { controller.runBulk(BulkKind.IDENTIFY, redo) }
         }
 
         if (job.running || job.finishedNote != null) {
@@ -258,6 +272,18 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
     }
 }
 
+/** A heading over a couple of the tools, so the list reads as sorted. */
+@Composable
+private fun BulkGroup(text: String) {
+    Text(
+        text.uppercase(Locale.getDefault()),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = Palette.TextFaint,
+        modifier = Modifier.padding(top = 6.dp, start = 2.dp)
+    )
+}
+
 @Composable
 private fun BulkOption(
     kind: BulkKind,
@@ -286,7 +312,9 @@ private fun BulkOption(
             Text(
                 description,
                 style = MaterialTheme.typography.labelSmall,
-                color = Palette.TextFaint
+                color = Palette.TextFaint,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Spacer(Modifier.width(12.dp))

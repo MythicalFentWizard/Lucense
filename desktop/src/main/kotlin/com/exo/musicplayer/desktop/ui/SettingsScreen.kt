@@ -349,6 +349,101 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
         Spacer(Modifier.height(14.dp))
 
         Panel(Modifier.fillMaxWidth()) {
+            SectionTitle("Playback")
+            Spacer(Modifier.height(10.dp))
+            CheckRow(
+                label = "Even out volumes",
+                checked = controller.levelling,
+                note = "Plays every measured song at the same loudness. Run Level volumes in " +
+                    "Bulk tools to measure them."
+            ) { controller.levelling = it }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Fade out on the sleep timer",
+                checked = controller.sleepFade,
+                note = "The last half minute comes down gently instead of stopping mid-bar."
+            ) { controller.sleepFade = it }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Media keys",
+                checked = controller.mediaKeysEnabled,
+                note = "Play, pause, next and previous on the keyboard, from anywhere. " +
+                    "While this is on, other players won't see those keys."
+            ) { controller.mediaKeysEnabled = it }
+
+            Spacer(Modifier.height(28.dp))
+            SectionTitle("Lyrics and artwork")
+            Spacer(Modifier.height(10.dp))
+            Text("Lyrics search", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(controller.lyricsTerm.note)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = LyricsTerm.entries,
+                    selected = controller.lyricsTerm,
+                    label = { it.label },
+                    onSelect = { controller.lyricsTerm = it }
+                )
+            }
+            if (controller.lyricsTerm == LyricsTerm.CUSTOM) {
+                Spacer(Modifier.height(8.dp))
+                TextInput(
+                    value = controller.lyricsTermCustom,
+                    onValueChange = { controller.lyricsTermCustom = it },
+                    placeholder = "{artist} {title}",
+                    modifier = Modifier.width(320.dp)
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Text("Cover art service", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                "Asked first when covers are fetched in bulk. The others are still " +
+                    "tried when it has nothing, so a preference never costs you a cover."
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = listOf("") + controller.coverProviders,
+                    selected = controller.coverProvider,
+                    label = { if (it.isBlank()) "Automatic" else it },
+                    onSelect = { controller.coverProvider = it }
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
+            SectionTitle("Sharing")
+            Spacer(Modifier.height(10.dp))
+            CheckRow(
+                label = "Show what you're playing on Discord",
+                checked = controller.discord,
+                note = controller.discordNote
+                    ?: if (controller.discordConnected) {
+                        "Connected. Your profile shows the song and artist while something is playing."
+                    } else {
+                        "Needs the Discord desktop app running on this PC. Nothing leaves your machine."
+                    }
+            ) { controller.discord = it }
+            if (controller.discord) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Application ID",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim,
+                        modifier = Modifier.width(110.dp)
+                    )
+                    TextInput(
+                        value = controller.discordId,
+                        onValueChange = { controller.changeDiscordId(it) },
+                        placeholder = "From discord.com/developers",
+                        modifier = Modifier.width(260.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
             SectionTitle("About")
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -404,99 +499,9 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             }
 
             Spacer(Modifier.height(16.dp))
-            CheckRow(
-                label = "Even out volumes",
-                checked = controller.levelling,
-                note = "Plays every measured song at the same loudness. Run Level volumes in " +
-                    "Bulk tools to measure them."
-            ) { controller.levelling = it }
-            Spacer(Modifier.height(16.dp))
-            CheckRow(
-                label = "Fade out on the sleep timer",
-                checked = controller.sleepFade,
-                note = "The last half minute comes down gently instead of stopping mid-bar."
-            ) { controller.sleepFade = it }
-
-            Spacer(Modifier.height(18.dp))
-            Text("Lyrics search", style = MaterialTheme.typography.titleSmall, color = Palette.Text)
-            Spacer(Modifier.height(4.dp))
-            Hint(controller.lyricsTerm.note)
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                SegmentedRow(
-                    options = LyricsTerm.entries,
-                    selected = controller.lyricsTerm,
-                    label = { it.label },
-                    onSelect = { controller.lyricsTerm = it }
-                )
-            }
-            if (controller.lyricsTerm == LyricsTerm.CUSTOM) {
-                Spacer(Modifier.height(8.dp))
-                TextInput(
-                    value = controller.lyricsTermCustom,
-                    onValueChange = { controller.lyricsTermCustom = it },
-                    placeholder = "{artist} {title}",
-                    modifier = Modifier.width(320.dp)
-                )
-            }
-
-            Spacer(Modifier.height(18.dp))
-            Text("Cover art service", style = MaterialTheme.typography.titleSmall, color = Palette.Text)
-            Spacer(Modifier.height(4.dp))
-            Hint(
-                "Asked first when covers are fetched in bulk. The others are still " +
-                    "tried when it has nothing, so a preference never costs you a cover."
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                SegmentedRow(
-                    options = listOf("") + controller.coverProviders,
-                    selected = controller.coverProvider,
-                    label = { if (it.isBlank()) "Automatic" else it },
-                    onSelect = { controller.coverProvider = it }
-                )
-            }
-
-            Spacer(Modifier.height(18.dp))
             GhostButton("Keyboard shortcuts", icon = Icons.Default.Keyboard) {
                 controller.showShortcuts = true
             }
-
-            Spacer(Modifier.height(16.dp))
-            CheckRow(
-                label = "Show what you're playing on Discord",
-                checked = controller.discord,
-                note = controller.discordNote
-                    ?: if (controller.discordConnected) {
-                        "Connected. Your profile shows the song and artist while something is playing."
-                    } else {
-                        "Needs the Discord desktop app running on this PC. Nothing leaves your machine."
-                    }
-            ) { controller.discord = it }
-            if (controller.discord) {
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Application ID",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Palette.TextDim,
-                        modifier = Modifier.width(110.dp)
-                    )
-                    TextInput(
-                        value = controller.discordId,
-                        onValueChange = { controller.changeDiscordId(it) },
-                        placeholder = "From discord.com/developers",
-                        modifier = Modifier.width(260.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            CheckRow(
-                label = "Media keys",
-                checked = controller.mediaKeysEnabled,
-                note = "Play, pause, next and previous on the keyboard, from anywhere. " +
-                    "While this is on, other players won't see those keys."
-            ) { controller.mediaKeysEnabled = it }
             Spacer(Modifier.height(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
