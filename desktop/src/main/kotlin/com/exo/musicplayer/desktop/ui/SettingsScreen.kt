@@ -443,7 +443,15 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     }
             ) { controller.discord = it }
             if (controller.discord) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
+                CheckRow(
+                    label = "Show the song's own cover",
+                    checked = controller.discordCover,
+                    note = "Discord fetches the picture itself, so the cover has to be one " +
+                        "with a web address: the ones the cover tool found, or one looked up " +
+                        "once per song. Off shows the Resonate icon instead."
+                ) { controller.discordCover = it }
+                Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Application ID",

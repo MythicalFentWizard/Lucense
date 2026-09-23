@@ -353,7 +353,8 @@ class DesktopController(parent: CoroutineScope) {
         plays = playCounts[track.file.absolutePath] ?: 0,
         rating = ratings[track.file.absolutePath] ?: 0,
         year = track.year,
-        addedAt = track.file.lastModified()
+        addedAt = track.file.lastModified(),
+        genre = track.genre
     )
 
     /** The library by path, for the lists that are kept as paths. */
@@ -1973,7 +1974,8 @@ class DesktopController(parent: CoroutineScope) {
         title: String,
         artist: String,
         album: String,
-        year: String
+        year: String,
+        genre: String
     ) {
         scope.launch {
             val result = io {
@@ -1983,6 +1985,7 @@ class DesktopController(parent: CoroutineScope) {
                     artist = artist.trim(),
                     album = album.trim(),
                     year = year.trim().toIntOrNull(),
+                    genre = genre.trim(),
                     clearBlanks = true
                 )
             }
@@ -2221,7 +2224,10 @@ class DesktopController(parent: CoroutineScope) {
     private suspend fun bulkCover(track: DesktopTrack): BulkOutcome {
         if (io { Covers.hasLocalArt(track) }) return BulkOutcome.ALREADY_HAD
         val stored = libraryLookup.preferring(coverProvider).findArtwork(track.searchQuery) { url ->
-            Covers.fetchAndStore(track, url, writeTags).takeIf { it }
+            Covers.fetchAndStore(track, url, writeTags).takeIf { it }?.also {
+                // Kept because Discord needs an address, not a local file.
+                io { store.saveCoverUrl(track.file.absolutePath, url) }
+            }
         }
         return if (stored != null) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
     }
@@ -2230,8 +2236,9 @@ class DesktopController(parent: CoroutineScope) {
         val details = libraryLookup.findDetails(track.artist, track.title, giveUpMs = TAGS_GIVE_UP_MS)
             ?: return false
         return io {
-            TagWriter.write(track.file, details.title, details.artist, details.album, details.year)
-                .isSuccess
+            TagWriter.write(
+                track.file, details.title, details.artist, details.album, details.year, details.genre
+            ).isSuccess
         }
     }
 
@@ -2977,25 +2984,25 @@ class DesktopController(parent: CoroutineScope) {
      * field left blank is left alone rather than cleared: the whole point of
      * editing thirty files at once is to set one thing about them.
      */
-    fun applyToMany(artist: String, album: String, year: String) {
+    fun applyToMany(artist: String, album: String, year: String, genre: String) {
         val targets = editMany
         if (targets.isEmpty()) return
         editMany = emptyList()
-        val change = Triple(
-            artist.trim().takeIf { it.isNotEmpty() },
-            album.trim().takeIf { it.isNotEmpty() },
-            year.trim().takeIf { it.isNotEmpty() }
-        )
-        if (change.first == null && change.second == null && change.third == null) return
+        val newArtist = artist.trim().takeIf { it.isNotEmpty() }
+        val newAlbum = album.trim().takeIf { it.isNotEmpty() }
+        val newYear = year.trim().takeIf { it.isNotEmpty() }
+        val newGenre = genre.trim().takeIf { it.isNotEmpty() }
+        if (newArtist == null && newAlbum == null && newYear == null && newGenre == null) return
         scope.launch {
             val written = io {
                 targets.count { track ->
                     TagWriter.change(
                         TagChange(
                             file = track.file,
-                            artist = change.first,
-                            album = change.second,
-                            year = change.third
+                            artist = newArtist,
+                            album = newAlbum,
+                            year = newYear,
+                            genre = newGenre
                         )
                     ).isSuccess
                 }
@@ -3424,16 +3431,64 @@ class DesktopController(parent: CoroutineScope) {
         tellDiscord()
     }
 
+    private val discordCoverState = mutableStateOf(settings.discordCover)
+
+    /** Whether the song's own cover is shown on Discord instead of the app icon. */
+    var discordCover: Boolean
+        get() = discordCoverState.value
+        set(value) {
+            discordCoverState.value = value
+            settings.discordCover = value
+            tellDiscord()
+        }
+
+    /** Cover addresses already known, by song path; blank means "none to be had". */
+    private val coverUrls = mutableMapOf<String, String>()
+    private val coverLookups = mutableSetOf<String>()
+
+    /**
+     * A web address for this song's cover, if there is one.
+     *
+     * Discord fetches the picture itself, so the copy in the covers folder is
+     * no use to it - it has to be something public. Addresses the cover tool
+     * already found are kept in the database; anything else is looked up once,
+     * in the background, and the presence is told again when it arrives.
+     */
+    private fun discordCoverUrl(track: DesktopTrack): String? {
+        if (!discordCover) return null
+        val path = track.file.absolutePath
+        coverUrls[path]?.let { return it.ifBlank { null } }
+        if (!coverLookups.add(path)) return null
+        scope.launch {
+            val found = io { store.coverUrl(path) }
+                ?: runCatching {
+                    libraryLookup.searchAll(track.searchQuery, limitPer = 3)
+                        .firstNotNullOfOrNull { it.artworkUrl }
+                }.getOrNull()
+            coverUrls[path] = found.orEmpty()
+            if (found != null) {
+                io { store.saveCoverUrl(path, found) }
+                // Only if it is still the song playing; a lookup can easily
+                // outlive the song that asked for it.
+                if (engine.status.value.track?.file?.absolutePath == path) tellDiscord()
+            }
+        }
+        return null
+    }
+
     /** Called whenever what is playing changes. */
     private fun tellDiscord() {
         val status = engine.status.value
+        val track = status.track
         val startedAt = System.currentTimeMillis() - status.positionMs
         presence.show(
-            title = status.track?.title,
-            artist = status.track?.displayArtist,
+            title = track?.title,
+            artist = track?.displayArtist,
             startedAt = startedAt,
             endsAt = if (status.durationMs > 0L) startedAt + status.durationMs else 0L,
-            playing = status.playing
+            playing = status.playing,
+            image = track?.let { discordCoverUrl(it) },
+            album = track?.album
         )
     }
 
@@ -3442,6 +3497,71 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Whether the list of keyboard shortcuts is on screen. */
     var showShortcuts by mutableStateOf(false)
+
+    // ---- Genres --------------------------------------------------------------------
+
+    /** Every genre in the library with how many songs carry it, commonest first. */
+    val genres: List<Pair<String, Int>>
+        get() = tracks
+            .flatMap { Genres.split(it.genre) }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { it.value }
+                    .thenBy { it.key.lowercase(Locale.ROOT) }
+            )
+            .map { it.key to it.value }
+
+    /** How many songs carry no genre at all, which is what the bulk tool is for. */
+    val ungenred: Int get() = tracks.count { Genres.split(it.genre).isEmpty() }
+
+    /**
+     * The songs behind something typed into the genre box.
+     *
+     * A bare word is tried as a genre first, because that is what the box is
+     * for. If nothing carries that genre it falls back to an ordinary search,
+     * so typing an artist or an album there still does the obvious thing rather
+     * than nothing at all. Anything with a field in it - rating:4+, year:2020+ -
+     * is passed straight through, so a genre can be narrowed down as well.
+     */
+    fun promptTracks(prompt: String): List<DesktopTrack> {
+        val text = prompt.trim()
+        if (text.isEmpty()) return emptyList()
+        if (!text.contains(':')) {
+            val asGenre = SearchQuery.of("genre:\"" + text + "\"")
+            val byGenre = tracks.filter { matchesQuery(asGenre, it) }
+            if (byGenre.isNotEmpty()) return byGenre
+        }
+        val free = SearchQuery.of(text)
+        return if (free.isEmpty) emptyList() else tracks.filter { matchesQuery(free, it) }
+    }
+
+    var genreNote by mutableStateOf<String?>(null)
+
+    fun dismissGenreNote() { genreNote = null }
+
+    fun playPrompt(prompt: String) {
+        val list = promptTracks(prompt)
+        if (list.isEmpty()) {
+            genreNote = "Nothing in the library matches \"${prompt.trim()}\"."
+            return
+        }
+        play(list.first(), list)
+        genreNote = "Playing ${list.size} songs."
+    }
+
+    /** Freezes what a prompt matches right now into an ordinary playlist. */
+    fun savePrompt(prompt: String) {
+        val list = promptTracks(prompt)
+        if (list.isEmpty()) {
+            genreNote = "Nothing in the library matches \"${prompt.trim()}\"."
+            return
+        }
+        val name = prompt.trim().replaceFirstChar { it.titlecase(Locale.ROOT) }
+        createPlaylist(name, list)
+        genreNote = "Saved \"$name\" with ${list.size} songs."
+    }
 
     // ---- Lists that keep themselves ---------------------------------------------
 

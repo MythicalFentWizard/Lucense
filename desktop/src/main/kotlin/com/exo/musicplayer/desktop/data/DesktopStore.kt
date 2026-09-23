@@ -61,6 +61,14 @@ class DesktopStore(databaseFile: File) {
             )
             st.executeUpdate(
                 """
+                CREATE TABLE IF NOT EXISTS cover_urls (
+                    path TEXT PRIMARY KEY,
+                    url TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
                 CREATE TABLE IF NOT EXISTS track_fx (
                     path TEXT PRIMARY KEY,
                     settings TEXT NOT NULL
@@ -520,6 +528,25 @@ class DesktopStore(databaseFile: File) {
         }
     }
 
+    /** Where this song's cover was found on the web, if it was. */
+    fun coverUrl(path: String): String? {
+        connection.prepareStatement("SELECT url FROM cover_urls WHERE path = ?").use { ps ->
+            ps.setString(1, path)
+            ps.executeQuery().use { rs -> return if (rs.next()) rs.getString(1) else null }
+        }
+    }
+
+    fun saveCoverUrl(path: String, url: String) {
+        connection.prepareStatement(
+            "INSERT INTO cover_urls(path, url) VALUES (?,?) " +
+                "ON CONFLICT(path) DO UPDATE SET url = excluded.url"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setString(2, url)
+            ps.executeUpdate()
+        }
+    }
+
     fun fxFor(path: String): String? {
         connection.prepareStatement("SELECT settings FROM track_fx WHERE path = ?").use { ps ->
             ps.setString(1, path)
@@ -549,7 +576,8 @@ class DesktopStore(databaseFile: File) {
     fun forgetPaths(paths: Collection<String>) {
         if (paths.isEmpty()) return
         for (table in listOf(
-            "play_events", "lyrics", "marks", "playlist_items", "favourites", "track_fx"
+            "play_events", "lyrics", "marks", "playlist_items", "favourites", "track_fx",
+            "cover_urls"
         )) {
             connection.prepareStatement("DELETE FROM $table WHERE path = ?").use { ps ->
                 for (path in paths) { ps.setString(1, path); ps.addBatch() }

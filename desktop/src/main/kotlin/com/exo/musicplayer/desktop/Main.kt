@@ -46,6 +46,7 @@ import com.exo.musicplayer.desktop.ui.MiniPlayer
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.ResonateDesktopTheme
 import com.exo.musicplayer.desktop.ui.ScaledToWindow
+import com.exo.musicplayer.desktop.ui.Typing
 import kotlinx.coroutines.delay
 import java.awt.Dimension
 import java.io.File
@@ -97,6 +98,10 @@ fun main(args: Array<String>) = application {
         // only for keys we claim.
         onPreviewKeyEvent = { event ->
             when {
+                // Someone is typing, so these keys are the text box's, not the
+                // window's: Ctrl+A is the text in the box rather than every
+                // song on screen, and Escape is its own business.
+                Typing.active -> false
                 event.type == KeyEventType.KeyDown &&
                     event.isCtrlPressed && event.key == Key.A -> {
                     controller.selectAll(controller.visibleTracks)

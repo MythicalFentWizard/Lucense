@@ -15,11 +15,27 @@ import java.util.Locale
  * library full of names nobody can type on a plain keyboard is the normal case
  * here, not the exception.
  */
+/**
+ * A genre tag is often several genres at once.
+ *
+ * "Hip-Hop/Rap", "Rock; Alternative", "Pop | Dance" all turn up in real files.
+ * Commas are deliberately not separators: "Drum, Bass" would become two genres
+ * that nobody has, and plenty of single genres carry a comma of their own.
+ */
+object Genres {
+    // No escapes needed: each piece is trimmed on the way out anyway.
+    private val BETWEEN = Regex("[;/|]")
+
+    fun split(raw: String?): List<String> =
+        raw?.split(BETWEEN)?.mapNotNull { it.trim().takeIf { one -> one.isNotEmpty() } }.orEmpty()
+}
+
 data class SearchQuery(
     val words: List<String> = emptyList(),
     val artist: List<String> = emptyList(),
     val album: List<String> = emptyList(),
     val title: List<String> = emptyList(),
+    val genre: List<String> = emptyList(),
     val favouritesOnly: Boolean = false,
     val unplayedOnly: Boolean = false,
     val ratingFrom: Int? = null,
@@ -33,7 +49,7 @@ data class SearchQuery(
 ) {
     val isEmpty: Boolean
         get() = words.isEmpty() && artist.isEmpty() && album.isEmpty() && title.isEmpty() &&
-            !favouritesOnly && !unplayedOnly && ratingFrom == null && ratingTo == null &&
+            genre.isEmpty() && !favouritesOnly && !unplayedOnly && ratingFrom == null && ratingTo == null &&
             yearFrom == null && yearTo == null && playsFrom == null && playsTo == null &&
             addedWithinDays == null
 
@@ -45,7 +61,8 @@ data class SearchQuery(
         plays: Int,
         rating: Int = 0,
         year: Int? = null,
-        addedAt: Long = 0L
+        addedAt: Long = 0L,
+        genre: String? = null
     ): Boolean {
         if (favouritesOnly && !favourite) return false
         if (unplayedOnly && plays > 0) return false
@@ -61,6 +78,10 @@ data class SearchQuery(
         addedWithinDays?.let {
             if (addedAt <= 0L) return false
             if (System.currentTimeMillis() - addedAt > it * 86_400_000L) return false
+        }
+        if (this.genre.isNotEmpty()) {
+            val carried = Genres.split(genre).map { fold(it) }
+            if (this.genre.any { wanted -> carried.none { it.contains(wanted) } }) return false
         }
         val foldedTitle = fold(title)
         val foldedArtist = fold(artist)
@@ -85,6 +106,7 @@ data class SearchQuery(
             val artist = mutableListOf<String>()
             val album = mutableListOf<String>()
             val title = mutableListOf<String>()
+            val genre = mutableListOf<String>()
             var favourites = false
             var unplayed = false
             var ratingFrom: Int? = null
@@ -103,6 +125,7 @@ data class SearchQuery(
                     field == "artist" || field == "by" -> if (value.isNotEmpty()) artist.add(value)
                     field == "album" -> if (value.isNotEmpty()) album.add(value)
                     field == "title" || field == "track" -> if (value.isNotEmpty()) title.add(value)
+                    field == "genre" || field == "style" -> if (value.isNotEmpty()) genre.add(value)
                     field == "fav" || field == "loved" -> favourites = value != "no"
                     field == "unplayed" || field == "new" -> unplayed = value != "no"
                     field == "rating" || field == "stars" -> span(value)?.let {
@@ -122,7 +145,7 @@ data class SearchQuery(
                 }
             }
             return SearchQuery(
-                words, artist, album, title, favourites, unplayed,
+                words, artist, album, title, genre, favourites, unplayed,
                 ratingFrom, ratingTo, yearFrom, yearTo, playsFrom, playsTo, addedWithin
             )
         }

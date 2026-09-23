@@ -29,10 +29,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -176,6 +179,19 @@ fun Hint(text: String, modifier: Modifier = Modifier) {
 }
 
 /** Single-line input styled for a dense layout. */
+/**
+ * Whether a text box currently holds the keyboard.
+ *
+ * The window claims a few keys before anything else sees them, which is right
+ * for Ctrl+A over the song list and wrong the moment someone is typing in a
+ * box: there, Ctrl+A means the text in it. The window stands back while this
+ * is set, which also hands back Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Z, Home, End and
+ * shift-selection, all of which the text field has always known how to do.
+ */
+object Typing {
+    var active by mutableStateOf(false)
+}
+
 @Composable
 fun TextInput(
     value: String,
@@ -215,6 +231,7 @@ fun TextInput(
                 cursorBrush = SolidColor(Palette.Accent),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .onFocusChanged { Typing.active = it.isFocused }
                     .then(
                         if (onSubmit == null) {
                             Modifier

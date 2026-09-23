@@ -175,6 +175,7 @@ object TagWriter {
         artist: String?,
         album: String?,
         year: Int?,
+        genre: String? = null,
         clearBlanks: Boolean = false
     ): Result<Unit> = runCatching {
         val audio = AudioFileIO.read(file)
@@ -192,6 +193,7 @@ object TagWriter {
         apply(FieldKey.ARTIST, artist)
         apply(FieldKey.ALBUM, album)
         apply(FieldKey.YEAR, year?.toString())
+        apply(FieldKey.GENRE, genre)
         audio.commit()
     }
 
@@ -204,6 +206,7 @@ object TagWriter {
         change.album?.let { tag.setField(FieldKey.ALBUM, it) }
         change.albumArtist?.let { tag.setField(FieldKey.ALBUM_ARTIST, it) }
         change.year?.let { tag.setField(FieldKey.YEAR, it) }
+        change.genre?.let { tag.setField(FieldKey.GENRE, it) }
         audio.commit()
     }
 }

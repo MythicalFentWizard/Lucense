@@ -98,6 +98,11 @@ class DesktopSettings {
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
     /** The Discord application this shows up as; blank turns it off. */
+    /** Whether the song's own cover is shown on Discord rather than the app icon. */
+    var discordCover: Boolean
+        get() = prefs.getBoolean(KEY_DISCORD_COVER, true)
+        set(value) = prefs.putBoolean(KEY_DISCORD_COVER, value)
+
     /** Milliseconds one song overlaps the next; 0 is a clean handover. */
     var crossfadeMs: Int
         get() = prefs.getInt(KEY_CROSSFADE, 0)
@@ -228,6 +233,7 @@ class DesktopSettings {
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
         const val KEY_LEVELLING = "levelling"
+        const val KEY_DISCORD_COVER = "discord_cover"
         const val KEY_CROSSFADE = "crossfade_ms"
         const val KEY_SLEEP_FADE = "sleep_fade"
         const val KEY_LYRICS_TERM = "lyrics_term"

@@ -552,6 +552,7 @@ fun EditTrackDialog(
     var title by remember(track.file.absolutePath) { mutableStateOf(track.title) }
     var artist by remember(track.file.absolutePath) { mutableStateOf(track.artist.orEmpty()) }
     var album by remember(track.file.absolutePath) { mutableStateOf(track.album.orEmpty()) }
+    var genre by remember(track.file.absolutePath) { mutableStateOf(track.genre.orEmpty()) }
     var year by remember(track.file.absolutePath) {
         mutableStateOf(track.year?.toString().orEmpty())
     }
@@ -574,6 +575,9 @@ fun EditTrackDialog(
             Column(Modifier.weight(2f)) {
                 FieldLabel("Album")
                 TextInput(album, { album = it }, "None", Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                FieldLabel("Genre")
+                TextInput(genre, { genre = it }, "None", Modifier.fillMaxWidth())
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.width(96.dp)) {
@@ -603,7 +607,7 @@ fun EditTrackDialog(
             GhostButton("Cancel", onClick = onDismiss)
             Spacer(Modifier.width(8.dp))
             AccentButton("Save", enabled = controller.writeTags) {
-                controller.saveTrackDetails(track, title, artist, album, year)
+                controller.saveTrackDetails(track, title, artist, album, year, genre)
             }
         }
     }
@@ -626,7 +630,8 @@ fun EditTracksDialog(controller: DesktopController, tracks: List<DesktopTrack>, 
     var artist by remember(tracks) { mutableStateOf("") }
     var album by remember(tracks) { mutableStateOf("") }
     var year by remember(tracks) { mutableStateOf("") }
-    val anything = artist.isNotBlank() || album.isNotBlank() || year.isNotBlank()
+    var genre by remember(tracks) { mutableStateOf("") }
+    val anything = artist.isNotBlank() || album.isNotBlank() || year.isNotBlank() || genre.isNotBlank()
 
     ScrimDialog(
         title = "Edit ${tracks.size} songs",
@@ -638,6 +643,9 @@ fun EditTracksDialog(controller: DesktopController, tracks: List<DesktopTrack>, 
         Spacer(Modifier.height(12.dp))
         FieldLabel("Album")
         TextInput(album, { album = it }, "Leave unchanged", Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        FieldLabel("Genre")
+        TextInput(genre, { genre = it }, "Leave unchanged", Modifier.fillMaxWidth())
         Spacer(Modifier.height(12.dp))
         FieldLabel("Year")
         TextInput(year, { year = it }, "Leave unchanged", Modifier.width(140.dp))
@@ -652,7 +660,7 @@ fun EditTracksDialog(controller: DesktopController, tracks: List<DesktopTrack>, 
             GhostButton("Cancel", onClick = onDismiss)
             Spacer(Modifier.width(8.dp))
             AccentButton("Apply to ${tracks.size}", enabled = anything) {
-                controller.applyToMany(artist, album, year)
+                controller.applyToMany(artist, album, year, genre)
             }
         }
     }

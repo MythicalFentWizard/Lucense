@@ -72,6 +72,7 @@ fun PlaylistsScreen(
     }
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf("") }
     var creatingSmart by remember { mutableStateOf(false) }
     var smartName by remember { mutableStateOf("") }
     var smartRule by remember { mutableStateOf("") }
@@ -186,6 +187,76 @@ fun PlaylistsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = Palette.Accent
                     )
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+
+        SectionTitle("Genres") {
+            Text(
+                if (controller.ungenred > 0) {
+                    "${controller.ungenred} without a genre — Names & tags fills them in"
+                } else {
+                    "${controller.genres.size} genres"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        controller.genreNote?.let { note ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Dismiss") { controller.dismissGenreNote() }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Panel(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextInput(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    placeholder = "A genre, an artist, or a rule like: rock rating:4+",
+                    modifier = Modifier.weight(1f),
+                    onSubmit = { controller.playPrompt(prompt) }
+                )
+                Spacer(Modifier.width(10.dp))
+                AccentButton("Play", enabled = prompt.isNotBlank()) {
+                    controller.playPrompt(prompt)
+                }
+                Spacer(Modifier.width(8.dp))
+                GhostButton("Save as playlist", enabled = prompt.isNotBlank()) {
+                    controller.savePrompt(prompt)
+                }
+            }
+            if (prompt.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Matches ${controller.promptTracks(prompt).size} songs right now",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.Accent
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (controller.genres.isEmpty()) {
+            Hint(
+                "Nothing in the library carries a genre yet. Run Names & tags in Bulk " +
+                    "tools and it fills the genre in from iTunes along with artist, album " +
+                    "and year — or type one into a song's details yourself."
+            )
+        } else {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                controller.genres.take(30).forEach { (name, songs) ->
+                    GhostButton("$name · $songs") { controller.playPrompt(name) }
                 }
             }
         }

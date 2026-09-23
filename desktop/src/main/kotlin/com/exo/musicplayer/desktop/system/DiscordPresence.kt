@@ -35,7 +35,10 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         val artist: String,
         val startedAt: Long,
         val endsAt: Long,
-        val playing: Boolean
+        val playing: Boolean,
+        /** A web address for the cover; Discord fetches the picture itself. */
+        val image: String?,
+        val album: String?
     )
 
     private val running = AtomicBoolean(false)
@@ -85,11 +88,29 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
     }
 
     /** What should be on screen; the worker sends it when Discord will take it. */
-    fun show(title: String?, artist: String?, startedAt: Long, endsAt: Long, playing: Boolean) {
+    fun show(
+        title: String?,
+        artist: String?,
+        startedAt: Long,
+        endsAt: Long,
+        playing: Boolean,
+        image: String? = null,
+        album: String? = null
+    ) {
         wanted = if (title.isNullOrBlank()) {
             null
         } else {
-            Showing(title, artist.orEmpty().ifBlank { "Unknown artist" }, startedAt, endsAt, playing)
+            Showing(
+                title = title,
+                artist = artist.orEmpty().ifBlank { "Unknown artist" },
+                startedAt = startedAt,
+                endsAt = endsAt,
+                playing = playing,
+                // Discord will not fetch just anything, and a very long address
+                // is refused outright, so obvious nonsense is dropped here.
+                image = image?.takeIf { it.startsWith("https://") && it.length <= 220 },
+                album = album?.takeIf { it.isNotBlank() }
+            )
         }
     }
 
@@ -183,8 +204,15 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         }
         append("},")
         append(quoted("assets")).append(":{")
-        append(quoted("large_image")).append(":").append(quoted(ASSET)).append(",")
-        append(quoted("large_text")).append(":").append(quoted("Resonate"))
+        // Discord turns a plain https address into one of its own proxied keys
+        // by itself, which is what lets a song's own cover show without it
+        // having been uploaded to the application beforehand.
+        append(quoted("large_image")).append(":").append(quoted(showing.image ?: ASSET)).append(",")
+        append(quoted("large_text")).append(":")
+        append(quoted(showing.album ?: "Resonate")).append(",")
+        // The little round badge on the corner of the cover.
+        append(quoted("small_image")).append(":").append(quoted(ASSET)).append(",")
+        append(quoted("small_text")).append(":").append(quoted("Resonate"))
         append("}}")
     }
 

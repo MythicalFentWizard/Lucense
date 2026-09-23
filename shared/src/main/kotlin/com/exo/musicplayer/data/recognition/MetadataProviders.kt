@@ -187,7 +187,8 @@ class MetadataProviderChain(private val providers: List<MetadataProvider>) {
         val title: String?,
         val artist: String?,
         val album: String?,
-        val year: Int?
+        val year: Int?,
+        val genre: String? = null
     )
 
     /**
@@ -257,9 +258,10 @@ class MetadataProviderChain(private val providers: List<MetadataProvider>) {
                 title = best { it.title.takeIf(String::isNotBlank) },
                 artist = best { it.artist?.takeIf(String::isNotBlank) },
                 album = best { it.album?.takeIf(String::isNotBlank) },
-                year = best { it.releaseYear }
+                year = best { it.releaseYear },
+                genre = best { it.genre?.takeIf(String::isNotBlank) }
             )
-            val empty = details == SongDetails(null, null, null, null)
+            val empty = details == SongDetails(null, null, null, null, null)
             when {
                 // Past patience a field nobody fast has (Deezer gives no years,
                 // YouTube no albums) is not worth holding the song for, once
