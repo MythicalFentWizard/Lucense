@@ -98,6 +98,11 @@ class DesktopSettings {
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
     /** The Discord application this shows up as; blank turns it off. */
+    /** Milliseconds one song overlaps the next; 0 is a clean handover. */
+    var crossfadeMs: Int
+        get() = prefs.getInt(KEY_CROSSFADE, 0)
+        set(value) = prefs.putInt(KEY_CROSSFADE, value.coerceIn(0, 12_000))
+
     /** Fade the last half minute out rather than cutting off mid-bar. */
     var sleepFade: Boolean
         get() = prefs.getBoolean(KEY_SLEEP_FADE, true)
@@ -223,6 +228,7 @@ class DesktopSettings {
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
         const val KEY_LEVELLING = "levelling"
+        const val KEY_CROSSFADE = "crossfade_ms"
         const val KEY_SLEEP_FADE = "sleep_fade"
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_CUSTOM = "lyrics_term_custom"

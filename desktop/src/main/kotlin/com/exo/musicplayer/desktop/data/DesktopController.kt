@@ -249,6 +249,27 @@ class DesktopController(parent: CoroutineScope) {
 
     private val shazam = ShazamClient()
 
+    init {
+        // The engine rolls into the next song by itself now, so everything that
+        // used to happen when the controller started a track has to happen here
+        // too. This arrives on the playback thread, so nothing may block: the
+        // work is handed straight to the scope.
+        engine.onAdvanced = { finished, started ->
+            scope.launch {
+                // It reached the end, so that is how much of it was heard -
+                // by the time this runs the position already belongs to the
+                // song that followed it.
+                closeListenEvent(finished.durationMs)
+                openListenEvent(started)
+                engine.trackGain = gainFor(started)
+                loadLyricsFor(started)
+                applyFxFor(started)
+                tellDiscord()
+                refreshUpNext()
+            }
+        }
+    }
+
     // ---- Library ------------------------------------------------------------
 
     var folders by mutableStateOf(settings.folders)
@@ -668,6 +689,7 @@ class DesktopController(parent: CoroutineScope) {
         change(list, list.indexOfFirst { it.file == playing?.file })
         order = list
         if (queue.isEmpty()) queue = list
+        refreshUpNext()
     }
 
     /** Drops copies of [items] that are already waiting, so nothing queues twice. */
@@ -771,6 +793,7 @@ class DesktopController(parent: CoroutineScope) {
             // turning it on doesn't cut the current track off, and turning it
             // off puts the rest of the list back in its own order.
             order = orderFrom(engine.status.value.track, queue)
+            refreshUpNext()
         }
 
     private val repeatState = mutableStateOf(RepeatMode.fromName(settings.repeat))
@@ -780,6 +803,10 @@ class DesktopController(parent: CoroutineScope) {
         set(value) {
             repeatState.value = value
             settings.repeat = value.name
+            // Repeat one means the next song is this one again, and repeat all
+            // means the end of the list runs back to the top; both change what
+            // the engine should be holding ready.
+            refreshUpNext()
         }
 
     fun cycleRepeat() {
@@ -1105,6 +1132,7 @@ class DesktopController(parent: CoroutineScope) {
         loadLyricsFor(track)
         applyFxFor(track)
         tellDiscord()
+        refreshUpNext()
     }
 
     /**
@@ -1197,13 +1225,17 @@ class DesktopController(parent: CoroutineScope) {
     fun sleepAfterTrack() {
         setSleepTimer(null)
         stopAfterTrack = true
+        // Nothing follows, so the engine stops at the end instead of rolling on.
+        refreshUpNext()
         dropNote = "Stopping when this song ends."
     }
 
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
         sleepJob = null
+        val wasStopping = stopAfterTrack
         stopAfterTrack = false
+        if (wasStopping) refreshUpNext()
         // Whatever the fade left it at, the slider is the truth again.
         pushVolume()
         if (minutes == null) {
@@ -1334,10 +1366,49 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     /** Called when a track finishes on its own. */
+    /**
+     * What the engine should run into when this song ends, if anything.
+     *
+     * The same reckoning [next] makes, but handed over in advance so the
+     * playback thread can open it before it is needed rather than after.
+     */
+    private fun followingTrack(): DesktopTrack? {
+        if (stopAfterTrack) return null
+        val current = engine.status.value.track ?: return null
+        if (repeat == RepeatMode.ONE) return current
+        val list = order.ifEmpty { queue }
+        if (list.isEmpty()) return null
+        val index = list.indexOfFirst { it.file == current.file }
+        return when {
+            index >= 0 && index < list.lastIndex -> list[index + 1]
+            index >= 0 && repeat == RepeatMode.ALL -> list.firstOrNull()
+            else -> null
+        }
+    }
+
+    /** Keeps the engine told what follows, and how loud it is. */
+    internal fun refreshUpNext() {
+        val follow = followingTrack()
+        engine.setUpNext(follow, gainFor(follow))
+    }
+
+    private val crossfadeState = mutableStateOf(settings.crossfadeMs / 1000)
+
+    /** Seconds one song overlaps the next; 0 hands over cleanly instead. */
+    var crossfadeSeconds: Int
+        get() = crossfadeState.value
+        set(value) {
+            val seconds = value.coerceIn(0, 12)
+            crossfadeState.value = seconds
+            settings.crossfadeMs = seconds * 1000
+            engine.crossfadeMs = seconds * 1000
+        }
+
     fun advance() {
         closeListenEvent()
         if (stopAfterTrack) {
             stopAfterTrack = false
+            refreshUpNext()
             rememberPlace()
             dropNote = "Stopped at the end of the song."
             return
@@ -1359,11 +1430,16 @@ class DesktopController(parent: CoroutineScope) {
         scope.launch { open.rowId.complete(io { store.startPlay(open.path, group) }) }
     }
 
-    /** Writes how much of the outgoing track was actually heard. */
-    fun closeListenEvent() {
+    /**
+     * Writes how much of the outgoing track was actually heard.
+     *
+     * [listenedMs] is given when the engine has already moved on and the
+     * position on screen belongs to the next song rather than to this one.
+     */
+    fun closeListenEvent(listenedMs: Long? = null) {
         val open = openPlay ?: return
         openPlay = null
-        val listened = engine.status.value.positionMs
+        val listened = listenedMs ?: engine.status.value.positionMs
         scope.launch {
             val id = open.rowId.await()
             if (id < 0) return@launch
@@ -3468,6 +3544,7 @@ class DesktopController(parent: CoroutineScope) {
     fun start() {
         applyOutputs()
         pushVolume()
+        engine.crossfadeMs = settings.crossfadeMs
         applyDuckBinding()
         // The music folder is always part of the library, so there is something to
         // scan even before any folder has been added by hand.

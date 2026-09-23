@@ -2,6 +2,9 @@ package com.exo.musicplayer.desktop.audio
 
 import com.exo.musicplayer.data.audio.SpectrumAnalyser
 import com.exo.musicplayer.desktop.library.DesktopTrack
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +71,35 @@ class PlaybackEngine {
     /** Where a prepared track will start from when play is pressed. */
     @Volatile private var pendingStartMs = 0L
     private var lastPublished = -1L
+
+    /**
+     * The song to run into when this one ends, kept fed from outside.
+     *
+     * The old shape was: the track ends, the worker exits, the lines close, the
+     * controller starts the next one and the lines open again. Every one of
+     * those steps is silence, and together they are the gap between tracks.
+     * Knowing what comes next lets the same thread carry straight on through
+     * the same open lines.
+     */
+    @Volatile private var upNext: DesktopTrack? = null
+
+    /** What the next song is multiplied by, the way [trackGain] is for this one. */
+    @Volatile private var upNextGain = 1f
+
+    /** Milliseconds the next song overlaps this one; 0 is a clean handover. */
+    @Volatile var crossfadeMs: Int = 0
+
+    /**
+     * Called on the playback thread when the engine moves on by itself.
+     *
+     * Whoever listens must not block: this is the thread feeding the speakers.
+     */
+    var onAdvanced: ((finished: DesktopTrack, started: DesktopTrack) -> Unit)? = null
+
+    fun setUpNext(track: DesktopTrack?, gain: Float) {
+        upNext = track
+        upNextGain = gain
+    }
 
     /** Devices to play through. The first is primary; the rest are mirrors. */
     fun setOutputs(selected: List<DesktopAudioOutput>) {
@@ -146,12 +178,19 @@ class PlaybackEngine {
     fun setVolume(value: Float) { effects.volume = value.coerceIn(0f, 1f) }
 
     private fun run(track: DesktopTrack, startFrame: Long) {
+        var current = track
         var decoder: Decoder? = null
-        // Whether the decoder ran out, as opposed to being stopped or failing:
-        // the difference between rolling on to the next track and not.
+        // The song being faded in, while the one above is still going.
+        var incomingTrack: DesktopTrack? = null
+        var incoming: Decoder? = null
+        var fadeFrames = 0L
+        var fadeLength = 0L
+        // Whether the decoder ran out with nothing to follow it, as opposed to
+        // being stopped or failing: the difference between the queue being
+        // finished and playback merely ending here.
         var reachedEnd = false
         try {
-            decoder = Decoder.open(track.file, startFrame)
+            decoder = Decoder.open(current.file, startFrame)
             reopenLines()
             if (lines.isEmpty()) {
                 _status.value = _status.value.copy(
@@ -162,7 +201,7 @@ class PlaybackEngine {
             }
 
             val rate = AudioDevices.FORMAT.sampleRate.toInt()
-            val duration = if (track.durationMs > 0) track.durationMs else -1L
+            var duration = if (current.durationMs > 0) current.durationMs else -1L
 
             while (!stopRequested) {
                 if (outputsDirty) {
@@ -174,7 +213,12 @@ class PlaybackEngine {
                 // moves the position straight away rather than on resume.
                 seekToMs?.let { target ->
                     seekToMs = null
-                    decoder = seek(decoder, track, target * rate / 1000)
+                    // A jump abandons any overlap in progress: the song that was
+                    // being faded in is no longer the one about to arrive.
+                    runCatching { incoming?.close() }
+                    incoming = null
+                    incomingTrack = null
+                    decoder = seek(decoder, current, target * rate / 1000)
                     framesPlayed = decoder?.positionFrames ?: 0L
                     effects.reset()
                     spectrum.reset()
@@ -188,10 +232,62 @@ class PlaybackEngine {
 
                 if (!playing) { Thread.sleep(40); continue }
 
+                // Open the next song early enough to overlap by the chosen
+                // amount. Only possible where this one's length is known -
+                // without that there is no telling when the end is coming.
+                val overlap = crossfadeMs.toLong()
+                if (incoming == null && overlap > 0 && duration > 0) {
+                    val leftMs = duration - framesPlayed * 1000 / rate
+                    val follow = upNext
+                    if (follow != null && leftMs in 1..overlap) {
+                        val opened = runCatching { Decoder.open(follow.file, 0L) }.getOrNull()
+                        if (opened != null) {
+                            incoming = opened
+                            incomingTrack = follow
+                            fadeFrames = 0L
+                            fadeLength = (overlap * rate / 1000).coerceAtLeast(1L)
+                        }
+                    }
+                }
+
                 val raw = decoder?.read(4096)
                 if (raw == null) {
-                    reachedEnd = true
-                    break
+                    // This song is done. Carry on into the next one on this
+                    // same thread, through these same open lines: closing them
+                    // and opening them again is exactly what the gap was.
+                    var started = incomingTrack
+                    var handover = incoming
+                    if (handover == null) {
+                        val follow = upNext
+                        if (follow != null) {
+                            handover = runCatching { Decoder.open(follow.file, 0L) }.getOrNull()
+                            started = follow
+                        }
+                    }
+                    if (handover == null || started == null) {
+                        reachedEnd = true
+                        break
+                    }
+                    runCatching { decoder?.close() }
+                    val finished = current
+                    decoder = handover
+                    current = started
+                    incoming = null
+                    incomingTrack = null
+                    trackGain = upNextGain
+                    // Where the new song already is, which after an overlap is
+                    // however much of it has been playing underneath.
+                    framesPlayed = handover.positionFrames
+                    lastPublished = -1
+                    duration = if (current.durationMs > 0) current.durationMs else -1L
+                    _status.value = PlaybackStatus(
+                        track = current,
+                        playing = true,
+                        positionMs = framesPlayed * 1000 / rate,
+                        durationMs = current.durationMs
+                    )
+                    runCatching { onAdvanced?.invoke(finished, current) }
+                    continue
                 }
 
                 // Before the effects rather than after: the meter, the reverb
@@ -200,6 +296,19 @@ class PlaybackEngine {
                 val gain = trackGain
                 if (gain < 0.999f || gain > 1.001f) {
                     for (i in raw.indices) raw[i] *= gain
+                }
+
+                incoming?.let { second ->
+                    val other = second.read(raw.size / 2)
+                    if (other == null) {
+                        // The next song turned out shorter than the overlap.
+                        // Stop mixing and let the changeover do the rest.
+                        runCatching { second.close() }
+                        incoming = null
+                        incomingTrack = null
+                    } else {
+                        fadeFrames += mixFade(raw, other, upNextGain, fadeFrames, fadeLength)
+                    }
                 }
 
                 val processed = effects.process(raw)
@@ -220,6 +329,7 @@ class PlaybackEngine {
             )
         } finally {
             runCatching { decoder?.close() }
+            runCatching { incoming?.close() }
             if (!stopRequested) {
                 _status.value = _status.value.copy(playing = false, ended = reachedEnd)
             }
@@ -323,4 +433,42 @@ class PlaybackEngine {
     fun release() {
         stop()
     }
+}
+
+/**
+ * Mixes [incoming] into [out] across an overlap, and says how many frames of it
+ * were used.
+ *
+ * Equal power rather than a straight line: two uncorrelated songs at half
+ * volume each are quieter than either at full volume, so a linear fade dips
+ * audibly in the middle. Cosine and sine keep the sum of squares at one.
+ *
+ * The level is worked out once at each end of the buffer and interpolated
+ * across it, rather than a cosine per sample - a buffer is about a tenth of a
+ * second, which is far too coarse a step to hear a seam in, and this is the
+ * thread feeding the speakers.
+ */
+internal fun mixFade(
+    out: FloatArray,
+    incoming: FloatArray,
+    incomingGain: Float,
+    fadeFrames: Long,
+    fadeLength: Long
+): Int {
+    val count = minOf(out.size, incoming.size)
+    if (count <= 0 || fadeLength <= 0L) return 0
+    val half = (PI / 2).toFloat()
+    val from = (fadeFrames.toFloat() / fadeLength).coerceIn(0f, 1f)
+    val to = ((fadeFrames + count / 2).toFloat() / fadeLength).coerceIn(0f, 1f)
+    val outFrom = cos(from * half)
+    val outTo = cos(to * half)
+    val inFrom = sin(from * half)
+    val inTo = sin(to * half)
+    for (i in 0 until count) {
+        val along = if (count > 1) i.toFloat() / (count - 1) else 1f
+        val fading = outFrom + (outTo - outFrom) * along
+        val rising = inFrom + (inTo - inFrom) * along
+        out[i] = out[i] * fading + incoming[i] * incomingGain * rising
+    }
+    return count / 2
 }

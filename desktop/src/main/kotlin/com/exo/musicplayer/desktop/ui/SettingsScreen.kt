@@ -363,7 +363,24 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 checked = controller.sleepFade,
                 note = "The last half minute comes down gently instead of stopping mid-bar."
             ) { controller.sleepFade = it }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(18.dp))
+            Text("Crossfade", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                "How long one song overlaps the next. Off still runs straight on into it " +
+                    "without the silence there used to be between tracks."
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = listOf(0, 2, 4, 6, 8, 12),
+                    selected = controller.crossfadeSeconds,
+                    label = { if (it == 0) "Off" else "$it seconds" },
+                    onSelect = { controller.crossfadeSeconds = it }
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
             CheckRow(
                 label = "Media keys",
                 checked = controller.mediaKeysEnabled,
