@@ -146,10 +146,6 @@ fun main(args: Array<String>) = application {
                         controller.jumpToNowPlaying()
                         true
                     }
-                    Key.C -> {
-                        controller.toggleBigCover()
-                        true
-                    }
                     Key.S -> {
                         controller.shuffle = !controller.shuffle
                         true

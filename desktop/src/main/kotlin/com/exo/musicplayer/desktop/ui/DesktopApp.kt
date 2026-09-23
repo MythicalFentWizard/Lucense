@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Check
@@ -53,7 +52,6 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -1164,29 +1162,16 @@ private fun TransportBar(
     val panel = controller.sidePanel
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
-        // The bar is taller when the cover is big, and the content above it
-        // is on a weight, so the list gives up exactly that much room. Nothing
-        // is drawn over anything else.
-        val big = controller.bigCover
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(if (big) 188.dp else 76.dp)
+                .height(76.dp)
                 .background(Palette.Raised)
-                .padding(horizontal = 20.dp, vertical = if (big) 16.dp else 0.dp),
+                .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Artwork(track, if (big) 156.dp else 46.dp, corner = if (big) 10.dp else 5.dp)
-            Spacer(Modifier.width(10.dp))
-            IconButton(onClick = { controller.toggleBigCover() }) {
-                Icon(
-                    if (big) Icons.Default.CloseFullscreen else Icons.Default.OpenInFull,
-                    if (big) "Make the cover small again" else "Make the cover big",
-                    Modifier.size(15.dp),
-                    tint = Palette.TextDim
-                )
-            }
-            Spacer(Modifier.width(6.dp))
+            Artwork(track, 46.dp)
+            Spacer(Modifier.width(13.dp))
             Column(Modifier.width(200.dp)) {
                 Text(
                     track?.title ?: "Nothing playing",
