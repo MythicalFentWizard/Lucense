@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.Repeat
@@ -1256,8 +1257,9 @@ private fun TransportBar(
             Box {
                 BarToggle(
                     icon = Icons.Default.Bedtime,
-                    label = controller.sleepMinutesLeft?.let { "$it min" } ?: "Sleep",
-                    active = controller.sleepEndsAt != null,
+                    label = controller.sleepMinutesLeft?.let { "$it min" }
+                        ?: if (controller.stopAfterTrack) "End of song" else "Sleep",
+                    active = controller.sleepEndsAt != null || controller.stopAfterTrack,
                     highlight = false
                 ) { sleepMenu = true }
                 DropdownMenu(expanded = sleepMenu, onDismissRequest = { sleepMenu = false }) {
@@ -1271,6 +1273,13 @@ private fun TransportBar(
                         )
                     }
                     DropdownMenuItem(
+                        text = { Text("When this song ends", color = Palette.Text) },
+                        onClick = {
+                            controller.sleepAfterTrack()
+                            sleepMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Off", color = Palette.TextDim) },
                         onClick = {
                             controller.setSleepTimer(null)
@@ -1279,6 +1288,12 @@ private fun TransportBar(
                     )
                 }
             }
+            BarToggle(
+                icon = Icons.Default.PictureInPictureAlt,
+                label = "Mini",
+                active = controller.miniPlayer,
+                highlight = false
+            ) { controller.miniPlayer = !controller.miniPlayer }
             BarToggle(
                 icon = Icons.AutoMirrored.Filled.QueueMusic,
                 label = "Queue",

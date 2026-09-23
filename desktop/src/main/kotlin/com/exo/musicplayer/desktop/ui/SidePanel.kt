@@ -192,12 +192,32 @@ fun SidePanel(
         when (kind) {
             SidePanelKind.QUEUE -> QueueList(controller)
 
-            SidePanelKind.EFFECTS -> EffectsControls(
-                fx = controller.fx,
-                spectrum = controller.engine.spectrum,
-                playing = controller.engine.status.value.playing,
-                onFx = { controller.fx = it }
-            )
+            SidePanelKind.EFFECTS -> {
+                EffectsControls(
+                    fx = controller.fx,
+                    spectrum = controller.engine.spectrum,
+                    playing = controller.engine.status.value.playing,
+                    onFx = { controller.fx = it }
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (controller.fxRemembered) {
+                            "Saved against this song"
+                        } else {
+                            "These apply to everything"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (controller.fxRemembered) Palette.Accent else Palette.TextFaint,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (controller.fxRemembered) {
+                        GhostButton("Forget") { controller.forgetFxForCurrent() }
+                    } else {
+                        GhostButton("Remember for this song") { controller.rememberFxForCurrent() }
+                    }
+                }
+            }
             SidePanelKind.OUTPUT -> OutputControls(
                 controller.outputs,
                 controller.selectedOutputs,

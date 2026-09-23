@@ -98,6 +98,11 @@ class DesktopSettings {
         set(value) = prefs.put(KEY_REACTIVE_MODE, value)
 
     /** The Discord application this shows up as; blank turns it off. */
+    /** Fade the last half minute out rather than cutting off mid-bar. */
+    var sleepFade: Boolean
+        get() = prefs.getBoolean(KEY_SLEEP_FADE, true)
+        set(value) = prefs.putBoolean(KEY_SLEEP_FADE, value)
+
     /** How the lyrics search term is put together; see LyricsTerm. */
     var lyricsTerm: String
         get() = prefs.get(KEY_LYRICS_TERM, "ARTIST_TITLE")
@@ -218,6 +223,7 @@ class DesktopSettings {
         const val KEY_SHUFFLE = "shuffle"
         const val KEY_MEDIA_KEYS = "media_keys"
         const val KEY_LEVELLING = "levelling"
+        const val KEY_SLEEP_FADE = "sleep_fade"
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_CUSTOM = "lyrics_term_custom"
         const val KEY_COVER_PROVIDER = "cover_provider"

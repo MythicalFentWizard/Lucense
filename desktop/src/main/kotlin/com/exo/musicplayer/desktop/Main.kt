@@ -42,6 +42,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.ui.DesktopApp
 import com.exo.musicplayer.desktop.ui.LyricsWindow
+import com.exo.musicplayer.desktop.ui.MiniPlayer
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.ResonateDesktopTheme
 import com.exo.musicplayer.desktop.ui.ScaledToWindow
@@ -165,6 +166,19 @@ fun main(args: Array<String>) = application {
             ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
                 AppHost(controller)
             }
+        }
+    }
+
+    if (controller.miniPlayer) {
+        Window(
+            onCloseRequest = { controller.miniPlayer = false },
+            title = "Resonate",
+            icon = painterResource("icon.png"),
+            state = rememberWindowState(width = 400.dp, height = 156.dp),
+            resizable = false,
+            alwaysOnTop = true
+        ) {
+            ResonateDesktopTheme { MiniPlayer(controller) }
         }
     }
 

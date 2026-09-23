@@ -410,6 +410,13 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 note = "Plays every measured song at the same loudness. Run Level volumes in " +
                     "Bulk tools to measure them."
             ) { controller.levelling = it }
+            Spacer(Modifier.height(16.dp))
+            CheckRow(
+                label = "Fade out on the sleep timer",
+                checked = controller.sleepFade,
+                note = "The last half minute comes down gently instead of stopping mid-bar."
+            ) { controller.sleepFade = it }
+
             Spacer(Modifier.height(18.dp))
             Text("Lyrics search", style = MaterialTheme.typography.titleSmall, color = Palette.Text)
             Spacer(Modifier.height(4.dp))

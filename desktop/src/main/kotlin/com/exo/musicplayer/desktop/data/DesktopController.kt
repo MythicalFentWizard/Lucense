@@ -285,13 +285,7 @@ class DesktopController(parent: CoroutineScope) {
         val search = SearchQuery.of(query)
         val filtered = tracks.filter { track ->
             (!favouritesOnly || track.file.absolutePath in favourites) &&
-                (search.isEmpty || search.matches(
-                    title = track.title,
-                    artist = track.displayArtist,
-                    album = track.displayAlbum,
-                    favourite = track.file.absolutePath in favourites,
-                    plays = playCounts[track.file.absolutePath] ?: 0
-                ))
+                (search.isEmpty || matchesQuery(search, track))
         }
         when (sort) {
             SortMode.ARTIST -> filtered.sortedWith(
@@ -322,6 +316,24 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     fun playCountOf(track: DesktopTrack): Int = playCounts[track.file.absolutePath] ?: 0
+
+    /**
+     * Whether a song answers a rule.
+     *
+     * The library search box and the smart playlists ask the same question of
+     * the same parser, so anything that can be typed into one works in the
+     * other - which is the whole reason smart lists are written as text.
+     */
+    internal fun matchesQuery(query: SearchQuery, track: DesktopTrack): Boolean = query.matches(
+        title = track.title,
+        artist = track.displayArtist,
+        album = track.displayAlbum,
+        favourite = track.file.absolutePath in favourites,
+        plays = playCounts[track.file.absolutePath] ?: 0,
+        rating = ratings[track.file.absolutePath] ?: 0,
+        year = track.year,
+        addedAt = track.file.lastModified()
+    )
 
     /** The library by path, for the lists that are kept as paths. */
     private val byPath: Map<String, DesktopTrack>
@@ -489,6 +501,44 @@ class DesktopController(parent: CoroutineScope) {
     // setter can push straight to the audio thread: assigning is the whole API,
     // and there is no way to change one without the engine hearing about it.
     private val fxState = mutableStateOf(DesktopFxState())
+    /** True when the song playing has its own effects saved against it. */
+    var fxRemembered by mutableStateOf(false)
+        private set
+
+    fun rememberFxForCurrent() {
+        val track = engine.status.value.track ?: return
+        val encoded = encodeFx(fx)
+        fxRemembered = true
+        scope.launch {
+            io { store.saveFx(track.file.absolutePath, encoded) }
+            dropNote = "These effects will come back with \"${track.title}\"."
+        }
+    }
+
+    fun forgetFxForCurrent() {
+        val track = engine.status.value.track ?: return
+        fxRemembered = false
+        scope.launch {
+            io { store.deleteFx(track.file.absolutePath) }
+            dropNote = "\"${track.title}\" plays with the usual effects again."
+        }
+    }
+
+    /**
+     * Puts back whatever was saved for [track].
+     *
+     * Nothing saved means the chain is left exactly as it is, rather than
+     * reset - someone who turned reverb on for the evening meant it for the
+     * evening, not for one song.
+     */
+    private fun applyFxFor(track: DesktopTrack) {
+        scope.launch {
+            val saved = io { store.fxFor(track.file.absolutePath) }
+            fxRemembered = saved != null
+            decodeFx(saved ?: return@launch)?.let { fx = it }
+        }
+    }
+
     var fx: DesktopFxState
         get() = fxState.value
         set(value) {
@@ -1053,6 +1103,7 @@ class DesktopController(parent: CoroutineScope) {
         engine.play(track)
         openListenEvent(track)
         loadLyricsFor(track)
+        applyFxFor(track)
         tellDiscord()
     }
 
@@ -1128,9 +1179,33 @@ class DesktopController(parent: CoroutineScope) {
     val sleepMinutesLeft: Int?
         get() = sleepEndsAt?.let { ((it - System.currentTimeMillis()) / 60_000L + 1).toInt().coerceAtLeast(0) }
 
+    private val sleepFadeState = mutableStateOf(settings.sleepFade)
+
+    /** Whether the last half minute is faded out rather than cut off mid-bar. */
+    var sleepFade: Boolean
+        get() = sleepFadeState.value
+        set(value) {
+            sleepFadeState.value = value
+            settings.sleepFade = value
+        }
+
+    /** Set when the timer is "when this song ends" rather than a clock. */
+    var stopAfterTrack by mutableStateOf(false)
+        private set
+
+    /** Stops at the end of whatever is playing, however long that is. */
+    fun sleepAfterTrack() {
+        setSleepTimer(null)
+        stopAfterTrack = true
+        dropNote = "Stopping when this song ends."
+    }
+
     fun setSleepTimer(minutes: Int?) {
         sleepJob?.cancel()
         sleepJob = null
+        stopAfterTrack = false
+        // Whatever the fade left it at, the slider is the truth again.
+        pushVolume()
         if (minutes == null) {
             sleepEndsAt = null
             return
@@ -1138,8 +1213,17 @@ class DesktopController(parent: CoroutineScope) {
         val until = System.currentTimeMillis() + minutes * 60_000L
         sleepEndsAt = until
         sleepJob = scope.launch {
-            while (System.currentTimeMillis() < until) delay(1_000)
+            while (System.currentTimeMillis() < until) {
+                val left = until - System.currentTimeMillis()
+                // Ramped on the engine rather than through `volume`, so the
+                // slider and the saved setting are left where the user put them.
+                if (sleepFade && left <= SLEEP_FADE_MS) {
+                    engine.setVolume(volume * (left.toFloat() / SLEEP_FADE_MS).coerceIn(0f, 1f))
+                }
+                delay(if (sleepFade && left <= SLEEP_FADE_MS) 200 else 1_000)
+            }
             if (engine.status.value.playing) engine.togglePlay()
+            pushVolume()
             rememberPlace()
             sleepEndsAt = null
             sleepJob = null
@@ -1252,6 +1336,12 @@ class DesktopController(parent: CoroutineScope) {
     /** Called when a track finishes on its own. */
     fun advance() {
         closeListenEvent()
+        if (stopAfterTrack) {
+            stopAfterTrack = false
+            rememberPlace()
+            dropNote = "Stopped at the end of the song."
+            return
+        }
         val current = engine.status.value.track
         if (repeat == RepeatMode.ONE && current != null) {
             start(current)
@@ -3271,8 +3361,70 @@ class DesktopController(parent: CoroutineScope) {
         )
     }
 
+    /** Whether the small always-on-top player is open. */
+    var miniPlayer by mutableStateOf(false)
+
     /** Whether the list of keyboard shortcuts is on screen. */
     var showShortcuts by mutableStateOf(false)
+
+    // ---- Lists that keep themselves ---------------------------------------------
+
+    var smartPlaylists by mutableStateOf<List<StoredSmartPlaylist>>(emptyList())
+        private set
+
+    var smartNote by mutableStateOf<String?>(null)
+
+    fun dismissSmartNote() { smartNote = null }
+
+    fun refreshSmartPlaylists() {
+        scope.launch { smartPlaylists = io { store.smartPlaylists() } }
+    }
+
+    /** The songs a rule picks out right now, in the library's own order. */
+    fun smartTracks(rule: String): List<DesktopTrack> {
+        val query = SearchQuery.of(rule)
+        if (query.isEmpty) return emptyList()
+        return tracks.filter { matchesQuery(query, it) }
+    }
+
+    fun createSmartPlaylist(name: String, rule: String) {
+        val cleanName = name.trim().ifBlank { "Smart list" }
+        val cleanRule = rule.trim()
+        if (cleanRule.isEmpty()) {
+            smartNote = "A smart list needs a rule - try rating:4+ or year:2015-2020."
+            return
+        }
+        scope.launch {
+            io { store.createSmart(cleanName, cleanRule) }
+            smartPlaylists = io { store.smartPlaylists() }
+            smartNote = "\"$cleanName\" holds ${smartTracks(cleanRule).size} songs."
+        }
+    }
+
+    fun updateSmartPlaylist(playlist: StoredSmartPlaylist, name: String, rule: String) {
+        val cleanRule = rule.trim()
+        if (cleanRule.isEmpty()) return
+        scope.launch {
+            io { store.updateSmart(playlist.id, name.trim().ifBlank { playlist.name }, cleanRule) }
+            smartPlaylists = io { store.smartPlaylists() }
+        }
+    }
+
+    fun deleteSmartPlaylist(playlist: StoredSmartPlaylist) {
+        scope.launch {
+            io { store.deleteSmart(playlist.id) }
+            smartPlaylists = io { store.smartPlaylists() }
+        }
+    }
+
+    fun playSmart(playlist: StoredSmartPlaylist) {
+        val list = smartTracks(playlist.rule)
+        if (list.isEmpty()) {
+            smartNote = "\"${playlist.name}\" matches nothing right now."
+            return
+        }
+        play(list.first(), list)
+    }
 
     // ---- Backups --------------------------------------------------------------
 
@@ -3327,6 +3479,7 @@ class DesktopController(parent: CoroutineScope) {
         watcher.watch(roots())
         rescan()
         refreshPlaylists()
+        refreshSmartPlaylists()
         refreshTools()
         refreshWeather()
         loadWallpaper()
@@ -3364,6 +3517,38 @@ private const val SONGS_AT_ONCE = 5
  * sooner than for covers.
  */
 private const val TAGS_GIVE_UP_MS = 10_000L
+
+/** How long the sleep timer spends fading out before it pauses. */
+private const val SLEEP_FADE_MS = 30_000L
+
+/** A song's effects as one line of text, for the database. */
+private fun encodeFx(fx: DesktopFxState): String =
+    listOf(
+        fx.speed,
+        fx.pitchSemitones,
+        if (fx.reverbEnabled) 1f else 0f,
+        fx.reverbMix,
+        fx.reverbDecay,
+        if (fx.eqEnabled) 1f else 0f
+    ).joinToString(",") + "|" + fx.eqGains.joinToString(",")
+
+/** Null for anything that isn't the six numbers and ten bands written above. */
+private fun decodeFx(text: String): DesktopFxState? {
+    val halves = text.split('|')
+    if (halves.size != 2) return null
+    val head = halves[0].split(',').mapNotNull { it.toFloatOrNull() }
+    val gains = halves[1].split(',').mapNotNull { it.toFloatOrNull() }
+    if (head.size != 6 || gains.size != 10) return null
+    return DesktopFxState(
+        speed = head[0],
+        pitchSemitones = head[1],
+        reverbEnabled = head[2] > 0.5f,
+        reverbMix = head[3],
+        reverbDecay = head[4],
+        eqEnabled = head[5] > 0.5f,
+        eqGains = gains
+    )
+}
 
 /** How far into a song the previous button restarts it rather than going back. */
 private const val RESTART_WINDOW_MS = 4_000L
