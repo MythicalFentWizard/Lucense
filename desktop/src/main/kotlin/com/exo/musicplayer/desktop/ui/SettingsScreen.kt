@@ -387,6 +387,21 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 note = "Play, pause, next and previous on the keyboard, from anywhere. " +
                     "While this is on, other players won't see those keys."
             ) { controller.mediaKeysEnabled = it }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Offer Lucense for music files in Explorer",
+                checked = controller.fileTypes,
+                enabled = controller.canAssociate,
+                note = controller.fileTypesNote ?: when {
+                    !controller.canAssociate ->
+                        "Available once Lucense is running from its installed shortcut " +
+                            "rather than from a development build."
+                    else ->
+                        "Puts Lucense in the Open with list for MP3, FLAC, M4A and the rest. " +
+                            "Windows does not allow a program to make itself the default, so " +
+                            "pick it from Open with once and tick \"Always use this app\"."
+                }
+            ) { controller.changeFileTypes(it) }
 
             Spacer(Modifier.height(28.dp))
             SectionTitle("Lyrics and artwork")

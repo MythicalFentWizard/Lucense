@@ -61,6 +61,7 @@ import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
 import com.exo.musicplayer.desktop.library.FolderWatcher
 import com.exo.musicplayer.desktop.system.DiscordPresence
+import com.exo.musicplayer.desktop.system.FileAssociations
 import com.exo.musicplayer.desktop.system.DuckKey
 import com.exo.musicplayer.desktop.system.Explorer
 import com.exo.musicplayer.desktop.system.GlobalHotkey
@@ -1347,6 +1348,47 @@ class DesktopController(parent: CoroutineScope) {
             sleepEndsAt = null
             sleepJob = null
             dropNote = "Sleep timer: paused."
+        }
+    }
+
+    // ---- File types ------------------------------------------------------------
+
+    /** Whether Lucense is currently offered for music files in Explorer. */
+    var fileTypes by mutableStateOf(false)
+        private set
+
+    /**
+     * False when there is no installed launcher to register.
+     *
+     * Started from a classpath the running program is java.exe, and handing
+     * every MP3 on the machine to a bare JVM would be worse than doing nothing.
+     */
+    val canAssociate: Boolean get() = FileAssociations.launcher() != null
+
+    var fileTypesNote by mutableStateOf<String?>(null)
+
+    fun refreshFileTypes() {
+        scope.launch { fileTypes = io { FileAssociations.registered() } }
+    }
+
+    fun changeFileTypes(wanted: Boolean) {
+        scope.launch {
+            val result = io {
+                if (wanted) FileAssociations.register() else FileAssociations.unregister()
+            }
+            fileTypes = io { FileAssociations.registered() }
+            fileTypesNote = result.fold(
+                onSuccess = {
+                    if (wanted) {
+                        "Done. Windows will not let a program make itself the default, so " +
+                            "right-click a song, choose Open with, pick Lucense and tick " +
+                            "\"Always use this app\"."
+                    } else {
+                        "Lucense is no longer offered for music files."
+                    }
+                },
+                onFailure = { "Could not change that: ${it.message}" }
+            )
         }
     }
 
@@ -3806,6 +3848,7 @@ class DesktopController(parent: CoroutineScope) {
         // The music folder is always part of the library, so there is something to
         // scan even before any folder has been added by hand.
         applyMediaKeys()
+        refreshFileTypes()
         applyDiscord()
         refreshRecentlyPlayed()
         checkForUpdate(announce = true)
