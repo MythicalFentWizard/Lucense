@@ -2026,7 +2026,14 @@ class DesktopController(parent: CoroutineScope) {
      *   Skips are counted and reported rather than silently dropped, so it is
      *   obvious why a run of 400 tracks finished in two seconds.
      */
-    fun runBulk(kind: BulkKind, redo: Boolean) {
+    /**
+     * Runs one of the bulk tools.
+     *
+     * [names] and [tags] only mean anything to Names & tags, which is the one
+     * tool that writes two quite different things at once and is regularly
+     * wanted for only one of them.
+     */
+    fun runBulk(kind: BulkKind, redo: Boolean, names: Boolean = true, tags: Boolean = true) {
         if (bulk.running) return
         val column = kind.markColumn
         bulkJob = scope.launch {
@@ -2069,7 +2076,7 @@ class DesktopController(parent: CoroutineScope) {
                             val outcome = try {
                                 when (kind) {
                                     BulkKind.COVERS -> bulkCover(track)
-                                    BulkKind.TAGS -> bulkTags(track).asOutcome()
+                                    BulkKind.TAGS -> bulkTags(track, names, tags).asOutcome()
                                     BulkKind.LYRICS -> bulkLyrics(track).asOutcome()
                                     BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
                                     BulkKind.REPAIR -> bulkRepair(track)
@@ -2232,12 +2239,25 @@ class DesktopController(parent: CoroutineScope) {
         return if (stored != null) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
     }
 
-    private suspend fun bulkTags(track: DesktopTrack): Boolean {
+    private suspend fun bulkTags(track: DesktopTrack, names: Boolean, tags: Boolean): Boolean {
+        if (!names && !tags) return false
         val details = libraryLookup.findDetails(track.artist, track.title, giveUpMs = TAGS_GIVE_UP_MS)
             ?: return false
+        // Nothing the chosen half can fill in is not a success, it is a miss:
+        // counting it as updated would claim work that never happened.
+        val useful = (names && (details.title != null || details.artist != null)) ||
+            (tags && (details.album != null || details.year != null || details.genre != null))
+        if (!useful) return false
+        // The writer leaves a null field alone, so unticking a half is simply a
+        // matter of not offering it those fields.
         return io {
             TagWriter.write(
-                track.file, details.title, details.artist, details.album, details.year, details.genre
+                file = track.file,
+                title = details.title.takeIf { names },
+                artist = details.artist.takeIf { names },
+                album = details.album.takeIf { tags },
+                year = details.year.takeIf { tags },
+                genre = details.genre.takeIf { tags }
             ).isSuccess
         }
     }

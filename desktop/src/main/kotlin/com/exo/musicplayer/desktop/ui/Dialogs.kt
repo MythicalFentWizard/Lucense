@@ -144,7 +144,24 @@ fun ScrimDialog(
 @Composable
 fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
     var redo by remember { mutableStateOf(false) }
+    var choosingParts by remember { mutableStateOf(false) }
     val job = controller.bulk
+
+    // Names & tags asks first. It takes the place of this dialog rather than
+    // sitting on top of it, and comes straight back to it once it has run, so
+    // the progress panel is where it always was.
+    if (choosingParts) {
+        TagPartsDialog(
+            running = job.running,
+            redo = redo,
+            onRun = { names, tags ->
+                controller.runBulk(BulkKind.TAGS, redo, names, tags)
+                choosingParts = false
+            },
+            onDismiss = { choosingParts = false }
+        )
+        return
+    }
 
     ScrimDialog(
         title = "Bulk tools",
@@ -168,10 +185,11 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
             BulkOption(
                 kind = BulkKind.TAGS,
                 icon = Icons.AutoMirrored.Filled.Label,
-                description = "Looks songs up by name and fills in artist, album and year, " +
-                    "each from the best source that has it.",
-                enabled = !job.running
-            ) { controller.runBulk(BulkKind.TAGS, redo) }
+                description = "Looks songs up by name, then writes the song's own name, or the " +
+                    "album, year and genre, or both — it asks which before it starts.",
+                enabled = !job.running,
+                runLabel = "Choose…"
+            ) { choosingParts = true }
 
             BulkOption(
                 kind = BulkKind.IDENTIFY,
@@ -290,6 +308,7 @@ private fun BulkOption(
     icon: ImageVector,
     description: String,
     enabled: Boolean,
+    runLabel: String = "Run",
     onRun: () -> Unit
 ) {
     Row(
@@ -318,7 +337,67 @@ private fun BulkOption(
             )
         }
         Spacer(Modifier.width(12.dp))
-        GhostButton("Run", enabled = enabled, onClick = onRun)
+        GhostButton(runLabel, enabled = enabled, onClick = onRun)
+    }
+}
+
+/**
+ * Which half of Names & tags to write.
+ *
+ * Worth asking rather than assuming: a library with good titles and no albums
+ * wants one of them, a pile of downloads named after the video wants the other,
+ * and doing both when only one was meant overwrites work somebody already did
+ * by hand.
+ */
+@Composable
+fun TagPartsDialog(
+    running: Boolean,
+    redo: Boolean,
+    onRun: (names: Boolean, tags: Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var names by remember { mutableStateOf(true) }
+    var tags by remember { mutableStateOf(true) }
+
+    ScrimDialog(
+        title = "Names & tags",
+        subtitle = "Choose what gets written into the files",
+        onDismiss = onDismiss
+    ) {
+        CheckRow(
+            label = "Names",
+            checked = names,
+            enabled = !running,
+            note = "The song's own title, and the artist"
+        ) { names = it }
+        Spacer(Modifier.height(14.dp))
+        CheckRow(
+            label = "Tags",
+            checked = tags,
+            enabled = !running,
+            note = "Album, year and genre"
+        ) { tags = it }
+        Spacer(Modifier.height(16.dp))
+        Hint(
+            if (redo) {
+                "Every song will be visited, including ones this has been through before."
+            } else {
+                "Songs this has already been through are skipped. To run the other half " +
+                    "over those as well, tick the redo box in Bulk tools first."
+            }
+        )
+        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (!names && !tags) "Pick at least one of them." else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint,
+                modifier = Modifier.weight(1f)
+            )
+            GhostButton("Cancel", onClick = onDismiss)
+            Spacer(Modifier.width(8.dp))
+            AccentButton("Run", enabled = !running && (names || tags)) { onRun(names, tags) }
+        }
     }
 }
 
