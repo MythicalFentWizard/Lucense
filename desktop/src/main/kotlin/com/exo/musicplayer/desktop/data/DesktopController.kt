@@ -673,6 +673,25 @@ class DesktopController(parent: CoroutineScope) {
             pushVolume()
         }
 
+    /** Where the volume was before the speaker was clicked to silence it. */
+    private var unmutedAt = 0.6f
+
+    /**
+     * Silences, or puts back the level it was at before.
+     *
+     * The level is remembered rather than restored to some fixed amount, so
+     * muting and unmuting is not also a way of losing the level you chose. A
+     * slider that was already at nothing comes back to a sensible level.
+     */
+    fun toggleMute() {
+        if (volume > 0.001f) {
+            unmutedAt = volume
+            volume = 0f
+        } else {
+            volume = unmutedAt.takeIf { it > 0.001f } ?: 0.6f
+        }
+    }
+
     /** True while the duck hotkey has the music turned down. */
     var ducked by mutableStateOf(false)
         private set
@@ -1498,7 +1517,14 @@ class DesktopController(parent: CoroutineScope) {
 
     fun seekFraction(fraction: Float) {
         val duration = engine.status.value.durationMs
-        if (duration > 0) engine.seekTo((duration * fraction.coerceIn(0f, 1f)).toLong())
+        if (duration <= 0) return
+        // Stops a second short of the very end, as the arrow keys already do.
+        // Landing exactly on the end runs the decoder dry on the spot, so the
+        // song was gone and the next one playing before the bar had finished
+        // being dragged there - which is the bar not sticking to the end.
+        val target = (duration * fraction.coerceIn(0f, 1f)).toLong()
+            .coerceAtMost((duration - 1_000L).coerceAtLeast(0L))
+        engine.seekTo(target)
         tellDiscord()
     }
 

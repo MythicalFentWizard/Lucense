@@ -777,6 +777,7 @@ fun ShortcutsDialog(onDismiss: () -> Unit) {
             "\u2191  \u2193" to "Volume up or down",
             "J" to "Jump the list to the song playing",
             "S" to "Shuffle on or off",
+            "M" to "Mute, or put the volume back",
             "R" to "Repeat: all, then one, then off",
             "Ctrl + A" to "Select every song in view",
             "Esc" to "Clear the selection",

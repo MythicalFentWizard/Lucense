@@ -68,6 +68,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
@@ -91,8 +93,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -1268,26 +1268,30 @@ private fun TransportBar(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         (scrubbing?.let { (it * durationMs).toLong() } ?: positionMs).asDuration(),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         color = if (scrubbing != null) Palette.Accent else Palette.TextFaint,
+                        textAlign = TextAlign.End,
                         modifier = Modifier.width(38.dp)
                     )
-                    SeekBar(
-                        fraction = if (durationMs > 0) {
+                    Spacer(Modifier.width(4.dp))
+                    LineSlider(
+                        value = if (durationMs > 0) {
                             (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
                         } else {
                             0f
                         },
                         enabled = track != null,
-                        onScrub = { scrubbing = it },
-                        onSeek = { controller.seekFraction(it) }
+                        onPreview = { scrubbing = it },
+                        onSet = { controller.seekFraction(it) },
+                        modifier = Modifier.width(330.dp)
                     )
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         durationMs.asDuration(),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         color = Palette.TextFaint,
-                        modifier = Modifier.width(38.dp),
-                        textAlign = TextAlign.End
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.width(38.dp)
                     )
                 }
             }
@@ -1374,21 +1378,40 @@ private fun TransportBar(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.width(9.dp)
             )
-            Icon(
-                volumeIcon(controller.volume),
-                if (controller.ducked) "Ducked for gaming" else "Volume",
-                Modifier.size(16.dp),
-                tint = if (controller.ducked) Palette.Accent else Palette.TextDim
-            )
-            Slider(
+            // Clicking the speaker mutes, and clicking it again puts back the
+            // level it was at - which is what a speaker next to a volume line
+            // is expected to do.
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .clickable { controller.toggleMute() }
+                    .pointerHoverIcon(PointerIcon.Hand),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    volumeIcon(controller.volume),
+                    when {
+                        controller.ducked -> "Ducked for gaming"
+                        controller.volume <= 0.001f -> "Unmute"
+                        else -> "Mute"
+                    },
+                    Modifier.size(16.dp),
+                    tint = if (controller.ducked) Palette.Accent else Palette.TextDim
+                )
+            }
+            // The same line as the seek bar, so the two read as one family
+            // rather than one of them being a different kind of control. It
+            // follows the drag live, since setting a volume costs nothing, and
+            // takes the mouse wheel a notch at a time.
+            LineSlider(
                 value = controller.volume,
-                onValueChange = { controller.volume = it },
-                colors = SliderDefaults.colors(
-                    thumbColor = Palette.TextDim,
-                    activeTrackColor = Palette.TextDim,
-                    inactiveTrackColor = Palette.Line
-                ),
-                modifier = Modifier.width(104.dp)
+                onSet = { controller.volume = it },
+                live = true,
+                wheelStep = 0.05f,
+                restColor = Palette.TextDim,
+                activeColor = Palette.Accent,
+                modifier = Modifier.width(96.dp)
             )
         }
     }
@@ -1405,108 +1428,6 @@ private fun volumeIcon(level: Float): ImageVector = when {
     level < 0.34f -> Icons.AutoMirrored.Filled.VolumeMute
     level < 0.67f -> Icons.AutoMirrored.Filled.VolumeDown
     else -> Icons.AutoMirrored.Filled.VolumeUp
-}
-
-/**
- * Click anywhere on the bar to jump there, or hold and drag to move through
- * the song.
- *
- * While a drag is happening the bar shows where the drag is rather than where
- * the song is, so the handle does not fight the playhead as it advances
- * underneath. The seek itself waits for the button to come up: seeking
- * backwards reopens the file, and doing that on every pixel of a drag stutters
- * far worse than the drag is worth.
- */
-@Composable
-private fun SeekBar(
-    fraction: Float,
-    enabled: Boolean,
-    onScrub: (Float?) -> Unit,
-    onSeek: (Float) -> Unit
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val hovered by interaction.collectIsHoveredAsState()
-    var dragging by remember { mutableStateOf<Float?>(null) }
-    val shown = dragging ?: fraction
-    val active = hovered || dragging != null
-
-    Box(
-        Modifier
-            .width(330.dp)
-            .height(14.dp)
-            .hoverable(interaction)
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                detectTapGestures { offset ->
-                    onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
-                }
-            }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        val at = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        dragging = at
-                        onScrub(at)
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        val at = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        dragging = at
-                        onScrub(at)
-                        change.consume()
-                    },
-                    onDragEnd = {
-                        dragging?.let { onSeek(it) }
-                        dragging = null
-                        onScrub(null)
-                    },
-                    onDragCancel = {
-                        dragging = null
-                        onScrub(null)
-                    }
-                )
-            },
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(if (active) 5.dp else 3.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Palette.Line)
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(shown)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Palette.Accent)
-            )
-        }
-        // The handle sits on the line at all times rather than appearing under
-        // the pointer, so the position is readable at a glance and there is
-        // always something obvious to take hold of. It grows when the pointer
-        // is on the bar or dragging it.
-        //
-        // The layer is inset by the handle's own radius so that the ends of the
-        // travel put it fully on the bar: without that, a song at the very
-        // start has half a ball hanging off the left of the track.
-        Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
-            Box(
-                Modifier
-                    .fillMaxWidth(shown)
-                    .height(14.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Box(
-                    Modifier
-                        .size(if (active) 12.dp else 8.dp)
-                        .clip(CircleShape)
-                        .background(Palette.Accent)
-                )
-            }
-        }
-    }
 }
 
 /** Icon toggle that also shows accent colour when the feature is doing something. */

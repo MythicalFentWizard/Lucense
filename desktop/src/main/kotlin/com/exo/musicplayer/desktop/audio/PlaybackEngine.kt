@@ -163,7 +163,18 @@ class PlaybackEngine {
         _status.value = _status.value.copy(playing = playing)
     }
 
-    fun seekTo(ms: Long) { seekToMs = ms.coerceAtLeast(0) }
+    fun seekTo(ms: Long) {
+        val target = ms.coerceAtLeast(0)
+        // Nothing open yet - a song restored at startup and not played - so
+        // there is no playback thread to hand the seek to. It becomes where
+        // play starts from instead, or pressing play would undo it.
+        if (worker?.isAlive == true) seekToMs = target else pendingStartMs = target
+        // Said at once rather than when the playback thread next gets round to
+        // it. Until then everything watching the position would show the old
+        // spot and then jump forward, which on the seek bar read as it bugging
+        // in and out.
+        _status.value = _status.value.copy(positionMs = target)
+    }
 
     fun stop() {
         stopRequested = true
@@ -360,6 +371,9 @@ class PlaybackEngine {
      * progress bar can show.
      */
     private fun publishPosition(duration: Long, rate: Int, force: Boolean = false) {
+        // A seek is waiting to be carried out: this frame count is about to be
+        // replaced, and saying it now would undo what seekTo already said.
+        if (!force && seekToMs != null) return
         val positionMs = framesPlayed * 1000 / rate
         val slot = positionMs / PUBLISH_INTERVAL_MS
         if (!force && slot == lastPublished) return

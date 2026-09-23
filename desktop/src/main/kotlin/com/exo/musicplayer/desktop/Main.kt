@@ -146,6 +146,10 @@ fun main(args: Array<String>) = application {
                         controller.jumpToNowPlaying()
                         true
                     }
+                    Key.M -> {
+                        controller.toggleMute()
+                        true
+                    }
                     Key.S -> {
                         controller.shuffle = !controller.shuffle
                         true
