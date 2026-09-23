@@ -80,7 +80,7 @@ fun SplashScreen(showStars: Boolean, modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.height(18.dp))
                 Text(
-                    text = "Resonate",
+                    text = "Lucense",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,

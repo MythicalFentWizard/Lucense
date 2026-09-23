@@ -56,6 +56,7 @@ fun MoodsScreen(
     onAddToPlaylist: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onFixTags: (Track) -> Unit,
+    onEditDetails: (Track) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier.fillMaxSize()) {
@@ -71,7 +72,7 @@ fun MoodsScreen(
                 Text("Match music to the weather", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Resonate needs your approximate location to look up local " +
+                    "Lucense needs your approximate location to look up local " +
                         "conditions. It reads your last known position only, never " +
                         "turns on GPS, and the coordinates go to the forecast service " +
                         "and nowhere else.",
@@ -120,7 +121,7 @@ fun MoodsScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "Resonate needs a bit of listening history before it can tell " +
+                        "Lucense needs a bit of listening history before it can tell " +
                             "which songs you reach for in which weather. Keep playing — " +
                             "it works this out on its own.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -178,6 +179,7 @@ fun MoodsScreen(
                                 onAddToPlaylist = { onAddToPlaylist(track) },
                                 onToggleFavorite = { onToggleFavorite(track) },
                                 onFixTags = { onFixTags(track) },
+                                onEditDetails = { onEditDetails(track) },
                                 onDelete = { }
                             )
                             state.affinities[track.id]?.let { affinity ->

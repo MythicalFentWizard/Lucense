@@ -36,7 +36,7 @@ class AudiusProvider : MetadataProvider {
         withContext(Dispatchers.IO) {
             val base = host() ?: return@withContext emptyList()
             val body = Http.get(
-                "$base/v1/tracks/search?query=${encode(query)}&app_name=Resonate"
+                "$base/v1/tracks/search?query=${encode(query)}&app_name=Lucense"
             ) ?: return@withContext emptyList()
 
             val data = runCatching { JSONObject(body).optJSONArray("data") }.getOrNull()

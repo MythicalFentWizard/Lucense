@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,15 +27,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.ui.DesktopApp
+import com.exo.musicplayer.desktop.ui.LyricsWindow
+import com.exo.musicplayer.desktop.ui.MiniPlayer
 import com.exo.musicplayer.desktop.ui.Palette
-import com.exo.musicplayer.desktop.ui.ResonateDesktopTheme
+import com.exo.musicplayer.desktop.ui.LucenseDesktopTheme
+import com.exo.musicplayer.desktop.ui.ScaledToWindow
+import com.exo.musicplayer.desktop.ui.Typing
 import kotlinx.coroutines.delay
+import java.awt.Dimension
 import java.io.File
 import javax.swing.JFileChooser
 import javax.swing.UIManager
@@ -46,25 +61,152 @@ import javax.swing.filechooser.FileNameExtensionFilter
  * snap layouts and window animations are what "native" actually looks like, and
  * a hand-drawn title bar loses all three.
  */
-fun main() = application {
+fun main(args: Array<String>) = application {
     // The folder picker is Swing; matching the OS look keeps it from standing out.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
 
+    // Held here rather than inside AppHost so the controller outlives
+    // recomposition and the window's key handler can reach it.
+    val scope = rememberCoroutineScope()
+    val controller = remember { DesktopController(scope) }
+
+    // A tray icon, so the keys and the transport are there while the window is
+    // behind something else. Not every desktop has a tray; Windows always does.
+    if (java.awt.SystemTray.isSupported()) {
+        val playing by controller.engine.status.collectAsState()
+        Tray(
+            icon = painterResource("icon.png"),
+            tooltip = playing.track?.let { "${it.title} — Lucense" } ?: "Lucense",
+            menu = {
+                Item(if (playing.playing) "Pause" else "Play") { controller.togglePlay() }
+                Item("Next") { controller.next() }
+                Item("Previous") { controller.previous() }
+                Separator()
+                Item("Quit Lucense") { exitApplication() }
+            }
+        )
+    }
+
     Window(
         onCloseRequest = ::exitApplication,
-        title = "Resonate",
-        state = rememberWindowState(width = 1280.dp, height = 820.dp)
+        title = "Lucense",
+        icon = painterResource("icon.png"),
+        state = rememberWindowState(width = 1280.dp, height = 820.dp),
+        // Window level, not view level: Ctrl+A has to work whether or not the
+        // track table happens to hold focus, and a text field that owns the
+        // keystroke still gets first refusal because it is a preview handler
+        // only for keys we claim.
+        onPreviewKeyEvent = { event ->
+            when {
+                // Someone is typing, so these keys are the text box's, not the
+                // window's: Ctrl+A is the text in the box rather than every
+                // song on screen, and Escape is its own business.
+                Typing.active -> false
+                event.type == KeyEventType.KeyDown &&
+                    event.isCtrlPressed && event.key == Key.A -> {
+                    controller.selectAll(controller.visibleTracks)
+                    true
+                }
+                event.type == KeyEventType.KeyDown && event.key == Key.Escape &&
+                    controller.hasSelection -> {
+                    controller.clearSelection()
+                    true
+                }
+                else -> false
+            }
+        },
+        // Not a preview handler: a search box that has focus gets the space bar
+        // and the arrow keys first, and these only see what it didn't want.
+        onKeyEvent = { event ->
+            if (event.type != KeyEventType.KeyDown) {
+                false
+            } else {
+                when (event.key) {
+                    Key.Spacebar -> {
+                        controller.togglePlay()
+                        true
+                    }
+                    Key.DirectionRight -> {
+                        if (event.isCtrlPressed) controller.next() else controller.seekBy(5_000)
+                        true
+                    }
+                    Key.DirectionLeft -> {
+                        if (event.isCtrlPressed) controller.previous() else controller.seekBy(-5_000)
+                        true
+                    }
+                    Key.DirectionUp -> {
+                        controller.volume = (controller.volume + 0.05f).coerceAtMost(1f)
+                        true
+                    }
+                    Key.DirectionDown -> {
+                        controller.volume = (controller.volume - 0.05f).coerceAtLeast(0f)
+                        true
+                    }
+                    Key.J -> {
+                        controller.jumpToNowPlaying()
+                        true
+                    }
+                    Key.M -> {
+                        controller.toggleMute()
+                        true
+                    }
+                    Key.S -> {
+                        controller.shuffle = !controller.shuffle
+                        true
+                    }
+                    Key.R -> {
+                        controller.cycleRepeat()
+                        true
+                    }
+                    Key.Slash -> {
+                        controller.showShortcuts = !controller.showShortcuts
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
     ) {
-        ResonateDesktopTheme {
-            AppHost()
+        // The smallest window the scaled layout still fits in.
+        LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
+        // Anything Windows handed over: a double-clicked file, or "Open with".
+        LaunchedEffect(Unit) { controller.openExternal(args.toList()) }
+        LucenseDesktopTheme {
+            ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
+                AppHost(controller)
+            }
+        }
+    }
+
+    if (controller.miniPlayer) {
+        Window(
+            onCloseRequest = { controller.miniPlayer = false },
+            title = "Lucense",
+            icon = painterResource("icon.png"),
+            state = rememberWindowState(width = 400.dp, height = 156.dp),
+            resizable = false,
+            alwaysOnTop = true
+        ) {
+            LucenseDesktopTheme { MiniPlayer(controller) }
+        }
+    }
+
+    if (controller.lyricsDetached) {
+        Window(
+            onCloseRequest = { controller.lyricsDetached = false },
+            title = "Lyrics · Lucense",
+            state = rememberWindowState(width = 460.dp, height = 700.dp)
+        ) {
+            LaunchedEffect(Unit) { window.minimumSize = Dimension(300, 360) }
+            LucenseDesktopTheme {
+                ScaledToWindow(designWidth = 420.dp, designHeight = 560.dp) { LyricsWindow(controller) }
+            }
         }
     }
 }
 
 @Composable
-private fun AppHost() {
-    val scope = rememberCoroutineScope()
-    val controller = remember { DesktopController(scope) }
+private fun AppHost(controller: DesktopController) {
     val status by controller.engine.status.collectAsState()
 
     // Shown once per launch, not on every navigation — a splash that reappears
@@ -81,11 +223,11 @@ private fun AppHost() {
         booting = false
     }
 
-    // Roll on to the next track when one runs out.
-    LaunchedEffect(status.playing, status.track) {
-        val finished = status.track != null && !status.playing &&
-            status.durationMs > 0 && status.positionMs >= status.durationMs - 1200
-        if (finished) controller.advance()
+    // Roll on to the next track when one runs out. The engine says when that
+    // happened; working it out from the position meant that pausing a track
+    // whose length was unknown counted as finishing it, and skipped ahead.
+    LaunchedEffect(status.ended, status.track) {
+        if (status.ended) controller.advance()
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -116,7 +258,7 @@ private fun BootScreen() {
             Box(Modifier.size(14.dp).clip(CircleShape).background(Palette.Accent))
             Spacer(Modifier.height(20.dp))
             Text(
-                "Resonate",
+                "Lucense",
                 style = MaterialTheme.typography.headlineMedium,
                 color = Palette.Text
             )

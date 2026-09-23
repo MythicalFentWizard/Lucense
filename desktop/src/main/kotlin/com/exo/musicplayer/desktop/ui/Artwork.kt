@@ -45,7 +45,9 @@ fun Artwork(
     val cached = track?.let { Covers.cached(it) }
     var bitmap by remember(track?.file?.absolutePath) { mutableStateOf(cached) }
 
-    LaunchedEffect(track?.file?.absolutePath) {
+    // Keyed on the revision too, so a cover fetched while this is on screen
+    // replaces the placeholder. A cover already showing is never reloaded.
+    LaunchedEffect(track?.file?.absolutePath, Covers.revision) {
         if (track != null && bitmap == null && !Covers.knownMissing(track)) {
             bitmap = Covers.load(track)
         }
@@ -108,6 +110,43 @@ fun RemoteArtwork(
     ArtworkFrame(bitmap, size, corner, modifier)
 }
 
+/**
+ * A remote image at whatever shape the caller's modifier gives it.
+ *
+ * [RemoteArtwork] is square because cover art is; a YouTube thumbnail is 16:9
+ * and a channel avatar is a circle, so this takes the geometry as a modifier
+ * instead of a single size. Same cache and same failure handling underneath.
+ */
+@Composable
+fun RemoteImage(
+    url: String?,
+    modifier: Modifier = Modifier,
+    corner: Dp = 6.dp,
+    placeholder: Boolean = true
+) {
+    var bitmap by remember(url) { mutableStateOf(url?.let(RemoteImages::cached)) }
+
+    LaunchedEffect(url) {
+        if (url != null && bitmap == null) bitmap = RemoteImages.load(url)
+    }
+
+    Box(
+        modifier
+            .clip(RoundedCornerShape(corner))
+            .background(if (placeholder) Palette.Hover else androidx.compose.ui.graphics.Color.Transparent),
+        contentAlignment = Alignment.Center
+    ) {
+        bitmap?.let {
+            Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
 private object RemoteImages {
 
     private val memory = Thumbnails.ByteBudgetCache(budget = 24L * 1024 * 1024)
@@ -126,7 +165,7 @@ private object RemoteImages {
                     connectTimeout = 12_000
                     readTimeout = 15_000
                     instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "Resonate/1.0 (desktop)")
+                    setRequestProperty("User-Agent", "Lucense/1.0 (desktop)")
                 }
                 try {
                     // Cover Art Archive 404s for releases with no art, which is

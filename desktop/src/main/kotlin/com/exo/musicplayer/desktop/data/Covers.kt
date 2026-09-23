@@ -1,11 +1,15 @@
 package com.exo.musicplayer.desktop.data
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
+import org.jaudiotagger.tag.Tag
 import org.jaudiotagger.tag.images.ArtworkFactory
 import java.io.File
 import java.net.HttpURLConnection
@@ -18,7 +22,7 @@ import java.security.MessageDigest
  * Three places art can come from, in the order they are cheapest to reach: the
  * downloaded cache, the tag embedded in the file, and a `cover.jpg` sitting next
  * to it — the convention every ripper and downloader already follows, so a
- * folder-based library usually has art before Resonate fetches anything.
+ * folder-based library usually has art before Lucense fetches anything.
  *
  * Decoding happens off the UI thread and results are held in a bounded
  * memory cache. This is the same lesson the Android build learned the hard way:
@@ -30,6 +34,13 @@ object Covers {
 
     /** Paths already checked and found to have no art, so they aren't re-read. */
     private val misses = Thumbnails.BoundedKeySet()
+
+    /**
+     * Goes up whenever a cover is fetched, so covers already on screen swap in
+     * while a bulk run is still going rather than only after they scroll away.
+     */
+    var revision by mutableStateOf(0)
+        private set
 
     private val sidecarNames = listOf(
         "cover.jpg", "cover.png", "folder.jpg", "folder.png",
@@ -71,7 +82,7 @@ object Covers {
         url: String,
         embedInFile: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
-        val bytes = download(url) ?: return@withContext false
+        val bytes = download(url)?.let(Thumbnails::squared) ?: return@withContext false
         // Decoded once to prove it is a real image, and that same result is
         // what goes in the cache rather than decoding a second time.
         val bitmap = Thumbnails.decodeScaled(bytes) ?: return@withContext false
@@ -82,6 +93,7 @@ object Covers {
         val key = track.file.absolutePath
         misses -= key
         memory[key] = bitmap
+        revision++
         true
     }
 
@@ -114,7 +126,7 @@ object Covers {
     }
 
     private fun embed(file: File, bytes: ByteArray) {
-        val temp = File.createTempFile("resonate-art", ".jpg")
+        val temp = File.createTempFile("lucense-art", ".jpg")
         try {
             temp.writeBytes(bytes)
             val audio = AudioFileIO.read(file)
@@ -132,7 +144,7 @@ object Covers {
             connectTimeout = 15_000
             readTimeout = 20_000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "Resonate/1.0 (desktop)")
+            setRequestProperty("User-Agent", "Lucense/1.0 (desktop)")
         }
         try {
             if (connection.responseCode !in 200..299) return null
@@ -147,22 +159,94 @@ object Covers {
             .joinToString("") { "%02x".format(it) }
 }
 
-/** Writes identified metadata back into the file's tags. */
+/**
+ * Writes metadata back into a file's tags.
+ *
+ * Two callers with opposite needs, hence [clearBlanks]. Automatic
+ * identification must never wipe a field it has no opinion about, so a null or
+ * blank value there means "leave it alone". Hand editing must be able to empty
+ * a field, because correcting a wrong album name to nothing is a legitimate
+ * edit and a writer that silently ignored it would look broken.
+ */
+/** A song's tags exactly as its own file had them. */
+data class OriginalTags(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val year: String?,
+    val genre: String?
+)
+
 object TagWriter {
+
+    /**
+     * Told what a file's tags say, immediately before anything changes them.
+     *
+     * A hook here rather than a call at each of the seven places tags get
+     * written: the entire value of the snapshot is that it is never missed,
+     * and a write path added later would otherwise quietly not be covered.
+     */
+    var beforeChange: ((File, OriginalTags) -> Unit)? = null
+
+    private fun snapshot(file: File, tag: Tag) {
+        val hook = beforeChange ?: return
+        fun field(key: FieldKey): String? =
+            runCatching { tag.getFirst(key)?.trim()?.takeIf { it.isNotEmpty() } }.getOrNull()
+        // Never let remembering the old tags stop the new ones being written.
+        runCatching {
+            hook(
+                file,
+                OriginalTags(
+                    title = field(FieldKey.TITLE),
+                    artist = field(FieldKey.ARTIST),
+                    album = field(FieldKey.ALBUM),
+                    year = field(FieldKey.YEAR),
+                    genre = field(FieldKey.GENRE)
+                )
+            )
+        }
+    }
 
     fun write(
         file: File,
         title: String?,
         artist: String?,
         album: String?,
-        year: Int?
+        year: Int?,
+        genre: String? = null,
+        clearBlanks: Boolean = false
     ): Result<Unit> = runCatching {
         val audio = AudioFileIO.read(file)
         val tag = audio.tagOrCreateAndSetDefault
-        title?.takeIf { it.isNotBlank() }?.let { tag.setField(FieldKey.TITLE, it) }
-        artist?.takeIf { it.isNotBlank() }?.let { tag.setField(FieldKey.ARTIST, it) }
-        album?.takeIf { it.isNotBlank() }?.let { tag.setField(FieldKey.ALBUM, it) }
-        year?.let { tag.setField(FieldKey.YEAR, it.toString()) }
+        snapshot(file, tag)
+
+        fun apply(key: FieldKey, value: String?) {
+            val text = value?.trim()
+            when {
+                !text.isNullOrEmpty() -> tag.setField(key, text)
+                clearBlanks -> runCatching { tag.deleteField(key) }
+            }
+        }
+
+        apply(FieldKey.TITLE, title)
+        apply(FieldKey.ARTIST, artist)
+        apply(FieldKey.ALBUM, album)
+        apply(FieldKey.YEAR, year?.toString())
+        apply(FieldKey.GENRE, genre)
+        audio.commit()
+    }
+
+    /** Writes only the fields [change] names, leaving the rest of the tag alone. */
+    fun change(change: TagChange): Result<Unit> = runCatching {
+        val audio = AudioFileIO.read(change.file)
+        val tag = audio.tagOrCreateAndSetDefault
+        snapshot(change.file, tag)
+        change.title?.let { tag.setField(FieldKey.TITLE, it) }
+        change.artist?.let { tag.setField(FieldKey.ARTIST, it) }
+        change.album?.let { tag.setField(FieldKey.ALBUM, it) }
+        change.albumArtist?.let { tag.setField(FieldKey.ALBUM_ARTIST, it) }
+        change.year?.let { tag.setField(FieldKey.YEAR, it) }
+        change.genre?.let { tag.setField(FieldKey.GENRE, it) }
         audio.commit()
     }
 }

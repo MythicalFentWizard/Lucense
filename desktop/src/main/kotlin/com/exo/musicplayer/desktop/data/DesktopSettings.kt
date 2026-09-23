@@ -4,23 +4,68 @@ import java.io.File
 import java.util.prefs.Preferences
 
 /**
- * Where Resonate keeps its own files on Windows.
+ * Where Lucense keeps its own files on Windows.
  *
- * `%LOCALAPPDATA%\Resonate` — the correct home for a per-user cache and
+ * `%LOCALAPPDATA%\Lucense` — the correct home for a per-user cache and
  * database on this platform, and specifically not next to the executable, which
  * is normally under Program Files and not writable.
+ *
+ * It was `\Resonate` before the app was renamed, and that folder holds every
+ * play, rating, playlist and favourite anyone has ever accumulated. So the old
+ * one is moved rather than abandoned, and if it cannot be moved it is used
+ * where it stands — an inconsistent folder name is a far smaller problem than
+ * a library that has forgotten everything about itself.
  */
 object AppDirs {
     val root: File by lazy {
-        val local = System.getenv("LOCALAPPDATA")
-            ?: System.getProperty("user.home") + File.separator + ".resonate"
-        File(local, "Resonate").also { it.mkdirs() }
+        home(
+            File(
+                System.getenv("LOCALAPPDATA")
+                    ?: (System.getProperty("user.home") + File.separator + ".lucense")
+            )
+        )
+    }
+
+    /**
+     * Picks the folder, moving the old one over if that is what is there.
+     *
+     * Split out from [root] so the move can be exercised against a scratch
+     * folder instead of against somebody's actual profile.
+     */
+    internal fun home(local: File): File {
+        val home = File(local, "Lucense")
+        val before = File(local, "Resonate")
+        return when {
+            home.isDirectory -> home
+            !before.isDirectory -> home.also { it.mkdirs() }
+            // A plain rename within the same parent, which is instant.
+            before.renameTo(home) -> home
+            // Windows may have a handle open somewhere in there; copying leaves
+            // the original alone, so nothing is lost if this half-finishes.
+            runCatching { before.copyRecursively(home, overwrite = false) }.getOrDefault(false) -> home
+            else -> before
+        }
     }
 
     val covers: File by lazy { File(root, "covers").also { it.mkdirs() } }
     val tools: File by lazy { File(root, "tools").also { it.mkdirs() } }
     val downloads: File by lazy { File(root, "downloads").also { it.mkdirs() } }
-    val database: File by lazy { File(root, "resonate.db") }
+    /**
+     * The database, carried over from its old name along with its journal
+     * files - an orphaned -wal beside a renamed database is a corrupt database.
+     */
+    val database: File by lazy { databaseIn(root) }
+
+    internal fun databaseIn(root: File): File {
+        val now = File(root, "lucense.db")
+        if (!now.exists()) {
+            root.listFiles { file -> file.name.startsWith("resonate.db") }?.forEach { old ->
+                val carried = File(root, old.name.replaceFirst("resonate.db", "lucense.db"))
+                runCatching { old.renameTo(carried) }
+            }
+        }
+        return now
+    }
 }
 
 /** Small key/value settings, in the Windows registry via java.util.prefs. */
@@ -82,6 +127,137 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_WRITE_TAGS, true)
         set(value) = prefs.putBoolean(KEY_WRITE_TAGS, value)
 
+    /** On by default, as it is on the phone. */
+    var starryBackground: Boolean
+        get() = prefs.getBoolean(KEY_STARS, true)
+        set(value) = prefs.putBoolean(KEY_STARS, value)
+
+    /** A BackdropStyle name; until one is chosen, whatever the old starry switch said. */
+    var backdrop: String
+        get() = prefs.get(KEY_BACKDROP, null) ?: if (starryBackground) "STARS" else "NONE"
+        set(value) = prefs.put(KEY_BACKDROP, value)
+
+    /** A ReactiveMode name. */
+    var reactiveMode: String
+        get() = prefs.get(KEY_REACTIVE_MODE, "BALL")
+        set(value) = prefs.put(KEY_REACTIVE_MODE, value)
+
+    /** The Discord application this shows up as; blank turns it off. */
+    /** Whether the song's own cover is shown on Discord rather than the app icon. */
+    var discordCover: Boolean
+        get() = prefs.getBoolean(KEY_DISCORD_COVER, true)
+        set(value) = prefs.putBoolean(KEY_DISCORD_COVER, value)
+
+    /** Milliseconds one song overlaps the next; 0 is a clean handover. */
+    var crossfadeMs: Int
+        get() = prefs.getInt(KEY_CROSSFADE, 0)
+        set(value) = prefs.putInt(KEY_CROSSFADE, value.coerceIn(0, 12_000))
+
+    /** Fade the last half minute out rather than cutting off mid-bar. */
+    var sleepFade: Boolean
+        get() = prefs.getBoolean(KEY_SLEEP_FADE, true)
+        set(value) = prefs.putBoolean(KEY_SLEEP_FADE, value)
+
+    /** How the lyrics search term is put together; see LyricsTerm. */
+    var lyricsTerm: String
+        get() = prefs.get(KEY_LYRICS_TERM, "ARTIST_TITLE")
+        set(value) = prefs.put(KEY_LYRICS_TERM, value)
+
+    var lyricsTermCustom: String
+        get() = prefs.get(KEY_LYRICS_CUSTOM, "{artist} {title}")
+        set(value) = prefs.put(KEY_LYRICS_CUSTOM, value)
+
+    /** The cover service to ask first; blank means try them all in order. */
+    var coverProvider: String
+        get() = prefs.get(KEY_COVER_PROVIDER, "")
+        set(value) = prefs.put(KEY_COVER_PROVIDER, value)
+
+    /** The last few library searches, newest first. */
+    var searchHistory: List<String>
+        get() = prefs.get(KEY_SEARCH_HISTORY, "").split('|').filter { it.isNotBlank() }
+        set(value) = prefs.put(KEY_SEARCH_HISTORY, value.take(8).joinToString("|"))
+
+    var discordId: String
+        get() = prefs.get(KEY_DISCORD_ID, DEFAULT_DISCORD_ID)
+        set(value) = prefs.put(KEY_DISCORD_ID, value.trim())
+
+    var discord: Boolean
+        get() = prefs.getBoolean(KEY_DISCORD, true)
+        set(value) = prefs.putBoolean(KEY_DISCORD, value)
+
+    var levelling: Boolean
+        get() = prefs.getBoolean(KEY_LEVELLING, true)
+        set(value) = prefs.putBoolean(KEY_LEVELLING, value)
+
+    var mediaKeys: Boolean
+        get() = prefs.getBoolean(KEY_MEDIA_KEYS, true)
+        set(value) = prefs.putBoolean(KEY_MEDIA_KEYS, value)
+
+    /** What was playing when Lucense was last closed, and how far into it. */
+    var lastTrack: String
+        get() = prefs.get(KEY_LAST_TRACK, "")
+        set(value) = prefs.put(KEY_LAST_TRACK, value)
+
+    var lastPosition: Long
+        get() = prefs.getLong(KEY_LAST_POSITION, 0L)
+        set(value) = prefs.putLong(KEY_LAST_POSITION, value)
+
+    var shuffle: Boolean
+        get() = prefs.getBoolean(KEY_SHUFFLE, false)
+        set(value) = prefs.putBoolean(KEY_SHUFFLE, value)
+
+    /** A RepeatMode name. */
+    var repeat: String
+        get() = prefs.get(KEY_REPEAT, "OFF")
+        set(value) = prefs.put(KEY_REPEAT, value)
+
+    /** The Custom theme as ARGB hex, "primary,secondary,tertiary,button"; empty until edited. */
+    var customTheme: String
+        get() = prefs.get(KEY_CUSTOM_THEME, "")
+        set(value) = prefs.put(KEY_CUSTOM_THEME, value)
+
+    /** ARGB hex for the background effect, or empty to follow the theme. */
+    var backdropColor: String
+        get() = prefs.get(KEY_BACKDROP_COLOR, "")
+        set(value) = prefs.put(KEY_BACKDROP_COLOR, value)
+
+    /** Whether a wallpaper is set; the picture itself is kept in Lucense's own folder. */
+    var hasWallpaper: Boolean
+        get() = prefs.getBoolean(KEY_WALLPAPER, false)
+        set(value) = prefs.putBoolean(KEY_WALLPAPER, value)
+
+    var wallpaperDim: Float
+        get() = prefs.getFloat(KEY_WALLPAPER_DIM, 0.55f)
+        set(value) = prefs.putFloat(KEY_WALLPAPER_DIM, value)
+
+    /** ARGB hex for the lyric line being sung, or empty to follow the theme. */
+    var lyricsActiveColor: String
+        get() = prefs.get(KEY_LYRICS_ACTIVE, "")
+        set(value) = prefs.put(KEY_LYRICS_ACTIVE, value)
+
+    /** ARGB hex for the other lyric lines, or empty to follow the theme. */
+    var lyricsInactiveColor: String
+        get() = prefs.get(KEY_LYRICS_INACTIVE, "")
+        set(value) = prefs.put(KEY_LYRICS_INACTIVE, value)
+
+    /** A ProxyMode name. System by default, which is how Lucense behaved before there was a choice. */
+    var proxyMode: String
+        get() = prefs.get(KEY_PROXY_MODE, "SYSTEM")
+        set(value) = prefs.put(KEY_PROXY_MODE, value)
+
+    var proxyHost: String
+        get() = prefs.get(KEY_PROXY_HOST, "")
+        set(value) = prefs.put(KEY_PROXY_HOST, value)
+
+    var proxyPort: Int
+        get() = prefs.getInt(KEY_PROXY_PORT, 0)
+        set(value) = prefs.putInt(KEY_PROXY_PORT, value)
+
+    /** Every setting as it stands, for writing into a backup. */
+    fun all(): Map<String, String> = runCatching {
+        prefs.keys().associateWith { prefs.get(it, "") }
+    }.getOrDefault(emptyMap())
+
     private companion object {
         const val KEY_FOLDERS = "library_folders"
         const val KEY_OUTPUTS = "audio_outputs"
@@ -96,5 +272,35 @@ class DesktopSettings {
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"
+        const val KEY_STARS = "starry_background"
+        const val KEY_BACKDROP = "backdrop_style"
+        const val KEY_REACTIVE_MODE = "reactive_mode"
+        const val KEY_SHUFFLE = "shuffle"
+        const val KEY_MEDIA_KEYS = "media_keys"
+        const val KEY_LEVELLING = "levelling"
+        const val KEY_DISCORD_COVER = "discord_cover"
+        const val KEY_CROSSFADE = "crossfade_ms"
+        const val KEY_SLEEP_FADE = "sleep_fade"
+        const val KEY_LYRICS_TERM = "lyrics_term"
+        const val KEY_LYRICS_CUSTOM = "lyrics_term_custom"
+        const val KEY_COVER_PROVIDER = "cover_provider"
+        const val KEY_SEARCH_HISTORY = "search_history"
+        const val KEY_DISCORD = "discord"
+        const val KEY_DISCORD_ID = "discord_id"
+
+        /** Lucense's own Discord application. */
+        const val DEFAULT_DISCORD_ID = "1552040009253523578"
+        const val KEY_LAST_TRACK = "last_track"
+        const val KEY_LAST_POSITION = "last_position"
+        const val KEY_REPEAT = "repeat"
+        const val KEY_CUSTOM_THEME = "custom_theme"
+        const val KEY_BACKDROP_COLOR = "backdrop_color"
+        const val KEY_WALLPAPER = "wallpaper"
+        const val KEY_WALLPAPER_DIM = "wallpaper_dim"
+        const val KEY_LYRICS_ACTIVE = "lyrics_active_color"
+        const val KEY_LYRICS_INACTIVE = "lyrics_inactive_color"
+        const val KEY_PROXY_MODE = "proxy_mode"
+        const val KEY_PROXY_HOST = "proxy_host"
+        const val KEY_PROXY_PORT = "proxy_port"
     }
 }

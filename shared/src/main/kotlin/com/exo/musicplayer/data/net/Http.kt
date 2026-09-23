@@ -7,7 +7,7 @@ import java.net.URL
 object Http {
 
     private const val TAG = "Http"
-    const val USER_AGENT = "Resonate/2.0 (Android music player)"
+    const val USER_AGENT = "Lucense/2.0 (Android music player)"
 
     fun get(url: String, headers: Map<String, String> = emptyMap()): String? = try {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {

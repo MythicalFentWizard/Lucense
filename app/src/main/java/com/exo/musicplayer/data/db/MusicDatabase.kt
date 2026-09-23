@@ -10,9 +10,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         Track::class, Playlist::class, PlaylistEntry::class,
-        PlayEvent::class, Lyrics::class
+        PlayEvent::class, Lyrics::class, SmartPlaylist::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class MusicDatabase : RoomDatabase() {
@@ -21,6 +21,7 @@ abstract class MusicDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun playEventDao(): PlayEventDao
     abstract fun lyricsDao(): LyricsDao
+    abstract fun smartPlaylistDao(): SmartPlaylistDao
 
     companion object {
         /**
@@ -87,6 +88,33 @@ abstract class MusicDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds genres and smart lists.
+         *
+         * By hand like the rest: by now a library is somebody's own imported
+         * music with its play history attached, and throwing that away to add
+         * two things would be an absurd trade.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `genre` TEXT")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `smart_playlists` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `rule` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_smart_playlists_name` " +
+                        "ON `smart_playlists` (`name`)"
+                )
+            }
+        }
+
         @Volatile
         private var instance: MusicDatabase? = null
 
@@ -97,7 +125,7 @@ abstract class MusicDatabase : RoomDatabase() {
                     MusicDatabase::class.java,
                     "music.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                     .build()
                     .also { instance = it }

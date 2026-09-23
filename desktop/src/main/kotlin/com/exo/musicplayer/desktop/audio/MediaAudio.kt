@@ -119,7 +119,7 @@ object MediaAudio {
             0.0
         }
 
-        val output = File.createTempFile("resonate-identify", ".wav")
+        val output = File.createTempFile("lucense-identify", ".wav")
         try {
             val process = ProcessBuilder(
                 ffmpeg.absolutePath,

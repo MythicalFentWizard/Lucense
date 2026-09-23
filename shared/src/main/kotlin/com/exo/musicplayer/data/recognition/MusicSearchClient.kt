@@ -59,6 +59,7 @@ class MusicSearchClient {
             title = title,
             artist = optString("artistName").takeIf { it.isNotBlank() },
             album = optString("collectionName").takeIf { it.isNotBlank() },
+            genre = optString("primaryGenreName").takeIf { it.isNotBlank() },
             // The API hands back a 100px thumbnail; ask for something usable.
             artworkUrl = optString("artworkUrl100")
                 .takeIf { it.isNotBlank() }

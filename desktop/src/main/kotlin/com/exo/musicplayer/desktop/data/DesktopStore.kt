@@ -14,6 +14,18 @@ data class StoredLyrics(
 
 data class ListenRow(val path: String, val totalMs: Long, val plays: Int)
 
+/** What a song's own file said, before the app wrote over it. */
+data class StoredOriginal(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val year: String?,
+    val genre: String?
+)
+
+/** A list written as a rule rather than as a set of songs. */
+data class StoredSmartPlaylist(val id: Long, val name: String, val rule: String)
+
 data class StoredPlaylist(val id: Long, val name: String, val size: Int)
 
 /**
@@ -48,12 +60,68 @@ class DesktopStore(databaseFile: File) {
             st.executeUpdate("CREATE INDEX IF NOT EXISTS ix_events_path ON play_events(path)")
             st.executeUpdate(
                 """
+                CREATE TABLE IF NOT EXISTS smart_playlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    rule TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS original_tags (
+                    path TEXT PRIMARY KEY,
+                    title TEXT,
+                    artist TEXT,
+                    album TEXT,
+                    year TEXT,
+                    genre TEXT,
+                    capturedAt INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS cover_urls (
+                    path TEXT PRIMARY KEY,
+                    url TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS track_fx (
+                    path TEXT PRIMARY KEY,
+                    settings TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
                 CREATE TABLE IF NOT EXISTS lyrics (
                     path TEXT PRIMARY KEY,
                     plain TEXT,
                     synced TEXT,
                     source TEXT NOT NULL,
                     updatedAt INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS levels (
+                    path TEXT PRIMARY KEY,
+                    dbfs REAL NOT NULL,
+                    peak REAL NOT NULL
+                )
+                """.trimIndent()
+            )
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS ratings (
+                    path TEXT PRIMARY KEY,
+                    stars INTEGER NOT NULL
                 )
                 """.trimIndent()
             )
@@ -343,6 +411,54 @@ class DesktopStore(databaseFile: File) {
 
     // ---- Favourites ----
 
+    fun saveLevel(path: String, dbfs: Float, peak: Float) {
+        connection.prepareStatement(
+            "INSERT OR REPLACE INTO levels(path, dbfs, peak) VALUES(?, ?, ?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setDouble(2, dbfs.toDouble())
+            ps.setDouble(3, peak.toDouble())
+            ps.executeUpdate()
+        }
+    }
+
+    /** Every measured level, as loudness and peak. */
+    fun levels(): Map<String, Pair<Float, Float>> = buildMap {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path, dbfs, peak FROM levels").use { rs ->
+                while (rs.next()) {
+                    put(rs.getString(1), rs.getDouble(2).toFloat() to rs.getDouble(3).toFloat())
+                }
+            }
+        }
+    }
+
+    /** Stars out of five; zero clears it. */
+    fun setRating(path: String, stars: Int) {
+        if (stars <= 0) {
+            connection.prepareStatement("DELETE FROM ratings WHERE path = ?").use { ps ->
+                ps.setString(1, path)
+                ps.executeUpdate()
+            }
+            return
+        }
+        connection.prepareStatement(
+            "INSERT OR REPLACE INTO ratings(path, stars) VALUES(?, ?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setInt(2, stars.coerceAtMost(5))
+            ps.executeUpdate()
+        }
+    }
+
+    fun ratings(): Map<String, Int> = buildMap {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path, stars FROM ratings").use { rs ->
+                while (rs.next()) put(rs.getString(1), rs.getInt(2))
+            }
+        }
+    }
+
     fun favourites(): Set<String> = buildSet {
         connection.createStatement().use { st ->
             st.executeQuery("SELECT path FROM favourites").use { rs ->
@@ -383,10 +499,165 @@ class DesktopStore(databaseFile: File) {
         }
     }
 
+    /** The songs played most recently, newest first and each one only once. */
+    fun recentPlays(limit: Int): List<String> = buildList {
+        connection.createStatement().use { st ->
+            st.executeQuery(
+                "SELECT path, MAX(startedAt) AS last FROM play_events " +
+                    "WHERE listenedMs >= $QUALIFYING_MS GROUP BY path " +
+                    "ORDER BY last DESC LIMIT $limit"
+            ).use { rs -> while (rs.next()) add(rs.getString(1)) }
+        }
+    }
+
+    fun smartPlaylists(): List<StoredSmartPlaylist> = buildList {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT id, name, rule FROM smart_playlists ORDER BY name COLLATE NOCASE")
+                .use { rs ->
+                    while (rs.next()) {
+                        add(StoredSmartPlaylist(rs.getLong(1), rs.getString(2), rs.getString(3)))
+                    }
+                }
+        }
+    }
+
+    fun createSmart(name: String, rule: String): Long {
+        connection.prepareStatement(
+            "INSERT INTO smart_playlists(name, rule, createdAt) VALUES (?,?,?)"
+        ).use { ps ->
+            ps.setString(1, name)
+            ps.setString(2, rule)
+            ps.setLong(3, System.currentTimeMillis())
+            ps.executeUpdate()
+        }
+        return queryLong("SELECT last_insert_rowid()")
+    }
+
+    fun updateSmart(id: Long, name: String, rule: String) {
+        connection.prepareStatement("UPDATE smart_playlists SET name = ?, rule = ? WHERE id = ?")
+            .use { ps ->
+                ps.setString(1, name)
+                ps.setString(2, rule)
+                ps.setLong(3, id)
+                ps.executeUpdate()
+            }
+    }
+
+    fun deleteSmart(id: Long) {
+        connection.prepareStatement("DELETE FROM smart_playlists WHERE id = ?").use { ps ->
+            ps.setLong(1, id)
+            ps.executeUpdate()
+        }
+    }
+
+    /**
+     * Keeps a song's own tags, the first time anything overwrites them.
+     *
+     * Only the first time: the second write is the app changing its own work,
+     * and the point of this is what the file said before the app ever touched
+     * it. INSERT OR IGNORE is exactly that rule.
+     */
+    fun rememberOriginal(
+        path: String,
+        title: String?,
+        artist: String?,
+        album: String?,
+        year: String?,
+        genre: String?
+    ) {
+        connection.prepareStatement(
+            "INSERT OR IGNORE INTO original_tags(path, title, artist, album, year, genre, capturedAt) " +
+                "VALUES (?,?,?,?,?,?,?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setString(2, title)
+            ps.setString(3, artist)
+            ps.setString(4, album)
+            ps.setString(5, year)
+            ps.setString(6, genre)
+            ps.setLong(7, System.currentTimeMillis())
+            ps.executeUpdate()
+        }
+    }
+
+    fun originalFor(path: String): StoredOriginal? {
+        connection.prepareStatement(
+            "SELECT title, artist, album, year, genre FROM original_tags WHERE path = ?"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.executeQuery().use { rs ->
+                return if (rs.next()) {
+                    StoredOriginal(
+                        rs.getString(1), rs.getString(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5)
+                    )
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    /** Which songs have something to go back to, for the menu to offer it. */
+    fun pathsWithOriginals(): Set<String> = buildSet {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path FROM original_tags").use { rs ->
+                while (rs.next()) add(rs.getString(1))
+            }
+        }
+    }
+
+    /** Where this song's cover was found on the web, if it was. */
+    fun coverUrl(path: String): String? {
+        connection.prepareStatement("SELECT url FROM cover_urls WHERE path = ?").use { ps ->
+            ps.setString(1, path)
+            ps.executeQuery().use { rs -> return if (rs.next()) rs.getString(1) else null }
+        }
+    }
+
+    fun saveCoverUrl(path: String, url: String) {
+        connection.prepareStatement(
+            "INSERT INTO cover_urls(path, url) VALUES (?,?) " +
+                "ON CONFLICT(path) DO UPDATE SET url = excluded.url"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setString(2, url)
+            ps.executeUpdate()
+        }
+    }
+
+    fun fxFor(path: String): String? {
+        connection.prepareStatement("SELECT settings FROM track_fx WHERE path = ?").use { ps ->
+            ps.setString(1, path)
+            ps.executeQuery().use { rs -> return if (rs.next()) rs.getString(1) else null }
+        }
+    }
+
+    fun saveFx(path: String, settings: String) {
+        connection.prepareStatement(
+            "INSERT INTO track_fx(path, settings) VALUES (?,?) " +
+                "ON CONFLICT(path) DO UPDATE SET settings = excluded.settings"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setString(2, settings)
+            ps.executeUpdate()
+        }
+    }
+
+    fun deleteFx(path: String) {
+        connection.prepareStatement("DELETE FROM track_fx WHERE path = ?").use { ps ->
+            ps.setString(1, path)
+            ps.executeUpdate()
+        }
+    }
+
     /** Drops every trace of files that no longer exist, after a delete. */
     fun forgetPaths(paths: Collection<String>) {
         if (paths.isEmpty()) return
-        for (table in listOf("play_events", "lyrics", "marks", "playlist_items", "favourites")) {
+        for (table in listOf(
+            "play_events", "lyrics", "marks", "playlist_items", "favourites", "track_fx",
+            "cover_urls", "original_tags"
+        )) {
             connection.prepareStatement("DELETE FROM $table WHERE path = ?").use { ps ->
                 for (path in paths) { ps.setString(1, path); ps.addBatch() }
                 ps.executeBatch()

@@ -19,14 +19,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,9 +54,10 @@ import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.DesktopDuplicateGroup
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
+import java.util.Locale
 
 /** Which modal is open, if any. */
-enum class DialogKind { BULK, DUPLICATES, ADD_TO_PLAYLIST }
+enum class DialogKind { BULK, DUPLICATES, ADD_TO_PLAYLIST, MERGE }
 
 /**
  * Modal surface.
@@ -116,7 +123,14 @@ fun ScrimDialog(
                 }
             }
             Spacer(Modifier.height(16.dp))
-            content()
+            // The heading stays put and the body scrolls under it. Nothing here
+            // is taller than the window today - the tallest, Bulk tools, is
+            // 553px of the 576px a dialog is given - but a job in progress adds
+            // a panel to that one, and without this the bottom of it would
+            // simply be cut off with no way to reach it.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                content()
+            }
         }
     }
 }
@@ -132,7 +146,24 @@ fun ScrimDialog(
 @Composable
 fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
     var redo by remember { mutableStateOf(false) }
+    var choosingParts by remember { mutableStateOf(false) }
     val job = controller.bulk
+
+    // Names & tags asks first. It takes the place of this dialog rather than
+    // sitting on top of it, and comes straight back to it once it has run, so
+    // the progress panel is where it always was.
+    if (choosingParts) {
+        TagPartsDialog(
+            running = job.running,
+            redo = redo,
+            onRun = { names, tags ->
+                controller.runBulk(BulkKind.TAGS, redo, names, tags)
+                choosingParts = false
+            },
+            onDismiss = { choosingParts = false }
+        )
+        return
+    }
 
     ScrimDialog(
         title = "Bulk tools",
@@ -146,40 +177,73 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
             note = "Off means each tool only visits tracks it hasn't seen before"
         ) { redo = it }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(18.dp))
 
+        // Grouped by what they are for, and within that cheapest first. Repair
+        // comes last on purpose: it is the only one that rewrites the files
+        // rather than reading them or writing a tag.
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            BulkOption(
-                kind = BulkKind.COVERS,
-                icon = Icons.Default.Album,
-                description = "Finds missing cover art across seven catalogues. " +
-                    "Tracks that already have art are left alone.",
-                enabled = !job.running
-            ) { controller.runBulk(BulkKind.COVERS, redo) }
-
+            BulkGroup("Naming")
             BulkOption(
                 kind = BulkKind.TAGS,
                 icon = Icons.AutoMirrored.Filled.Label,
-                description = "Looks each track up by name and fills in artist, " +
-                    "album and year.",
-                enabled = !job.running
-            ) { controller.runBulk(BulkKind.TAGS, redo) }
-
-            BulkOption(
-                kind = BulkKind.LYRICS,
-                icon = Icons.Default.Lyrics,
-                description = "Four services in turn — LRCLIB, NetEase, lyrics.ovh, " +
-                    "Genius — keeping timed lyrics where they exist.",
-                enabled = !job.running
-            ) { controller.runBulk(BulkKind.LYRICS, redo) }
+                description = "Looks songs up by name, then writes the song's own name, or the " +
+                    "album, year and genre, or both — it asks which before it starts.",
+                enabled = !job.running,
+                runLabel = "Choose…"
+            ) { choosingParts = true }
 
             BulkOption(
                 kind = BulkKind.IDENTIFY,
                 icon = Icons.Default.Fingerprint,
-                description = "Fingerprints the audio itself. Slower, but it works on " +
-                    "files with no usable name at all.",
+                description = "Fingerprints the audio itself. Slower, but it works on files " +
+                    "with no usable name at all.",
                 enabled = !job.running
             ) { controller.runBulk(BulkKind.IDENTIFY, redo) }
+
+            BulkOption(
+                kind = BulkKind.FOLDERS,
+                icon = Icons.Default.FolderOpen,
+                description = "Reads the names out of the folders: Artist, Album, then " +
+                    "01 Title. Fills in blanks only, and never argues with a tag that is " +
+                    "already there. Nothing is looked up online.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.FOLDERS, redo) }
+
+            BulkGroup("Artwork and words")
+            BulkOption(
+                kind = BulkKind.COVERS,
+                icon = Icons.Default.Album,
+                description = "Finds missing cover art, asking six sources at once. Songs " +
+                    "that already have art are left alone.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.COVERS, redo) }
+
+            BulkOption(
+                kind = BulkKind.LYRICS,
+                icon = Icons.Default.Lyrics,
+                description = "Four services in turn, keeping timed lyrics where they exist.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.LYRICS, redo) }
+
+            BulkGroup("Sound")
+            BulkOption(
+                kind = BulkKind.LEVELS,
+                icon = Icons.Default.Tune,
+                description = "Measures how loud each song really is, so they all play at the " +
+                    "same level. Nothing is written to the files.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.LEVELS, redo) }
+
+            BulkGroup("Repair")
+            BulkOption(
+                kind = BulkKind.REPAIR,
+                icon = Icons.Default.Healing,
+                description = "Rebuilds files that came without a proper header — Telegram " +
+                    "exports, mostly — so they show their length and seek properly. The audio " +
+                    "itself is copied across untouched.",
+                enabled = !job.running
+            ) { controller.runBulk(BulkKind.REPAIR, redo) }
         }
 
         if (job.running || job.finishedNote != null) {
@@ -237,12 +301,25 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
     }
 }
 
+/** A heading over a couple of the tools, so the list reads as sorted. */
+@Composable
+private fun BulkGroup(text: String) {
+    Text(
+        text.uppercase(Locale.getDefault()),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = Palette.TextFaint,
+        modifier = Modifier.padding(top = 6.dp, start = 2.dp)
+    )
+}
+
 @Composable
 private fun BulkOption(
     kind: BulkKind,
     icon: ImageVector,
     description: String,
     enabled: Boolean,
+    runLabel: String = "Run",
     onRun: () -> Unit
 ) {
     Row(
@@ -265,11 +342,73 @@ private fun BulkOption(
             Text(
                 description,
                 style = MaterialTheme.typography.labelSmall,
-                color = Palette.TextFaint
+                color = Palette.TextFaint,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Spacer(Modifier.width(12.dp))
-        GhostButton("Run", enabled = enabled, onClick = onRun)
+        GhostButton(runLabel, enabled = enabled, onClick = onRun)
+    }
+}
+
+/**
+ * Which half of Names & tags to write.
+ *
+ * Worth asking rather than assuming: a library with good titles and no albums
+ * wants one of them, a pile of downloads named after the video wants the other,
+ * and doing both when only one was meant overwrites work somebody already did
+ * by hand.
+ */
+@Composable
+fun TagPartsDialog(
+    running: Boolean,
+    redo: Boolean,
+    onRun: (names: Boolean, tags: Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var names by remember { mutableStateOf(true) }
+    var tags by remember { mutableStateOf(true) }
+
+    ScrimDialog(
+        title = "Names & tags",
+        subtitle = "Choose what gets written into the files",
+        onDismiss = onDismiss
+    ) {
+        CheckRow(
+            label = "Names",
+            checked = names,
+            enabled = !running,
+            note = "The song's own title, and the artist"
+        ) { names = it }
+        Spacer(Modifier.height(14.dp))
+        CheckRow(
+            label = "Tags",
+            checked = tags,
+            enabled = !running,
+            note = "Album, year and genre"
+        ) { tags = it }
+        Spacer(Modifier.height(16.dp))
+        Hint(
+            if (redo) {
+                "Every song will be visited, including ones this has been through before."
+            } else {
+                "Songs this has already been through are skipped. To run the other half " +
+                    "over those as well, tick the redo box in Bulk tools first."
+            }
+        )
+        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (!names && !tags) "Pick at least one of them." else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint,
+                modifier = Modifier.weight(1f)
+            )
+            GhostButton("Cancel", onClick = onDismiss)
+            Spacer(Modifier.width(8.dp))
+            AccentButton("Run", enabled = !running && (names || tags)) { onRun(names, tags) }
+        }
     }
 }
 
@@ -482,6 +621,188 @@ fun AddToPlaylistDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Hand-edit a track's details.
+ *
+ * Identification gets it right most of the time and not all of it — live
+ * bootlegs, uncatalogued tracks, names the services transliterate differently.
+ * Emptying a box clears that tag rather than leaving the old value, because
+ * deleting a wrong album name has to be possible.
+ */
+@Composable
+fun EditTrackDialog(
+    controller: DesktopController,
+    track: DesktopTrack,
+    onDismiss: () -> Unit
+) {
+    var title by remember(track.file.absolutePath) { mutableStateOf(track.title) }
+    var artist by remember(track.file.absolutePath) { mutableStateOf(track.artist.orEmpty()) }
+    var album by remember(track.file.absolutePath) { mutableStateOf(track.album.orEmpty()) }
+    var genre by remember(track.file.absolutePath) { mutableStateOf(track.genre.orEmpty()) }
+    var year by remember(track.file.absolutePath) {
+        mutableStateOf(track.year?.toString().orEmpty())
+    }
+
+    ScrimDialog(title = "Edit details", subtitle = track.file.name, onDismiss = onDismiss) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Artwork(track, 76.dp, corner = 8.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                FieldLabel("Song name")
+                TextInput(title, { title = it }, "Required", Modifier.fillMaxWidth())
+                Spacer(Modifier.height(10.dp))
+                FieldLabel("Artist")
+                TextInput(artist, { artist = it }, "Unknown artist", Modifier.fillMaxWidth())
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row {
+            Column(Modifier.weight(2f)) {
+                FieldLabel("Album")
+                TextInput(album, { album = it }, "None", Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                FieldLabel("Genre")
+                TextInput(genre, { genre = it }, "None", Modifier.fillMaxWidth())
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.width(96.dp)) {
+                FieldLabel("Year")
+                TextInput(year, { year = it.filter(Char::isDigit).take(4) }, "----",
+                    Modifier.fillMaxWidth())
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Hint(
+            if (controller.writeTags) {
+                "Saved into the file's own tags, so other players see it too."
+            } else {
+                "\"Write tags into files\" is off in Settings, so this will not be saved " +
+                    "to the file. Turn it on first."
+            }
+        )
+        controller.editNote?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.Accent)
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (controller.canRevert(track)) {
+                GhostButton("Revert to the file's own", icon = Icons.Default.Undo) {
+                    controller.revertToOriginal(listOf(track))
+                    onDismiss()
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            GhostButton("Cancel", onClick = onDismiss)
+            Spacer(Modifier.width(8.dp))
+            AccentButton("Save", enabled = controller.writeTags) {
+                controller.saveTrackDetails(track, title, artist, album, year, genre)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FieldLabel(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = Palette.TextFaint,
+        modifier = Modifier.padding(bottom = 4.dp)
+    )
+}
+
+
+/** Setting one thing about a lot of songs at once. */
+@Composable
+fun EditTracksDialog(controller: DesktopController, tracks: List<DesktopTrack>, onDismiss: () -> Unit) {
+    var artist by remember(tracks) { mutableStateOf("") }
+    var album by remember(tracks) { mutableStateOf("") }
+    var year by remember(tracks) { mutableStateOf("") }
+    var genre by remember(tracks) { mutableStateOf("") }
+    val anything = artist.isNotBlank() || album.isNotBlank() || year.isNotBlank() || genre.isNotBlank()
+
+    ScrimDialog(
+        title = "Edit ${tracks.size} songs",
+        subtitle = "Anything left blank stays as it is",
+        onDismiss = onDismiss
+    ) {
+        FieldLabel("Artist")
+        TextInput(artist, { artist = it }, "Leave unchanged", Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        FieldLabel("Album")
+        TextInput(album, { album = it }, "Leave unchanged", Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        FieldLabel("Genre")
+        TextInput(genre, { genre = it }, "Leave unchanged", Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        FieldLabel("Year")
+        TextInput(year, { year = it }, "Leave unchanged", Modifier.width(140.dp))
+        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Written into the files' own tags",
+                style = MaterialTheme.typography.bodySmall,
+                color = Palette.TextDim,
+                modifier = Modifier.weight(1f)
+            )
+            GhostButton("Cancel", onClick = onDismiss)
+            Spacer(Modifier.width(8.dp))
+            AccentButton("Apply to ${tracks.size}", enabled = anything) {
+                controller.applyToMany(artist, album, year, genre)
+            }
+        }
+    }
+}
+
+/** What the keys do, since nothing on screen says so. */
+@Composable
+fun ShortcutsDialog(onDismiss: () -> Unit) {
+    ScrimDialog(
+        title = "Keyboard shortcuts",
+        subtitle = "Live whenever the window has focus and you are not typing in a box",
+        onDismiss = onDismiss
+    ) {
+        listOf(
+            "Space" to "Play or pause",
+            "\u2190  \u2192" to "Back or forward five seconds",
+            "Ctrl + \u2190  \u2192" to "Previous or next song",
+            "\u2191  \u2193" to "Volume up or down",
+            "J" to "Jump the list to the song playing",
+            "S" to "Shuffle on or off",
+            "M" to "Mute, or put the volume back",
+            "R" to "Repeat: all, then one, then off",
+            "Ctrl + A" to "Select every song in view",
+            "Esc" to "Clear the selection",
+            "Ctrl + click" to "Add one song to the selection",
+            "Shift + click" to "Select everything between",
+            "/" to "This list"
+        ).forEach { (keys, what) ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    keys,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.width(132.dp)
+                )
+                Text(what, style = MaterialTheme.typography.bodySmall, color = Palette.Text)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.weight(1f))
+            GhostButton("Close", onClick = onDismiss)
         }
     }
 }

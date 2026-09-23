@@ -144,6 +144,9 @@ class TrackImporter(private val context: Context) {
                 durationMs = tags.durationMs,
                 trackNumber = tags.trackNumber,
                 year = tags.year,
+                // Empty, not null: null is reserved for "never looked at",
+                // which is what the pass over an older library searches for.
+                genre = tags.genre.orEmpty(),
                 mimeType = declaredMime,
                 sizeBytes = destination.length(),
                 artPath = artPath,
@@ -200,40 +203,13 @@ class TrackImporter(private val context: Context) {
         }.getOrDefault(uri.lastPathSegment to null)
     }
 
-    private data class Tags(
-        val title: String?,
-        val artist: String?,
-        val album: String?,
-        val albumArtist: String?,
-        val durationMs: Long,
-        val trackNumber: Int?,
-        val year: Int?,
-        val artwork: ByteArray?
-    )
-
-    private fun readTags(file: File): Tags {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(file.absolutePath)
-            fun key(k: Int) = retriever.extractMetadata(k)?.trim()?.takeIf { it.isNotEmpty() }
-            Tags(
-                title = key(MediaMetadataRetriever.METADATA_KEY_TITLE),
-                artist = key(MediaMetadataRetriever.METADATA_KEY_ARTIST),
-                album = key(MediaMetadataRetriever.METADATA_KEY_ALBUM),
-                albumArtist = key(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST),
-                durationMs = key(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
-                trackNumber = key(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
-                    ?.substringBefore('/')?.trim()?.toIntOrNull(),
-                year = key(MediaMetadataRetriever.METADATA_KEY_YEAR)?.take(4)?.toIntOrNull(),
-                artwork = runCatching { retriever.embeddedPicture }.getOrNull()
-            )
-        } catch (t: Throwable) {
-            Log.w(TAG, "Could not read tags from ${file.name}", t)
-            Tags(null, null, null, null, 0L, null, null, null)
-        } finally {
-            runCatching { retriever.release() }
-        }
-    }
+    /**
+     * One reader, shared with the revert button and the genre pass.
+     *
+     * Reading a file's tags in two places would mean two answers to the same
+     * question the moment one of them learned about a new field.
+     */
+    private fun readTags(file: File): FileTags.Read = FileTags.of(file)
 
     private fun writeArtwork(hash: String, bytes: ByteArray): String? = runCatching {
         val file = File(artDir, "$hash.jpg")

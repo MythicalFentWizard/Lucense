@@ -31,6 +31,14 @@ data class Track(
     val durationMs: Long = 0L,
     val trackNumber: Int? = null,
     val year: Int? = null,
+    /**
+     * The genre the file itself claims, or empty where it claims none.
+     *
+     * Empty rather than null on purpose: null means "never looked", which is
+     * what the one-off pass over an older library goes looking for. Without
+     * that difference every song without a genre would be re-read for ever.
+     */
+    val genre: String? = null,
     val mimeType: String? = null,
     val sizeBytes: Long = 0L,
     /** Absolute path of the extracted cover art, if the file embedded one. */
@@ -82,6 +90,21 @@ data class PlaylistEntry(
     val playlistId: Long,
     val trackId: Long,
     val position: Int
+)
+
+/**
+ * A list kept as a rule rather than as a set of songs.
+ *
+ * [rule] is written in the same language as the search box - rating:4+,
+ * year:2015-2020, genre:rock - and is answered against the library whenever it
+ * is asked, so it fills itself in as the library changes.
+ */
+@Entity(tableName = "smart_playlists", indices = [Index(value = ["name"])])
+data class SmartPlaylist(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val name: String,
+    val rule: String,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 /** A playlist plus the counts the list screen needs, in one query. */

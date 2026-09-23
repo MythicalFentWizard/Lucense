@@ -5,6 +5,8 @@ data class MusicMatch(
     val title: String,
     val artist: String?,
     val album: String?,
+    /** As the service words it: "Hip-Hop/Rap", "Alternative", and so on. */
+    val genre: String? = null,
     val artworkUrl: String? = null,
     val releaseYear: Int? = null,
     val durationMs: Long? = null,

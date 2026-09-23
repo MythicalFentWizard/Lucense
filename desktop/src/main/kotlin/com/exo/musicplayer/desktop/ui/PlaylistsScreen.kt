@@ -3,6 +3,7 @@ package com.exo.musicplayer.desktop.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -22,12 +23,14 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Save
@@ -49,8 +52,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.playlist.ImportResult
+import com.exo.musicplayer.desktop.data.AutoPlaylist
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.StoredPlaylist
+import com.exo.musicplayer.desktop.data.StoredSmartPlaylist
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
 import java.io.File
@@ -61,9 +66,16 @@ fun PlaylistsScreen(
     controller: DesktopController,
     onPickPlaylistFile: (save: Boolean, suggested: String) -> File?
 ) {
-    LaunchedEffect(Unit) { controller.refreshPlaylists() }
+    LaunchedEffect(Unit) {
+        controller.refreshPlaylists()
+        controller.refreshSmartPlaylists()
+    }
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf("") }
+    var creatingSmart by remember { mutableStateOf(false) }
+    var smartName by remember { mutableStateOf("") }
+    var smartRule by remember { mutableStateOf("") }
 
     val open = controller.openPlaylist
     if (open != null) {
@@ -72,6 +84,184 @@ fun PlaylistsScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+        SectionTitle("Made for you")
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AutoPlaylist.entries.forEach { kind ->
+                val songs = remember(controller.tracks, controller.playCounts, controller.favourites, kind) {
+                    controller.autoPlaylist(kind).size
+                }
+                AutoCard(kind, songs) { controller.playAuto(kind) }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+
+        SectionTitle("Smart lists") {
+            AccentButton("New smart list", icon = Icons.Default.Add) { creatingSmart = true }
+        }
+        Spacer(Modifier.height(10.dp))
+        controller.smartNote?.let { note ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Dismiss") { controller.dismissSmartNote() }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (controller.smartPlaylists.isEmpty() && !creatingSmart) {
+            Hint(
+                "A smart list is a rule rather than a fixed set of songs, so it refills " +
+                    "itself as the library changes. Anything the search box understands " +
+                    "works here: rating:4+ · year:2015-2020 · plays:0 · added:30d · fav:"
+            )
+        } else if (controller.smartPlaylists.isNotEmpty()) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                controller.smartPlaylists.forEach { list ->
+                    val songs = remember(
+                        controller.tracks,
+                        controller.ratings,
+                        controller.playCounts,
+                        controller.favourites,
+                        list.rule
+                    ) { controller.smartTracks(list.rule).size }
+                    SmartCard(
+                        list = list,
+                        songs = songs,
+                        onPlay = { controller.playSmart(list) },
+                        onDelete = { controller.deleteSmartPlaylist(list) }
+                    )
+                }
+            }
+        }
+        if (creatingSmart) {
+            Spacer(Modifier.height(12.dp))
+            Panel(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextInput(
+                        value = smartName,
+                        onValueChange = { smartName = it },
+                        placeholder = "Name",
+                        modifier = Modifier.width(200.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    TextInput(
+                        value = smartRule,
+                        onValueChange = { smartRule = it },
+                        placeholder = "rating:4+ year:2015-2020",
+                        modifier = Modifier.weight(1f),
+                        onSubmit = {
+                            controller.createSmartPlaylist(smartName, smartRule)
+                            smartName = ""
+                            smartRule = ""
+                            creatingSmart = false
+                        }
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    AccentButton("Create", enabled = smartRule.isNotBlank()) {
+                        controller.createSmartPlaylist(smartName, smartRule)
+                        smartName = ""
+                        smartRule = ""
+                        creatingSmart = false
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton("Cancel") {
+                        creatingSmart = false
+                        smartName = ""
+                        smartRule = ""
+                    }
+                }
+                if (smartRule.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Matches ${controller.smartTracks(smartRule).size} songs right now",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Palette.Accent
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+
+        SectionTitle("Genres") {
+            Text(
+                if (controller.ungenred > 0) {
+                    "${controller.ungenred} without a genre — Names & tags fills them in"
+                } else {
+                    "${controller.genres.size} genres"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        controller.genreNote?.let { note ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent,
+                    modifier = Modifier.weight(1f)
+                )
+                GhostButton("Dismiss") { controller.dismissGenreNote() }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Panel(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextInput(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    placeholder = "A genre, an artist, or a rule like: rock rating:4+",
+                    modifier = Modifier.weight(1f),
+                    onSubmit = { controller.playPrompt(prompt) }
+                )
+                Spacer(Modifier.width(10.dp))
+                AccentButton("Play", enabled = prompt.isNotBlank()) {
+                    controller.playPrompt(prompt)
+                }
+                Spacer(Modifier.width(8.dp))
+                GhostButton("Save as playlist", enabled = prompt.isNotBlank()) {
+                    controller.savePrompt(prompt)
+                }
+            }
+            if (prompt.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Matches ${controller.promptTracks(prompt).size} songs right now",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.Accent
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        if (controller.genres.isEmpty()) {
+            Hint(
+                "Nothing in the library carries a genre yet. Run Names & tags in Bulk " +
+                    "tools and it fills the genre in from iTunes along with artist, album " +
+                    "and year — or type one into a song's details yourself."
+            )
+        } else {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                controller.genres.take(30).forEach { (name, songs) ->
+                    GhostButton("$name · $songs") { controller.playPrompt(name) }
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionTitle("Your playlists") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -324,6 +514,12 @@ private fun OpenPlaylist(
                 Spacer(Modifier.width(8.dp))
                 GhostButton("Rename") { renaming = true }
                 Spacer(Modifier.width(8.dp))
+                GhostButton(
+                    "Zip and ship",
+                    enabled = !controller.archiveRunning,
+                    icon = Icons.Default.Archive
+                ) { controller.zipPlaylist(playlist) }
+                Spacer(Modifier.width(8.dp))
                 GhostButton("Export…", icon = Icons.Default.Save) {
                     onPickPlaylistFile(true, playlist.name)?.let {
                         controller.exportPlaylist(playlist, it)
@@ -434,90 +630,86 @@ private fun PlaylistTrackRow(
     }
 }
 
-/** Albums: covers first, because that is how people actually look for an album. */
+
+/** One made-for-you list: press it and it becomes the queue. */
 @Composable
-fun AlbumsScreen(controller: DesktopController) {
-    val albums = remember(controller.tracks) {
-        controller.tracks
-            .filter { !it.album.isNullOrBlank() }
-            .groupBy { "${it.displayAlbum}|${it.displayArtist}" }
-            .map { (_, group) ->
-                val ordered = group.sortedBy { it.trackNumber ?: Int.MAX_VALUE }
-                ordered.first().displayAlbum to ordered
-            }
-            .sortedBy { it.first.lowercase() }
-    }
-
-    if (albums.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            EmptyState(
-                icon = Icons.Default.Album,
-                title = "No albums",
-                body = "Nothing in the library has an album tag yet.\n" +
-                    "Run Names & tags from the library toolbar to fill them in."
-            )
-        }
-        return
-    }
-
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(160.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)
-    ) {
-        items(albums, key = { it.first + it.second.first().displayArtist }) { (name, group) ->
-            AlbumCard(name, group) { controller.play(group.first(), group) }
-        }
-    }
-}
-
-@Composable
-private fun AlbumCard(name: String, tracks: List<DesktopTrack>, onPlay: () -> Unit) {
+private fun AutoCard(kind: AutoPlaylist, songs: Int, onPlay: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
-
     Column(
         Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (hovered) Palette.Hover else Color.Transparent)
+            .width(196.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
             .hoverable(interaction)
-            .clickable(onClick = onPlay)
-            .padding(8.dp)
+            .clickable(enabled = songs > 0, onClick = onPlay)
+            .padding(14.dp)
     ) {
-        Box {
-            Artwork(tracks.first(), 144.dp, corner = 7.dp, modifier = Modifier.fillMaxWidth())
-            if (hovered) {
-                Box(
-                    Modifier
-                        .padding(8.dp)
-                        .size(30.dp)
-                        .clip(RoundedCornerShape(15.dp))
-                        .background(Palette.Accent)
-                        .align(Alignment.BottomEnd),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow, "Play",
-                        Modifier.size(16.dp), tint = Palette.OnAccent
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(9.dp))
         Text(
-            name,
+            kind.label,
             style = MaterialTheme.typography.bodyMedium,
             color = Palette.Text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        Spacer(Modifier.height(3.dp))
         Text(
-            "${tracks.first().displayArtist} · ${tracks.size} tracks",
+            if (songs == 0) "Nothing here yet" else "$songs song${if (songs == 1) "" else "s"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (songs == 0) Palette.TextFaint else Palette.Accent
+        )
+        Spacer(Modifier.height(7.dp))
+        Text(
+            kind.note,
             style = MaterialTheme.typography.labelSmall,
             color = Palette.TextFaint,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** One smart list: what it is called, what it holds at the moment. */
+@Composable
+private fun SmartCard(
+    list: StoredSmartPlaylist,
+    songs: Int,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Column(
+        Modifier
+            .width(196.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
+            .hoverable(interaction)
+            .clickable(enabled = songs > 0, onClick = onPlay)
+            .padding(14.dp)
+    ) {
+        Text(
+            list.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Palette.Text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            if (songs == 0) "Matches nothing yet" else "$songs song${if (songs == 1) "" else "s"}",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (songs == 0) Palette.TextFaint else Palette.Accent
+        )
+        Spacer(Modifier.height(7.dp))
+        Text(
+            list.rule,
+            style = MaterialTheme.typography.labelSmall,
+            color = Palette.TextFaint,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(8.dp))
+        GhostButton("Delete", onClick = onDelete)
     }
 }

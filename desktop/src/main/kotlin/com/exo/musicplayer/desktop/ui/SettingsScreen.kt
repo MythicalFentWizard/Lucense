@@ -3,6 +3,7 @@ package com.exo.musicplayer.desktop.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,8 +21,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -37,11 +42,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.data.AppDirs
 import com.exo.musicplayer.desktop.data.DesktopController
+import com.exo.musicplayer.desktop.data.LyricsTerm
+import com.exo.musicplayer.desktop.data.ProxyMode
 import com.exo.musicplayer.desktop.system.DuckKey
+import kotlin.math.roundToInt
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -68,7 +78,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 }
             }
             Spacer(Modifier.height(4.dp))
-            Hint("Resonate reads these folders. Your files are never copied or moved.")
+            Hint("Lucense reads these folders. Your files are never copied or moved.")
             Spacer(Modifier.height(12.dp))
 
             if (controller.folders.isEmpty()) {
@@ -129,6 +139,8 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(10.dp))
+                GhostButton("Open") { controller.openMusicFolder() }
+                Spacer(Modifier.width(6.dp))
                 GhostButton("Change") {
                     onChooseFolder()?.let { controller.chooseDownloadDir(it) }
                 }
@@ -137,10 +149,14 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             CheckRow(
                 label = "Write tags and cover art into files",
                 checked = controller.writeTags,
-                note = "Off means identified names and covers stay inside Resonate " +
+                note = "Off means identified names and covers stay inside Lucense " +
                     "and your files aren't modified"
             ) { controller.writeTags = it }
         }
+
+        Spacer(Modifier.height(14.dp))
+
+        ProxySettings(controller)
 
         Spacer(Modifier.height(14.dp))
 
@@ -148,16 +164,103 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             SectionTitle("Appearance")
             Spacer(Modifier.height(4.dp))
             Hint(
-                "The window keeps its dark surfaces either way — only the accent moves. " +
-                    "Recolouring the whole shell is what makes a themed app look skinned."
+                "Recolours the whole window, not just the buttons. Each one is a published " +
+                    "scheme - the surfaces and the text tones come from it together, which is " +
+                    "what keeps every label readable on every layer."
             )
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                AccentChoice.entries.forEach { option ->
-                    AccentSwatch(option, option == controller.accent) {
-                        controller.accent = option
+            var editingColours by remember { mutableStateOf(false) }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Fixed-width cells, and the short last row padded out with empty
+                // ones: a swatch used to be as wide as its own label, so "Amethyst"
+                // and "Rose" made different columns and the bottom row sat offset.
+                AccentChoice.entries.chunked(SWATCHES_PER_ROW).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        row.forEach { option ->
+                            AccentSwatch(option, option == controller.accent) {
+                                controller.accent = option
+                                if (option == AccentChoice.CUSTOM) editingColours = true
+                            }
+                        }
+                        repeat(SWATCHES_PER_ROW - row.size) { Spacer(Modifier.width(SWATCH_CELL)) }
                     }
                 }
+            }
+            Spacer(Modifier.height(8.dp))
+            Hint(controller.accent.credit)
+            Spacer(Modifier.height(12.dp))
+            GhostButton("Edit colours", icon = Icons.Default.ColorLens) { editingColours = true }
+            Spacer(Modifier.height(6.dp))
+            Hint("Theme colours, the background effect's colour, and the lyrics' current and other lines.")
+            if (editingColours) ThemeEditorWindow(controller) { editingColours = false }
+
+            Spacer(Modifier.height(18.dp))
+            Text("Background", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(8.dp))
+            SegmentedRow(
+                options = BackdropStyle.entries,
+                selected = controller.backdrop,
+                label = { it.label },
+                onSelect = { controller.backdrop = it }
+            )
+            if (controller.backdrop == BackdropStyle.REACTIVE) {
+                Spacer(Modifier.height(8.dp))
+                SegmentedRow(
+                    options = ReactiveMode.entries,
+                    selected = controller.reactiveMode,
+                    label = { it.label },
+                    onSelect = { controller.reactiveMode = it }
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Hint(
+                if (controller.backdrop == BackdropStyle.NONE) {
+                    controller.backdrop.note
+                } else {
+                    controller.backdrop.note +
+                        (if (controller.backdrop == BackdropStyle.REACTIVE) " " + controller.reactiveMode.note else "") +
+                        " Shown behind the sidebar, the library and the " +
+                        "lyrics, and paused while the window isn't focused."
+                }
+            )
+
+            Spacer(Modifier.height(18.dp))
+            Text("Wallpaper", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint("A picture of your own behind everything, with the background effect drawn over it.")
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GhostButton(
+                    if (controller.wallpaper == null) "Choose picture" else "Change picture",
+                    icon = Icons.Default.Image
+                ) { chooseImage()?.let { controller.setWallpaper(it) } }
+                if (controller.wallpaper != null) {
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton("Remove") { controller.clearWallpaper() }
+                }
+            }
+            controller.wallpaperNote?.let { note ->
+                Spacer(Modifier.height(6.dp))
+                Hint(note)
+            }
+            if (controller.wallpaper != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Dim ${(controller.wallpaperDim * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.TextDim
+                )
+                Slider(
+                    value = controller.wallpaperDim,
+                    onValueChange = { controller.wallpaperDim = it },
+                    valueRange = 0f..0.9f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Palette.Accent,
+                        activeTrackColor = Palette.Accent,
+                        inactiveTrackColor = Palette.Line
+                    )
+                )
+                Hint("Darkens the picture so text stays easy to read.")
             }
         }
 
@@ -246,18 +349,198 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
         Spacer(Modifier.height(14.dp))
 
         Panel(Modifier.fillMaxWidth()) {
+            SectionTitle("Playback")
+            Spacer(Modifier.height(10.dp))
+            CheckRow(
+                label = "Even out volumes",
+                checked = controller.levelling,
+                note = "Plays every measured song at the same loudness. Run Level volumes in " +
+                    "Bulk tools to measure them."
+            ) { controller.levelling = it }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Fade out on the sleep timer",
+                checked = controller.sleepFade,
+                note = "The last half minute comes down gently instead of stopping mid-bar."
+            ) { controller.sleepFade = it }
+            Spacer(Modifier.height(18.dp))
+            Text("Crossfade", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                "How long one song overlaps the next. Off still runs straight on into it " +
+                    "without the silence there used to be between tracks."
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = listOf(0, 2, 4, 6, 8, 12),
+                    selected = controller.crossfadeSeconds,
+                    label = { if (it == 0) "Off" else "$it seconds" },
+                    onSelect = { controller.crossfadeSeconds = it }
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            CheckRow(
+                label = "Media keys",
+                checked = controller.mediaKeysEnabled,
+                note = "Play, pause, next and previous on the keyboard, from anywhere. " +
+                    "While this is on, other players won't see those keys."
+            ) { controller.mediaKeysEnabled = it }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Offer Lucense for music files in Explorer",
+                checked = controller.fileTypes,
+                enabled = controller.canAssociate,
+                note = controller.fileTypesNote ?: when {
+                    !controller.canAssociate ->
+                        "Available once Lucense is running from its installed shortcut " +
+                            "rather than from a development build."
+                    else ->
+                        "Puts Lucense in the Open with list for MP3, FLAC, M4A and the rest. " +
+                            "Windows does not allow a program to make itself the default, so " +
+                            "pick it from Open with once and tick \"Always use this app\"."
+                }
+            ) { controller.changeFileTypes(it) }
+
+            Spacer(Modifier.height(28.dp))
+            SectionTitle("Lyrics and artwork")
+            Spacer(Modifier.height(10.dp))
+            Text("Lyrics search", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(controller.lyricsTerm.note)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = LyricsTerm.entries,
+                    selected = controller.lyricsTerm,
+                    label = { it.label },
+                    onSelect = { controller.lyricsTerm = it }
+                )
+            }
+            if (controller.lyricsTerm == LyricsTerm.CUSTOM) {
+                Spacer(Modifier.height(8.dp))
+                TextInput(
+                    value = controller.lyricsTermCustom,
+                    onValueChange = { controller.lyricsTermCustom = it },
+                    placeholder = "{artist} {title}",
+                    modifier = Modifier.width(320.dp)
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Text("Cover art service", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                "Asked first when covers are fetched in bulk. The others are still " +
+                    "tried when it has nothing, so a preference never costs you a cover."
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SegmentedRow(
+                    options = listOf("") + controller.coverProviders,
+                    selected = controller.coverProvider,
+                    label = { if (it.isBlank()) "Automatic" else it },
+                    onSelect = { controller.coverProvider = it }
+                )
+            }
+
+            Spacer(Modifier.height(28.dp))
+            SectionTitle("Sharing")
+            Spacer(Modifier.height(10.dp))
+            CheckRow(
+                label = "Show what you're playing on Discord",
+                checked = controller.discord,
+                note = controller.discordNote
+                    ?: if (controller.discordConnected) {
+                        "Connected. Your profile shows the song and artist while something is playing."
+                    } else {
+                        "Needs the Discord desktop app running on this PC. Nothing leaves your machine."
+                    }
+            ) { controller.discord = it }
+            if (controller.discord) {
+                Spacer(Modifier.height(12.dp))
+                CheckRow(
+                    label = "Show the song's own cover",
+                    checked = controller.discordCover,
+                    note = "Discord fetches the picture itself, so the cover has to be one " +
+                        "with a web address: the ones the cover tool found, or one looked up " +
+                        "once per song. Off shows the Lucense icon instead."
+                ) { controller.discordCover = it }
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Application ID",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim,
+                        modifier = Modifier.width(110.dp)
+                    )
+                    TextInput(
+                        value = controller.discordId,
+                        onValueChange = { controller.changeDiscordId(it) },
+                        placeholder = "From discord.com/developers",
+                        modifier = Modifier.width(260.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
             SectionTitle("About")
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Resonate for Windows",
+                        "Lucense for Windows",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Palette.Text
                     )
-                    Hint("made by lucent")
+                    Hint("version ${AppVersion.name} · made by lucent")
                 }
                 GhostButton("Contact") { openLink("https://t.me/Eth4wn") }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Updates", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+                    Hint(controller.updateNote ?: "Looked up when Lucense starts.")
+                }
+                controller.update?.takeIf { controller.updateReady }?.let { release ->
+                    AccentButton("Get ${release.version}") { openLink(release.url) }
+                    Spacer(Modifier.width(8.dp))
+                }
+                GhostButton("Check now", enabled = !controller.updateChecking) { controller.checkForUpdate() }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Backups", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                controller.backupNote
+                    ?: "Favourites, playlists and what you have played — everything the files " +
+                    "themselves don't hold. Settings are written down too, but restoring doesn't apply them."
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AccentButton("Back up now", icon = Icons.Default.Save) { controller.backUpNow() }
+                Spacer(Modifier.width(8.dp))
+                GhostButton("Show backups", icon = Icons.Default.FolderOpen) { controller.revealBackups() }
+            }
+            controller.backups.take(4).forEach { file ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        file.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    GhostButton("Restore") { controller.restoreBackup(file) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            GhostButton("Keyboard shortcuts", icon = Icons.Default.Keyboard) {
+                controller.showShortcuts = true
             }
             Spacer(Modifier.height(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -285,12 +568,15 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
 
 @Composable
 private fun AccentSwatch(choice: AccentChoice, selected: Boolean, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier.width(SWATCH_CELL),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Box(
             Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(9.dp))
-                .background(choice.accent)
+                .background(if (choice == AccentChoice.CUSTOM) Palette.custom.accent else choice.accent)
                 .border(
                     2.dp,
                     if (selected) Palette.Text else Color.Transparent,
@@ -300,17 +586,24 @@ private fun AccentSwatch(choice: AccentChoice, selected: Boolean, onClick: () ->
             contentAlignment = Alignment.Center
         ) {
             if (selected) {
-                Icon(Icons.Default.Check, null, Modifier.size(17.dp), tint = choice.onAccent)
+                Icon(Icons.Default.Check, null, Modifier.size(17.dp), tint = if (choice == AccentChoice.CUSTOM) Palette.custom.onAccent else choice.onAccent)
             }
         }
         Spacer(Modifier.height(6.dp))
         Text(
             choice.label,
             style = MaterialTheme.typography.labelSmall,
-            color = if (selected) Palette.Text else Palette.TextFaint
+            color = if (selected) Palette.Text else Palette.TextFaint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
         )
     }
 }
+
+/** Every swatch takes the same width, whatever its name is, so the rows line up. */
+private val SWATCH_CELL = 78.dp
+private const val SWATCHES_PER_ROW = 6
 
 @Composable
 private fun WeatherSettings(controller: DesktopController) {
@@ -321,7 +614,7 @@ private fun WeatherSettings(controller: DesktopController) {
         Spacer(Modifier.height(4.dp))
         Hint(
             "Moods needs to know what the sky is doing. Windows has no GPS, so " +
-                "Resonate works your city out from your IP address — or you can name it. " +
+                "Lucense works your city out from your IP address — or you can name it. " +
                 "Conditions come from Open-Meteo, which needs no account."
         )
         Spacer(Modifier.height(12.dp))
@@ -408,4 +701,90 @@ private fun openFolder(dir: File) {
             Desktop.getDesktop().open(dir)
         }
     }
+}
+
+/**
+ * The proxy for everything Lucense does online.
+ *
+ * One address box and one port box rather than a URL field: the kind of proxy
+ * is already chosen above it, and a pasted "socks5://" would only be something
+ * to strip back off.
+ */
+@Composable
+private fun ProxySettings(controller: DesktopController) {
+    val proxy = controller.proxy
+    Panel(Modifier.fillMaxWidth()) {
+        SectionTitle("Proxy")
+        Spacer(Modifier.height(4.dp))
+        Hint(
+            "Used for everything that goes online: yt-dlp and spotdl downloads, YouTube " +
+                "search and previews, lyrics, cover art, identification and weather."
+        )
+        Spacer(Modifier.height(12.dp))
+        SegmentedRow(
+            options = ProxyMode.entries,
+            selected = proxy.mode,
+            label = { it.label },
+            onSelect = { controller.proxy = controller.proxy.copy(mode = it) }
+        )
+        Spacer(Modifier.height(10.dp))
+        when (proxy.mode) {
+            ProxyMode.SYSTEM ->
+                Hint("Follows Windows: Settings, Network & internet, Proxy.")
+            ProxyMode.DIRECT ->
+                Hint("Connects straight to the internet, even if Windows has a proxy set.")
+            else -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextInput(
+                        value = proxy.host,
+                        onValueChange = { controller.proxy = controller.proxy.copy(host = it.trim()) },
+                        placeholder = "Address, like 127.0.0.1",
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextInput(
+                        value = if (proxy.port == 0) "" else proxy.port.toString(),
+                        onValueChange = { typed ->
+                            val digits = typed.filter { it.isDigit() }.take(5)
+                            controller.proxy = controller.proxy.copy(port = digits.toIntOrNull() ?: 0)
+                        },
+                        placeholder = "Port",
+                        modifier = Modifier.width(110.dp)
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Hint(
+                    when {
+                        proxy.port > 65535 ->
+                            "Ports go up to 65535. Until then Lucense connects directly."
+                        proxy.incomplete ->
+                            "Fill in both the address and the port. Until then Lucense connects directly."
+                        proxy.mode == ProxyMode.HTTPS ->
+                            "Reaches the proxy the same way as HTTP and tunnels secure sites through it."
+                        proxy.mode == ProxyMode.SOCKS5 ->
+                            "Recommended: carries every kind of connection Lucense makes."
+                        else ->
+                            "Applied straight away to every new connection."
+                    }
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GhostButton("Test connection") { controller.testProxy() }
+            controller.proxyTestNote?.let { note ->
+                Spacer(Modifier.width(10.dp))
+                Text(note, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
+            }
+        }
+    }
+}
+
+/** Windows' own open dialog, filtered to pictures. */
+private fun chooseImage(): File? {
+    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose a wallpaper", java.awt.FileDialog.LOAD)
+    dialog.file = "*.jpg;*.jpeg;*.png;*.webp;*.bmp"
+    dialog.isVisible = true
+    val name = dialog.file ?: return null
+    return File(dialog.directory, name)
 }

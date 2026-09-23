@@ -1,10 +1,13 @@
 package com.exo.musicplayer.desktop.audio
 
+import com.exo.musicplayer.data.audio.SpectrumAnalyser
 import com.exo.musicplayer.desktop.library.DesktopTrack
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.File
 import javax.sound.sampled.SourceDataLine
 import kotlin.concurrent.thread
 
@@ -13,7 +16,9 @@ data class PlaybackStatus(
     val playing: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val error: String? = null
+    val error: String? = null,
+    /** Set once the file has been played to its end, and only then. */
+    val ended: Boolean = false
 ) {
     val progress: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -41,6 +46,18 @@ class PlaybackEngine {
 
     val effects = EffectChain()
 
+    /** Band levels for the mixer display; idle unless something is showing it. */
+    val spectrum = SpectrumAnalyser()
+
+    /** The bass as it reaches the speakers, for the reactive backgrounds. */
+    val beat = BeatTap()
+
+    /**
+     * What this track is multiplied by so it sits at the same loudness as the
+     * rest. One when nothing has been measured, or when levelling is off.
+     */
+    @Volatile var trackGain = 1f
+
     private var worker: Thread? = null
     private var lines = listOf<SourceDataLine>()
     private var outputs = listOf<DesktopAudioOutput>()
@@ -50,7 +67,39 @@ class PlaybackEngine {
     @Volatile private var seekToMs: Long? = null
     @Volatile private var outputsDirty = false
     @Volatile private var framesPlayed = 0L
+
+    /** Where a prepared track will start from when play is pressed. */
+    @Volatile private var pendingStartMs = 0L
     private var lastPublished = -1L
+
+    /**
+     * The song to run into when this one ends, kept fed from outside.
+     *
+     * The old shape was: the track ends, the worker exits, the lines close, the
+     * controller starts the next one and the lines open again. Every one of
+     * those steps is silence, and together they are the gap between tracks.
+     * Knowing what comes next lets the same thread carry straight on through
+     * the same open lines.
+     */
+    @Volatile private var upNext: DesktopTrack? = null
+
+    /** What the next song is multiplied by, the way [trackGain] is for this one. */
+    @Volatile private var upNextGain = 1f
+
+    /** Milliseconds the next song overlaps this one; 0 is a clean handover. */
+    @Volatile var crossfadeMs: Int = 0
+
+    /**
+     * Called on the playback thread when the engine moves on by itself.
+     *
+     * Whoever listens must not block: this is the thread feeding the speakers.
+     */
+    var onAdvanced: ((finished: DesktopTrack, started: DesktopTrack) -> Unit)? = null
+
+    fun setUpNext(track: DesktopTrack?, gain: Float) {
+        upNext = track
+        upNextGain = gain
+    }
 
     /** Devices to play through. The first is primary; the rest are mirrors. */
     fun setOutputs(selected: List<DesktopAudioOutput>) {
@@ -61,29 +110,76 @@ class PlaybackEngine {
         outputsDirty = true
     }
 
-    fun play(track: DesktopTrack) {
+    fun play(track: DesktopTrack, startMs: Long = 0L) {
         stop()
         stopRequested = false
         playing = true
-        framesPlayed = 0
+        val from = startMs.coerceAtLeast(0L)
+        framesPlayed = from * AudioDevices.FORMAT.sampleRate.toInt() / 1000
+        pendingStartMs = 0L
         lastPublished = -1
         effects.reset()
-        _status.value = PlaybackStatus(track = track, playing = true, durationMs = track.durationMs)
+        spectrum.reset()
+        beat.reset()
+        _status.value = PlaybackStatus(
+            track = track,
+            playing = true,
+            positionMs = from,
+            durationMs = track.durationMs
+        )
 
-        worker = thread(name = "resonate-playback", isDaemon = true) { run(track) }
+        // Above normal priority: a playback thread that loses its time slice to
+        // the UI thread is an audible gap, and it does very little per wake-up.
+        worker = thread(name = "lucense-playback", isDaemon = true, priority = Thread.MAX_PRIORITY) {
+            run(track, framesPlayed)
+        }
+    }
+
+    /**
+     * Shows [track] paused at [positionMs] without opening it, which is how the
+     * app comes back to what was playing when it was last closed. Pressing play
+     * carries on from there.
+     */
+    fun prepare(track: DesktopTrack, positionMs: Long) {
+        stop()
+        pendingStartMs = positionMs.coerceAtLeast(0L)
+        _status.value = PlaybackStatus(
+            track = track,
+            playing = false,
+            positionMs = pendingStartMs,
+            durationMs = track.durationMs
+        )
     }
 
     fun togglePlay() {
-        if (_status.value.track == null) return
+        val track = _status.value.track ?: return
+        // Nothing is open yet - the track is only being shown, as it is after a
+        // restart - so this press starts it where it left off.
+        if (worker?.isAlive != true) {
+            play(track, pendingStartMs)
+            return
+        }
         playing = !playing
         _status.value = _status.value.copy(playing = playing)
     }
 
-    fun seekTo(ms: Long) { seekToMs = ms.coerceAtLeast(0) }
+    fun seekTo(ms: Long) {
+        val target = ms.coerceAtLeast(0)
+        // Nothing open yet - a song restored at startup and not played - so
+        // there is no playback thread to hand the seek to. It becomes where
+        // play starts from instead, or pressing play would undo it.
+        if (worker?.isAlive == true) seekToMs = target else pendingStartMs = target
+        // Said at once rather than when the playback thread next gets round to
+        // it. Until then everything watching the position would show the old
+        // spot and then jump forward, which on the seek bar read as it bugging
+        // in and out.
+        _status.value = _status.value.copy(positionMs = target)
+    }
 
     fun stop() {
         stopRequested = true
         playing = false
+        spectrum.reset()
         worker?.join(600)
         worker = null
         closeLines()
@@ -92,10 +188,20 @@ class PlaybackEngine {
 
     fun setVolume(value: Float) { effects.volume = value.coerceIn(0f, 1f) }
 
-    private fun run(track: DesktopTrack) {
+    private fun run(track: DesktopTrack, startFrame: Long) {
+        var current = track
         var decoder: Decoder? = null
+        // The song being faded in, while the one above is still going.
+        var incomingTrack: DesktopTrack? = null
+        var incoming: Decoder? = null
+        var fadeFrames = 0L
+        var fadeLength = 0L
+        // Whether the decoder ran out with nothing to follow it, as opposed to
+        // being stopped or failing: the difference between the queue being
+        // finished and playback merely ending here.
+        var reachedEnd = false
         try {
-            decoder = Decoder(track.file)
+            decoder = Decoder.open(current.file, startFrame)
             reopenLines()
             if (lines.isEmpty()) {
                 _status.value = _status.value.copy(
@@ -106,54 +212,126 @@ class PlaybackEngine {
             }
 
             val rate = AudioDevices.FORMAT.sampleRate.toInt()
-            val duration = if (track.durationMs > 0) track.durationMs else -1L
+            var duration = if (current.durationMs > 0) current.durationMs else -1L
 
             while (!stopRequested) {
                 if (outputsDirty) {
                     outputsDirty = false
                     reopenLines()
                 }
-                if (!playing) { Thread.sleep(40); continue }
 
+                // Handled before the pause check, so a seek made while paused
+                // moves the position straight away rather than on resume.
                 seekToMs?.let { target ->
                     seekToMs = null
-                    // Compressed streams have no cheap random access, so the
-                    // file is reopened and decoded forward to the target.
-                    runCatching { decoder?.close() }
-                    decoder = Decoder(track.file)
-                    var skipped = 0L
-                    val wanted = target * rate / 1000
-                    while (skipped < wanted) {
-                        val chunk = decoder?.read(8192) ?: break
-                        skipped += chunk.size / 2
-                    }
-                    framesPlayed = wanted
+                    // A jump abandons any overlap in progress: the song that was
+                    // being faded in is no longer the one about to arrive.
+                    runCatching { incoming?.close() }
+                    incoming = null
+                    incomingTrack = null
+                    decoder = seek(decoder, current, target * rate / 1000)
+                    framesPlayed = decoder?.positionFrames ?: 0L
                     effects.reset()
+                    spectrum.reset()
+                    beat.reset()
+                    // Drops what is already queued at the old position. Without
+                    // it, up to a fifth of a second of the old spot still plays
+                    // after the jump, which is what makes a seek feel sluggish.
+                    lines.forEach { runCatching { it.flush() } }
+                    publishPosition(duration, rate, force = true)
+                }
+
+                if (!playing) { Thread.sleep(40); continue }
+
+                // Open the next song early enough to overlap by the chosen
+                // amount. Only possible where this one's length is known -
+                // without that there is no telling when the end is coming.
+                val overlap = crossfadeMs.toLong()
+                if (incoming == null && overlap > 0 && duration > 0) {
+                    val leftMs = duration - framesPlayed * 1000 / rate
+                    val follow = upNext
+                    if (follow != null && leftMs in 1..overlap) {
+                        val opened = runCatching { Decoder.open(follow.file, 0L) }.getOrNull()
+                        if (opened != null) {
+                            incoming = opened
+                            incomingTrack = follow
+                            fadeFrames = 0L
+                            fadeLength = (overlap * rate / 1000).coerceAtLeast(1L)
+                        }
+                    }
                 }
 
                 val raw = decoder?.read(4096)
-                if (raw == null) break
+                if (raw == null) {
+                    // This song is done. Carry on into the next one on this
+                    // same thread, through these same open lines: closing them
+                    // and opening them again is exactly what the gap was.
+                    var started = incomingTrack
+                    var handover = incoming
+                    if (handover == null) {
+                        val follow = upNext
+                        if (follow != null) {
+                            handover = runCatching { Decoder.open(follow.file, 0L) }.getOrNull()
+                            started = follow
+                        }
+                    }
+                    if (handover == null || started == null) {
+                        reachedEnd = true
+                        break
+                    }
+                    runCatching { decoder?.close() }
+                    val finished = current
+                    decoder = handover
+                    current = started
+                    incoming = null
+                    incomingTrack = null
+                    trackGain = upNextGain
+                    // Where the new song already is, which after an overlap is
+                    // however much of it has been playing underneath.
+                    framesPlayed = handover.positionFrames
+                    lastPublished = -1
+                    duration = if (current.durationMs > 0) current.durationMs else -1L
+                    _status.value = PlaybackStatus(
+                        track = current,
+                        playing = true,
+                        positionMs = framesPlayed * 1000 / rate,
+                        durationMs = current.durationMs
+                    )
+                    runCatching { onAdvanced?.invoke(finished, current) }
+                    continue
+                }
+
+                // Before the effects rather than after: the meter, the reverb
+                // and the limiter downstream should all see the level that is
+                // actually going out.
+                val gain = trackGain
+                if (gain < 0.999f || gain > 1.001f) {
+                    for (i in raw.indices) raw[i] *= gain
+                }
+
+                incoming?.let { second ->
+                    val other = second.read(raw.size / 2)
+                    if (other == null) {
+                        // The next song turned out shorter than the overlap.
+                        // Stop mixing and let the changeover do the rest.
+                        runCatching { second.close() }
+                        incoming = null
+                        incomingTrack = null
+                    } else {
+                        fadeFrames += mixFade(raw, other, upNextGain, fadeFrames, fadeLength)
+                    }
+                }
 
                 val processed = effects.process(raw)
-                if (processed.isEmpty()) continue
-
-                val bytes = toBytes(processed)
-                writeToAll(bytes)
-
                 framesPlayed += raw.size / 2
-                val positionMs = framesPlayed * 1000 / rate
+                if (processed.isEmpty()) continue
+                // After the chain, so speed, pitch and reverb are all visible
+                // in the meter rather than it showing the untouched source.
+                spectrum.feed(processed)
+                beat.feed(processed, queuedFrames(), rate)
 
-                // Published four times a second rather than once per buffer.
-                // Every emission recomposes the transport bar and repaints a
-                // frame, and at ~11 buffers a second that was an order of
-                // magnitude more redrawing than a 3px progress bar can show.
-                if (positionMs / PUBLISH_INTERVAL_MS != lastPublished) {
-                    lastPublished = positionMs / PUBLISH_INTERVAL_MS
-                    _status.value = _status.value.copy(
-                        positionMs = positionMs,
-                        durationMs = if (duration > 0) duration else positionMs
-                    )
-                }
+                writeToAll(toBytes(processed))
+                publishPosition(duration, rate)
             }
         } catch (t: Throwable) {
             _status.value = _status.value.copy(
@@ -162,11 +340,58 @@ class PlaybackEngine {
             )
         } finally {
             runCatching { decoder?.close() }
+            runCatching { incoming?.close() }
             if (!stopRequested) {
-                _status.value = _status.value.copy(playing = false)
+                _status.value = _status.value.copy(playing = false, ended = reachedEnd)
             }
         }
     }
+
+    /**
+     * Moves playback to [frame], reopening the file only when that is behind the
+     * decoder.
+     *
+     * Forward is the common case, a click a little further along, and carrying on
+     * from where the decoder already is avoids passing over the start of the file
+     * again. A compressed stream cannot go backwards, so that reopens.
+     */
+    private fun seek(current: Decoder?, track: DesktopTrack, frame: Long): Decoder? {
+        if (current != null && frame >= current.positionFrames) {
+            current.skip(frame - current.positionFrames)
+            return current
+        }
+        runCatching { current?.close() }
+        return Decoder.open(track.file, frame)
+    }
+
+    /**
+     * Published four times a second rather than once per buffer. Every emission
+     * recomposes the transport bar and repaints a frame, and at about eleven
+     * buffers a second that was an order of magnitude more redrawing than a 3px
+     * progress bar can show.
+     */
+    private fun publishPosition(duration: Long, rate: Int, force: Boolean = false) {
+        // A seek is waiting to be carried out: this frame count is about to be
+        // replaced, and saying it now would undo what seekTo already said.
+        if (!force && seekToMs != null) return
+        val positionMs = framesPlayed * 1000 / rate
+        val slot = positionMs / PUBLISH_INTERVAL_MS
+        if (!force && slot == lastPublished) return
+        lastPublished = slot
+        _status.value = _status.value.copy(
+            positionMs = positionMs,
+            // Unknown stays unknown. Reporting the position as the length made
+            // the seek bar scale against a moving target, so its middle landed
+            // near the start, and made every pause look like the end of a track.
+            durationMs = if (duration > 0) duration else 0L
+        )
+    }
+
+    /** Frames handed to the primary line that it has not played yet. */
+    private fun queuedFrames(): Int = runCatching {
+        val line = lines.firstOrNull() ?: return 0
+        (line.bufferSize - line.available()) / line.format.frameSize
+    }.getOrDefault(0)
 
     private fun writeToAll(bytes: ByteArray) {
         val current = lines
@@ -222,4 +447,42 @@ class PlaybackEngine {
     fun release() {
         stop()
     }
+}
+
+/**
+ * Mixes [incoming] into [out] across an overlap, and says how many frames of it
+ * were used.
+ *
+ * Equal power rather than a straight line: two uncorrelated songs at half
+ * volume each are quieter than either at full volume, so a linear fade dips
+ * audibly in the middle. Cosine and sine keep the sum of squares at one.
+ *
+ * The level is worked out once at each end of the buffer and interpolated
+ * across it, rather than a cosine per sample - a buffer is about a tenth of a
+ * second, which is far too coarse a step to hear a seam in, and this is the
+ * thread feeding the speakers.
+ */
+internal fun mixFade(
+    out: FloatArray,
+    incoming: FloatArray,
+    incomingGain: Float,
+    fadeFrames: Long,
+    fadeLength: Long
+): Int {
+    val count = minOf(out.size, incoming.size)
+    if (count <= 0 || fadeLength <= 0L) return 0
+    val half = (PI / 2).toFloat()
+    val from = (fadeFrames.toFloat() / fadeLength).coerceIn(0f, 1f)
+    val to = ((fadeFrames + count / 2).toFloat() / fadeLength).coerceIn(0f, 1f)
+    val outFrom = cos(from * half)
+    val outTo = cos(to * half)
+    val inFrom = sin(from * half)
+    val inTo = sin(to * half)
+    for (i in 0 until count) {
+        val along = if (count > 1) i.toFloat() / (count - 1) else 1f
+        val fading = outFrom + (outTo - outFrom) * along
+        val rising = inFrom + (inTo - inFrom) * along
+        out[i] = out[i] * fading + incoming[i] * incomingGain * rising
+    }
+    return count / 2
 }
