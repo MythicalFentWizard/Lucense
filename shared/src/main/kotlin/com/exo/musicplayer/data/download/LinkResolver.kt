@@ -35,6 +35,12 @@ object LinkResolver {
     private val OG_DESCRIPTION =
         Regex("""<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']""")
 
+    /** A youtube.com or youtu.be link, music.youtube.com and m.youtube.com included. */
+    fun isYouTube(url: String): Boolean =
+        isYouTubeHost(runCatching { java.net.URI(url.trim()).host.orEmpty().lowercase() }.getOrDefault(""))
+
+    private fun isYouTubeHost(host: String): Boolean = host.contains("youtube.com") || host.contains("youtu.be")
+
     fun resolve(rawUrl: String): ResolvedLink {
         val url = rawUrl.trim()
         if (!url.startsWith("http", ignoreCase = true)) {
@@ -46,8 +52,7 @@ object LinkResolver {
         return when {
             host.contains("spotify.com") -> resolveSpotify(url)
             host.contains("soundcloud.com") -> ResolvedLink.Direct(url, "SoundCloud")
-            host.contains("youtube.com") || host.contains("youtu.be") ->
-                ResolvedLink.Direct(url, "YouTube")
+            isYouTubeHost(host) -> ResolvedLink.Direct(url, "YouTube")
             host.contains("bandcamp.com") -> ResolvedLink.Direct(url, "Bandcamp")
             // yt-dlp supports well over a thousand sites; anything unrecognised
             // is worth handing over rather than refusing up front.

@@ -1,6 +1,7 @@
 package com.exo.musicplayer.desktop.download
 
 import com.exo.musicplayer.data.download.DownloadQuality
+import com.exo.musicplayer.data.youtube.SoundCloudFallback
 import com.exo.musicplayer.data.youtube.YouTubeBackend
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
@@ -27,6 +28,13 @@ class DesktopYouTubeBackend : YouTubeBackend {
     override val label = "yt-dlp"
 
     override suspend fun search(query: String, limit: Int): List<YouTubeVideo> =
+        flatSearch(YtDlpFlatSearch.target(query, limit), label)
+
+    /** The same song on SoundCloud, for when YouTube refuses this connection. */
+    suspend fun searchSoundCloud(query: String): List<YouTubeVideo> =
+        flatSearch(SoundCloudFallback.target(query), SoundCloudFallback.LABEL)
+
+    private suspend fun flatSearch(target: String, label: String): List<YouTubeVideo> =
         withContext(Dispatchers.IO) {
             val exe = ToolPaths.ytDlp
             if (!exe.isFile) return@withContext emptyList()
@@ -35,7 +43,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                 val process = ProcessBuilder(
                     buildList {
                         add(exe.absolutePath)
-                        add(YtDlpFlatSearch.target(query, limit))
+                        add(target)
                         addAll(YtDlpFlatSearch.ARGUMENTS)
                         addAll(NetworkProxy.ytDlpArgs())
                         addAll(YT_DLP_NETWORK)

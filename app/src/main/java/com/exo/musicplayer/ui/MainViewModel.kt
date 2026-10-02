@@ -1000,6 +1000,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val coverProvider: StateFlow<String> = prefs.coverProvider
     fun setCoverProvider(label: String) = prefs.setCoverProvider(label)
 
+    val downloadProxy: StateFlow<String> = prefs.downloadProxy
+    fun setDownloadProxy(text: String) = prefs.setDownloadProxy(text)
+
     // ---- Identify one song by listening, and choose the match -------------------
 
     private val _tagTarget = MutableStateFlow<Track?>(null)

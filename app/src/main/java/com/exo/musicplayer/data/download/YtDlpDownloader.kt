@@ -5,6 +5,10 @@ import android.net.Uri
 import android.util.Log
 import com.exo.musicplayer.data.download.LinkResolver
 import com.exo.musicplayer.data.download.ResolvedLink
+import com.exo.musicplayer.data.youtube.SoundCloudFallback
+import com.exo.musicplayer.data.youtube.YouTubeVideo
+import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
+import com.exo.musicplayer.musicApp
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -15,7 +19,11 @@ import java.util.UUID
 
 sealed interface DownloadOutcome {
     data class Done(val file: File, val title: String?) : DownloadOutcome
-    data class Failed(val message: String) : DownloadOutcome
+    data class Failed(
+        val message: String,
+        /** YouTube refused the connection itself, so another source is worth a try. */
+        val refusedByYouTube: Boolean = false
+    ) : DownloadOutcome
     data object NotReady : DownloadOutcome
 }
 
@@ -69,10 +77,30 @@ class YtDlpDownloader(private val context: Context) {
         LinkResolver.resolve(url)
     }
 
-    /** Best-effort title lookup so the UI can show what's about to download. */
+    /**
+     * Best-effort title lookup so the UI can show what's about to download.
+     *
+     * A YouTube link is read from its oEmbed card: one light request instead of
+     * a full extraction, which doubled what YouTube saw per download - the kind
+     * of traffic that gets an address flagged - and which it refuses on a
+     * flagged VPN anyway. Other sites ask yt-dlp for just the title.
+     */
     suspend fun peekTitle(url: String): String? = withContext(Dispatchers.IO) {
+        if (LinkResolver.isYouTube(url)) {
+            return@withContext SoundCloudFallback.describe(url, lookupProxy)?.let { wanted ->
+                listOfNotNull(wanted.artist, wanted.title).joinToString(" - ")
+            }
+        }
         if (!ensureReady()) return@withContext null
-        runCatching { YoutubeDL.getInstance().getInfo(url).title }.getOrNull()
+        runCatching {
+            val request = newRequest(url).apply {
+                addOption("--print", "title")
+                addOption("--skip-download")
+                addOption("--no-playlist")
+                addOption("--no-warnings")
+            }
+            YoutubeDL.getInstance().execute(request).out.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+        }.getOrNull()
     }
 
     /**
@@ -91,7 +119,7 @@ class YtDlpDownloader(private val context: Context) {
 
         val workDir = File(context.cacheDir, "ytdlp/${UUID.randomUUID()}").apply { mkdirs() }
         return@withContext try {
-            val request = YoutubeDLRequest(url).apply {
+            val request = newRequest(url).apply {
                 addOption("-x")                              // audio only
                 addOption("--audio-format", "mp3")
                 addOption("--audio-quality", quality.audioQuality)
@@ -122,8 +150,33 @@ class YtDlpDownloader(private val context: Context) {
         } catch (t: Throwable) {
             Log.w(TAG, "download failed", t)
             workDir.deleteRecursively()
-            DownloadOutcome.Failed(friendly(t.message))
+            DownloadOutcome.Failed(friendly(t.message), SoundCloudFallback.refusedByYouTube(t.message))
         }
+    }
+
+    /** The download proxy from Settings, if one is set and makes sense. */
+    private val proxy: String?
+        get() = DownloadProxy.normalize(context.musicApp.prefs.downloadProxy.value)
+
+    /** The same proxy, for the app's own lookups that go with a download. */
+    val lookupProxy: java.net.Proxy?
+        get() = DownloadProxy.javaProxy(context.musicApp.prefs.downloadProxy.value)
+
+    /** Every yt-dlp call starts here, so a download proxy applies to all of them. */
+    fun newRequest(target: String): YoutubeDLRequest =
+        YoutubeDLRequest(target).apply { proxy?.let { addOption("--proxy", it) } }
+
+    /**
+     * The same song on SoundCloud, searched through yt-dlp as YouTube is, for
+     * when YouTube refuses this connection.
+     */
+    suspend fun searchSoundCloud(query: String): List<YouTubeVideo> = withContext(Dispatchers.IO) {
+        if (!ensureReady()) return@withContext emptyList()
+        runCatching {
+            val request = newRequest(SoundCloudFallback.target(query))
+            YtDlpFlatSearch.ARGUMENTS.forEach { request.addOption(it) }
+            SoundCloudFallback.parse(YoutubeDL.getInstance().execute(request).out)
+        }.getOrDefault(emptyList())
     }
 
     private fun friendly(raw: String?): String {
@@ -131,8 +184,9 @@ class YtDlpDownloader(private val context: Context) {
         return when {
             message.contains("Sign in to confirm", true) ||
                 message.contains("not a bot", true) ->
-                "YouTube asked for sign-in verification. Try again later, or update " +
-                    "yt-dlp — this usually means the bundled version is stale."
+                "YouTube refused this connection (\"confirm you're not a bot\"). It does that " +
+                    "to VPN addresses it has flagged: try another server, or download without " +
+                    "the VPN if YouTube isn't blocked where you are."
             message.contains("Video unavailable", true) ->
                 "That video is unavailable, private, or region blocked."
             message.contains("Unsupported URL", true) ->

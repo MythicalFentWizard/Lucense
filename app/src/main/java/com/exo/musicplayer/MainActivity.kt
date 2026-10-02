@@ -282,6 +282,7 @@ private fun AppScaffold(
     val lyricsTerm by viewModel.lyricsTerm.collectAsStateWithLifecycle()
     val lyricsPattern by viewModel.lyricsPattern.collectAsStateWithLifecycle()
     val coverProvider by viewModel.coverProvider.collectAsStateWithLifecycle()
+    val downloadProxy by viewModel.downloadProxy.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
 
     // Selection actions work on what is on screen: an open album's songs, the
@@ -800,6 +801,7 @@ private fun AppScaffold(
                                     lyricsPattern = lyricsPattern,
                                     coverProvider = coverProvider,
                                     coverProviders = viewModel.coverProviders,
+                                    downloadProxy = downloadProxy,
                                     update = update
                                 ),
                                 actions = SettingsActions(
@@ -813,6 +815,7 @@ private fun AppScaffold(
                                     onLyricsTerm = viewModel::setLyricsTerm,
                                     onLyricsPattern = viewModel::setLyricsPattern,
                                     onCoverProvider = viewModel::setCoverProvider,
+                                    onDownloadProxy = viewModel::setDownloadProxy,
                                     onBackUp = {
                                         viewModel.backUp { text ->
                                             pendingText = text

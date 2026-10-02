@@ -127,6 +127,11 @@ class AppPrefs(context: Context) {
     val coverProvider: StateFlow<String> = _coverProvider.asStateFlow()
     fun setCoverProvider(value: String) = put(_coverProvider, value) { putString(KEY_COVER_PROVIDER, value) }
 
+    /** A proxy for downloads only, as typed; blank sends them the way everything else goes. */
+    private val _downloadProxy = MutableStateFlow(prefs.getString(KEY_DOWNLOAD_PROXY, null).orEmpty())
+    val downloadProxy: StateFlow<String> = _downloadProxy.asStateFlow()
+    fun setDownloadProxy(value: String) = put(_downloadProxy, value) { putString(KEY_DOWNLOAD_PROXY, value) }
+
     private inline fun <T> put(
         flow: MutableStateFlow<T>,
         value: T,
@@ -150,5 +155,6 @@ class AppPrefs(context: Context) {
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_PATTERN = "lyrics_term_custom"
         const val KEY_COVER_PROVIDER = "cover_provider"
+        const val KEY_DOWNLOAD_PROXY = "download_proxy"
     }
 }

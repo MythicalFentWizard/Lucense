@@ -71,7 +71,11 @@ object YtDlpFlatSearch {
             // Flat search does not say, and the duration is a better signal
             // anyway: a Short is at most three minutes.
             isShort = false,
-            source = source
+            source = source,
+            // Other sites' results are addressed by their own URL, not a video id.
+            pageUrl = entry.optString("url").takeIf {
+                it.startsWith("http") && !entry.optString("ie_key").equals("Youtube", ignoreCase = true)
+            }
         )
     }
 }
