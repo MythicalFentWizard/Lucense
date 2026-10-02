@@ -1,6 +1,7 @@
 package com.exo.musicplayer.data.net
 
 import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URL
 
 /** One-line GET helper shared by the metadata and lyrics providers. */
@@ -9,8 +10,14 @@ object Http {
     private const val TAG = "Http"
     const val USER_AGENT = "Lucense/2.0 (Android music player)"
 
-    fun get(url: String, headers: Map<String, String> = emptyMap()): String? = try {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+    fun get(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        /** Null goes the usual way; a proxy sends just this request through it. */
+        proxy: Proxy? = null
+    ): String? = try {
+        val opened = if (proxy != null) URL(url).openConnection(proxy) else URL(url).openConnection()
+        val connection = (opened as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 12_000
             readTimeout = 18_000

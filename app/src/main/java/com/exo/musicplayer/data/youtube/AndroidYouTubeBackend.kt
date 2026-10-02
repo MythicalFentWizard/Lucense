@@ -3,7 +3,6 @@ package com.exo.musicplayer.data.youtube
 import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.data.download.YtDlpDownloader
 import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -35,7 +34,7 @@ class AndroidYouTubeBackend(
             if (!downloader.ensureReady()) return@withContext emptyList()
 
             runCatching {
-                val request = YoutubeDLRequest(YtDlpFlatSearch.target(query, limit))
+                val request = downloader.newRequest(YtDlpFlatSearch.target(query, limit))
                 YtDlpFlatSearch.ARGUMENTS.forEach { request.addOption(it) }
                 val response = YoutubeDL.getInstance().execute(request)
                 YtDlpFlatSearch.parse(response.out, label)
@@ -56,7 +55,7 @@ class AndroidYouTubeBackend(
         if (!downloader.ensureReady()) return@withContext null
 
         runCatching {
-            val request = YoutubeDLRequest("https://www.youtube.com/watch?v=$videoId").apply {
+            val request = downloader.newRequest("https://www.youtube.com/watch?v=$videoId").apply {
                 addOption("-f", quality.formatSelector)
                 addOption("-g")
                 addOption("--no-warnings")

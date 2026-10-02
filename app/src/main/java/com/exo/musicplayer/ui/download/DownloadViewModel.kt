@@ -6,20 +6,24 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.exo.musicplayer.data.download.DownloadOutcome
 import com.exo.musicplayer.data.download.DownloadQuality
+import com.exo.musicplayer.data.download.LinkResolver
 import com.exo.musicplayer.data.download.ResolvedLink
 import com.exo.musicplayer.data.download.YtDlpDownloader
 import com.exo.musicplayer.data.ingest.ImportResult
 import com.exo.musicplayer.data.youtube.AndroidYouTubeBackend
 import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
+import com.exo.musicplayer.data.youtube.SoundCloudFallback
 import com.exo.musicplayer.data.youtube.YouTubeFormat
 import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.musicApp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class DownloadUiState(
     val busy: Boolean = false,
@@ -64,9 +68,8 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
      * target does run, it takes YouTube's first hit, which for real searches is
      * routinely a sped-up or slowed re-upload rather than the song.
      */
-    private val finder = YouTubeLinkFinder(
-        YouTubeSearch(listOf(PipedYouTubeBackend(), AndroidYouTubeBackend(downloader)))
-    )
+    private val search = YouTubeSearch(listOf(PipedYouTubeBackend(), AndroidYouTubeBackend(downloader)))
+    private val finder = YouTubeLinkFinder(search)
 
     private val _state = MutableStateFlow(DownloadUiState())
     val state: StateFlow<DownloadUiState> = _state.asStateFlow()
@@ -89,7 +92,10 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
     private var pendingWanted: YouTubeLinkFinder.Wanted? = null
 
     fun setUrl(value: String) {
-        _url.value = value.trim()
+        // Kept exactly as typed: trimming every keystroke ate the space after
+        // each word, so "svard crash" could only ever be typed as "svardcrash".
+        // It's trimmed when the download starts.
+        _url.value = value
         // Typing over a prefilled search makes the text the request.
         pendingWanted = null
     }
@@ -239,19 +245,27 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
 
     /** Finds, downloads and imports one song, keeping the queue position in the state. */
     private suspend fun downloadOne(input: String, wanted: YouTubeLinkFinder.Wanted?): ItemOutcome {
+        // The song being fetched, in case YouTube refuses this connection and
+        // it has to be looked for elsewhere. Worked out only if that happens.
+        var song: suspend () -> SoundCloudFallback.Lookup? = { null }
         val picked: Picked = if (downloader.looksLikeUrl(input)) {
             _state.value = _state.value.copy(stage = "Reading the link…")
             when (val resolved = downloader.resolve(input)) {
-                is ResolvedLink.Direct ->
+                is ResolvedLink.Direct -> {
+                    song = { SoundCloudFallback.lookUp(resolved.url, search, downloader.lookupProxy) }
                     Picked(resolved.url, downloader.peekTitle(resolved.url), null)
+                }
 
                 is ResolvedLink.Search ->
                     // Spotify: its audio can't be fetched, so the same track is
                     // found on YouTube and that link is what downloads.
                     when (val found = findLink(YouTubeLinkFinder.Wanted(title = resolved.query))) {
-                        is LinkResult.Ok -> found.picked.copy(
-                            note = listOfNotNull(resolved.note, found.picked.note).joinToString("\n")
-                        )
+                        is LinkResult.Ok -> {
+                            song = { found.picked.lookup }
+                            found.picked.copy(
+                                note = listOfNotNull(resolved.note, found.picked.note).joinToString("\n")
+                            )
+                        }
                         is LinkResult.None -> return ItemOutcome.Failed(found.message, found.offerUpdate)
                     }
 
@@ -263,6 +277,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
             val text = input.replace(SEARCH_PREFIX, "").trim()
             when (val found = findLink(wanted ?: YouTubeLinkFinder.Wanted(title = text))) {
                 is LinkResult.Ok -> {
+                    song = { found.picked.lookup }
                     // The box shows the link yt-dlp is actually fetching.
                     _url.value = found.picked.link
                     found.picked
@@ -279,7 +294,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
             etaSeconds = 0L
         )
 
-        val outcome = downloader.downloadAudio(picked.link, _quality.value) { percent, eta, line ->
+        val progress: (Float, Long, String) -> Unit = { percent, eta, line ->
             _state.value = _state.value.copy(
                 percent = percent.coerceIn(0f, 100f),
                 etaSeconds = eta,
@@ -289,6 +304,18 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                     "Downloading…"
                 }
             )
+        }
+        var outcome = downloader.downloadAudio(picked.link, _quality.value, progress)
+        // Whatever stopped YouTube - a refused VPN address, a removed or
+        // region-blocked video - the same song may be on SoundCloud.
+        val failed = outcome as? DownloadOutcome.Failed
+        if (failed != null && LinkResolver.isYouTube(picked.link)) {
+            val refused = failed.refusedByYouTube
+            outcome = fromSoundCloud(song(), refused, progress)
+                ?: return ItemOutcome.Failed(
+                    SoundCloudFallback.notFound(refused, failed.message),
+                    offerUpdate = !refused
+                )
         }
 
         return when (outcome) {
@@ -309,8 +336,42 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /** The link yt-dlp will be given, and what to show about it. */
-    private data class Picked(val link: String, val title: String?, val note: String?)
+    /**
+     * The same song from SoundCloud, when YouTube has refused this connection -
+     * usually a VPN address it has flagged. Null when SoundCloud has no upload
+     * that is the song, so nothing wrong is saved.
+     */
+    private suspend fun fromSoundCloud(
+        lookup: SoundCloudFallback.Lookup?,
+        refused: Boolean,
+        progress: (Float, Long, String) -> Unit
+    ): DownloadOutcome? {
+        if (lookup == null || lookup.wanted.query.isBlank()) return null
+        _state.value = _state.value.copy(
+            stage = SoundCloudFallback.searching(refused),
+            percent = 0f,
+            etaSeconds = 0L
+        )
+        val found = downloader.searchSoundCloud(SoundCloudFallback.searchQuery(lookup.wanted))
+        val upload = SoundCloudFallback.pick(lookup, found) ?: return null
+        _state.value = _state.value.copy(
+            stage = "Downloading…",
+            title = upload.title,
+            note = SoundCloudFallback.note(upload, refused)
+        )
+        return downloader.downloadAudio(upload.watchUrl, _quality.value, progress)
+    }
+
+    /**
+     * The link yt-dlp will be given, and what to show about it. [lookup] is the
+     * song it stands for, kept for looking elsewhere if YouTube refuses.
+     */
+    private data class Picked(
+        val link: String,
+        val title: String?,
+        val note: String?,
+        val lookup: SoundCloudFallback.Lookup? = null
+    )
 
     private sealed interface LinkResult {
         data class Ok(val picked: Picked) : LinkResult
@@ -336,7 +397,10 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                             append("Found on YouTube: ${video.channel}")
                             video.durationSeconds?.let { append(" · ${YouTubeFormat.duration(it)}") }
                             video.viewCount?.let { append(" · ${YouTubeFormat.views(it)}") }
-                        }
+                        },
+                        // What was asked for, not the video's title; the video's
+                        // length only as a loose bound, as it includes intros.
+                        lookup = SoundCloudFallback.Lookup(wanted, video.durationSeconds)
                     )
                 )
             }

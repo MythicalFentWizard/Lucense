@@ -56,6 +56,26 @@ when it rains. See [`WeatherAffinity`](shared/src/main/kotlin/com/exo/musicplaye
 **Downloads** from YouTube, SoundCloud, Bandcamp, Spotify and anywhere else
 yt-dlp reaches, at your choice of quality.
 
+**When YouTube refuses your VPN.** YouTube decides by the address a request
+comes from. On many cheap VPN servers it answers nearly every video with
+*"Sign in to confirm you're not a bot"*, whichever app or YouTube client asks.
+Tested through one such server, every one of yt-dlp's YouTube clients was
+refused, and the public relays (Piped, Invidious) were down or blocked too.
+Search still works there; only the download is refused. So Lucense does two
+things, on both apps:
+
+- **It finds the song on SoundCloud instead.** It works out which song was
+  meant: the name you typed, or the link's title and length. Then it picks the
+  real upload from SoundCloud's results with the same rules as a YouTube
+  search: edits refused, snippets and loops refused by length. If there's no
+  right upload, nothing is saved. Many SoundCloud-native artists are covered,
+  but major-label songs are often locked there.
+- **Downloads can use their own proxy.** It's in Settings → Downloads on
+  both apps. If your VPN app also runs a local proxy (v2rayNG and Hiddify
+  listen on `127.0.0.1:10808`), point that at a cleaner server. On Android only
+  downloads go through it; on Windows the setting covers everything the app
+  does online.
+
 ### Playing
 
 - **Gapless, with optional crossfade.** One song runs straight into the next with

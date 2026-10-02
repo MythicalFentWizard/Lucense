@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.BuildConfig
+import com.exo.musicplayer.data.download.DownloadProxy
 import com.exo.musicplayer.data.lyrics.LyricsTerm
 import com.exo.musicplayer.ui.UpdateState
 
@@ -61,6 +62,7 @@ class SettingsValues(
     val lyricsPattern: String,
     val coverProvider: String,
     val coverProviders: List<String>,
+    val downloadProxy: String,
     val update: UpdateState
 )
 
@@ -76,6 +78,7 @@ class SettingsActions(
     val onLyricsTerm: (LyricsTerm) -> Unit,
     val onLyricsPattern: (String) -> Unit,
     val onCoverProvider: (String) -> Unit,
+    val onDownloadProxy: (String) -> Unit,
     val onBackUp: () -> Unit,
     val onRestore: () -> Unit,
     val onCheckUpdate: () -> Unit,
@@ -160,6 +163,37 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
                 current = values.coverProvider.ifBlank { "Any, in the usual order" },
                 options = listOf("Any, in the usual order" to { actions.onCoverProvider("") }) +
                     values.coverProviders.map { it to { actions.onCoverProvider(it) } }
+            )
+        }
+
+        Section("Downloads")
+        Setting(
+            "Proxy for downloads",
+            "YouTube refuses many cheap VPN servers. If your VPN app also offers a local proxy " +
+                "(v2rayNG and Hiddify use 127.0.0.1:10808), point it at a cleaner server and put " +
+                "it here: only downloads go through it. When YouTube refuses anyway, the song is " +
+                "looked for on SoundCloud."
+        ) {
+            // Seeded once: following the saved, trimmed value would fight the typing.
+            var proxy by remember { mutableStateOf(values.downloadProxy) }
+            val valid = proxy.isBlank() || DownloadProxy.normalize(proxy) != null
+            OutlinedTextField(
+                value = proxy,
+                onValueChange = { proxy = it; actions.onDownloadProxy(it.trim()) },
+                label = { Text("Proxy") },
+                placeholder = { Text("socks5://127.0.0.1:10808") },
+                supportingText = {
+                    Text(
+                        when {
+                            proxy.isBlank() -> "Empty: downloads go the way everything else does."
+                            valid -> "Downloads go through ${DownloadProxy.normalize(proxy)}"
+                            else -> "Not a proxy: socks5, socks4 or http, with host:port. Ignored until fixed."
+                        }
+                    )
+                },
+                isError = !valid,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
             )
         }
 

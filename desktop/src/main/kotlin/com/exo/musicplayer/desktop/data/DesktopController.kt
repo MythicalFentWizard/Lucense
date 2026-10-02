@@ -50,6 +50,7 @@ import com.exo.musicplayer.data.weather.OpenMeteo
 import com.exo.musicplayer.data.weather.WeatherAffinity
 import com.exo.musicplayer.data.weather.WeatherCondition
 import com.exo.musicplayer.data.weather.WeatherSnapshot
+import com.exo.musicplayer.data.youtube.SoundCloudFallback
 import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.audio.AudioDevices
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
@@ -3023,12 +3024,18 @@ class DesktopController(parent: CoroutineScope) {
                 return@launch
             }
 
+            // The song wanted, when known, in case YouTube refuses this
+            // connection and it has to come from somewhere else.
+            var wanted: YouTubeLinkFinder.Wanted? = null
+            foundVideos.remove(entry.id)
+
             // A song name rather than a link: found on YouTube first, and the
             // link that was found is what yt-dlp is given.
             val target = if (!url.startsWith("http", ignoreCase = true)) {
                 val text = url.replace(searchPrefix, "").trim()
                 update(entry.id) { it.status = "Finding it on YouTube…" }
-                findYouTubeLink(entry.id, YouTubeLinkFinder.Wanted(title = text))
+                wanted = YouTubeLinkFinder.Wanted(title = text)
+                findYouTubeLink(entry.id, wanted)
                     ?: return@launch
             } else when (val resolved = io { LinkResolver.resolve(url) }) {
                 is ResolvedLink.Direct -> {
@@ -3040,7 +3047,8 @@ class DesktopController(parent: CoroutineScope) {
                         it.display = resolved.display
                         it.note = resolved.note
                     }
-                    findYouTubeLink(entry.id, YouTubeLinkFinder.Wanted(title = resolved.query))
+                    wanted = YouTubeLinkFinder.Wanted(title = resolved.query)
+                    findYouTubeLink(entry.id, wanted)
                         ?: return@launch
                 }
                 is ResolvedLink.Unsupported -> {
@@ -3055,15 +3063,45 @@ class DesktopController(parent: CoroutineScope) {
 
             update(entry.id) { it.status = "Starting…" }
             val destination = File(settings.downloadDir)
-            val result = YtDlp.download(
-                target = target,
+            var refused = false
+            var youTubeSaid: String? = null
+            suspend fun fetch(link: String) = YtDlp.download(
+                target = link,
                 destination = destination,
                 toMp3 = downloadToMp3 && tools.ffmpeg,
                 embedThumbnail = downloadEmbedArt,
                 wholePlaylist = downloadPlaylist,
                 quality = downloadQuality,
-                onProgress = { progress -> onDownloadProgress(entry.id, progress) }
+                onProgress = { progress ->
+                    if (SoundCloudFallback.refusedByYouTube(progress.line)) refused = true
+                    if (progress.line.startsWith("ERROR")) youTubeSaid = progress.line
+                    onDownloadProgress(entry.id, progress)
+                }
             )
+            var result = fetch(target)
+
+            // Whatever stopped YouTube - a refused VPN address ("confirm you're
+            // not a bot"), a removed or region-blocked video - the same song
+            // may be on SoundCloud.
+            if (result.isFailure && LinkResolver.isYouTube(target)) {
+                update(entry.id) { it.status = SoundCloudFallback.searching(refused) }
+                val song = wanted?.let { SoundCloudFallback.Lookup(it, foundVideos[entry.id]?.durationSeconds) }
+                    ?: SoundCloudFallback.lookUp(target, youtube)
+                val upload = song?.let {
+                    SoundCloudFallback.pick(it, youtubeBackend.searchSoundCloud(SoundCloudFallback.searchQuery(it.wanted)))
+                }
+                result = if (upload == null) {
+                    Result.failure(IllegalStateException(SoundCloudFallback.notFound(refused, youTubeSaid)))
+                } else {
+                    update(entry.id) {
+                        it.display = "SoundCloud · ${upload.title}"
+                        it.note = listOfNotNull(it.note, SoundCloudFallback.note(upload, refused)).joinToString("\n")
+                        it.percent = 0f
+                        it.status = "Starting…"
+                    }
+                    fetch(upload.watchUrl)
+                }
+            }
 
             result.fold(
                 onSuccess = { files ->
@@ -3105,10 +3143,14 @@ class DesktopController(parent: CoroutineScope) {
      * When nothing suitable turns up the entry fails with the reason, rather
      * than saving an edit or a cover that would look like success.
      */
+    /** The video each download entry found, for its length if YouTube then refuses it. */
+    private val foundVideos = HashMap<Long, YouTubeVideo>()
+
     private suspend fun findYouTubeLink(id: Long, wanted: YouTubeLinkFinder.Wanted): String? =
         when (val outcome = linkFinder.find(wanted)) {
             is YouTubeLinkFinder.Outcome.Found -> {
                 val video = outcome.pick.video
+                foundVideos[id] = video
                 update(id) { entry ->
                     entry.display = "YouTube · ${video.title}"
                     entry.note = listOfNotNull(
