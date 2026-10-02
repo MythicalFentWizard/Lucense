@@ -100,8 +100,12 @@ fun AddToPlaylistDialog(
             }
         },
         dismissButton = {
+            // With no playlists yet the dialog opens straight on the name, and
+            // needs its own way out rather than only a tap outside it.
             if (creating && playlists.isNotEmpty()) {
                 TextButton(onClick = { creating = false }) { Text("Back") }
+            } else if (creating) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         }
     )
