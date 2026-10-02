@@ -40,6 +40,8 @@ import com.exo.musicplayer.data.library.DuplicateGroup
 fun DuplicatesDialog(
     groups: List<DuplicateGroup>,
     scanning: Boolean,
+    /** Songs listened to so far and how many need it, while listening. */
+    listening: Pair<Int, Int>?,
     onRemove: (List<Track>) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -55,23 +57,37 @@ fun DuplicatesDialog(
         title = {
             Text(
                 when {
-                    scanning -> "Scanning for duplicates…"
+                    scanning -> "Finding duplicates…"
                     groups.isEmpty() -> "No duplicates found"
-                    else -> "${candidates.size} duplicates in ${groups.size} songs"
+                    else -> "${candidates.size} ${if (candidates.size == 1) "copy" else "copies"} of " +
+                        "${groups.size} ${if (groups.size == 1) "song" else "songs"}"
                 }
             )
         },
         text = {
             when {
-                scanning -> Text(
-                    "Comparing titles, artists and lengths.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                scanning -> Column {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { listening?.let { (done, total) -> if (total > 0) done.toFloat() / total else 0f } ?: 0f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+                    Text(
+                        listening?.let { (done, total) -> "Listening to each song: $done of $total" }
+                            ?: "Comparing how the songs sound…",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Matched by how they sound, not by their names. Each song is listened to " +
+                            "once, thirty seconds from its middle, and remembered, so later scans only " +
+                            "listen to what's new.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 groups.isEmpty() -> Text(
-                    "Every song in your library looks unique. Identical files are " +
-                        "already blocked at import, so this only finds different " +
-                        "copies of the same recording.",
+                    "No song is in your library twice, by how they sound.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

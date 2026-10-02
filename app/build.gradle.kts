@@ -35,8 +35,12 @@ android {
 
         // yt-dlp ships a Python runtime and ffmpeg as native libraries. Building
         // every ABI would roughly triple the APK; arm64 covers every Android
-        // phone shipped in the last several years.
-        ndk { abiFilters += listOf("arm64-v8a") }
+        // phone shipped in the last several years. -PlucenseEmulator=true adds
+        // x86_64 for a local emulator build; nothing released carries it.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+            if (providers.gradleProperty("lucenseEmulator").orNull == "true") abiFilters += "x86_64"
+        }
     }
 
     buildTypes {

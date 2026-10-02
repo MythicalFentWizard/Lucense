@@ -1,6 +1,7 @@
 package com.exo.musicplayer.data.library
 
 import com.exo.musicplayer.data.db.Track
+import com.exo.musicplayer.data.library.AudioPrint
 import java.util.Locale
 
 /** A set of tracks judged to be the same song, with one chosen to survive. */
@@ -13,38 +14,37 @@ data class DuplicateGroup(
 }
 
 /**
- * Finds the same song stored more than once.
+ * Finds the same song stored more than once, by how it sounds.
  *
- * Byte-identical files never get this far — the importer already deduplicates on
- * a SHA-256 of the audio. What is left are genuinely different files of the same
- * recording: a 320kbps rip alongside a 128kbps one, the same track shared twice
- * from different chats, or a download that duplicates something already ripped.
- * Those need fuzzy matching on tags rather than on bytes.
+ * Byte-identical files never get this far - the importer already deduplicates
+ * on a SHA-256 of the audio. What is left are different files of the same
+ * recording: a 320 kbps rip alongside a 128 kbps one, the same song shared
+ * twice from different chats under different names, a download of something
+ * already ripped. Names say little about those - "Track 03" and a properly
+ * tagged copy are the same song, two songs can share a title - so the matching
+ * is done on sound prints, by the same shared code the PC uses.
  *
- * The matching itself lives in [DuplicateMatcher] so the desktop build applies
- * exactly the same rules. What stays here is which copy to keep, which is the
- * one genuinely storage-specific part.
+ * What stays here is which copy to keep, the storage-specific part.
  *
  * Nothing here deletes anything. It returns a proposal for the user to review,
  * because a wrong guess costs them a file they cannot get back.
  */
 object DuplicateFinder {
 
-    fun normalize(text: String?): String = DuplicateMatcher.normalize(text)
+    // Biggest file first, as a stand-in for bitrate, then the one with
+    // artwork, then the one actually played, then whichever arrived first.
+    private val keeperOrder = compareByDescending<Track> { it.sizeBytes }
+        .thenByDescending { !it.artPath.isNullOrBlank() }
+        .thenByDescending { it.playCount }
+        .thenBy { it.addedAt }
 
-    fun find(tracks: List<Track>): List<DuplicateGroup> =
-        DuplicateMatcher.group(
-            items = tracks,
-            artistOf = { it.artist },
-            titleOf = { it.title },
-            durationOf = { it.durationMs },
-            // Biggest file first, as a stand-in for bitrate, then the one with
-            // artwork, then the one actually played, then whichever arrived first.
-            keeperOrder = compareByDescending<Track> { it.sizeBytes }
-                .thenByDescending { !it.artPath.isNullOrBlank() }
-                .thenByDescending { it.playCount }
-                .thenBy { it.addedAt }
-        ).map { group ->
-            DuplicateGroup(keep = group.keep, remove = group.remove)
+    fun find(tracks: List<Track>, prints: Map<Long, IntArray>): List<DuplicateGroup> {
+        val byId = tracks.associateBy { it.id }
+        return AudioPrint.groups(
+            prints.mapNotNull { (id, print) -> byId[id]?.let { AudioPrint.Entry(id, print, it.durationMs) } }
+        ).map { ids ->
+            val members = ids.mapNotNull { byId[it] }.sortedWith(keeperOrder)
+            DuplicateGroup(keep = members.first(), remove = members.drop(1))
         }.sortedBy { it.title.lowercase(Locale.ROOT) }
+    }
 }

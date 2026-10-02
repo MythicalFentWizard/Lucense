@@ -30,6 +30,13 @@ interface PlayEventDao {
     )
     fun observeTopByListenTime(minMs: Long, limit: Int): Flow<List<TrackListenTime>>
 
+    /** Time listened for every song that has any, for sorting by it. */
+    @Query(
+        "SELECT trackId, COALESCE(SUM(listenedMs), 0) AS totalMs, COUNT(*) AS plays " +
+            "FROM play_events GROUP BY trackId"
+    )
+    fun observeListenTotals(): Flow<List<TrackListenTime>>
+
     @Query(
         "SELECT trackId, COALESCE(SUM(listenedMs), 0) AS totalMs, COUNT(*) AS plays " +
             "FROM play_events WHERE startedAt >= :since AND listenedMs >= :minMs " +

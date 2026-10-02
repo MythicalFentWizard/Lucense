@@ -2,6 +2,10 @@ package com.exo.musicplayer
 
 import android.app.Application
 import android.content.Context
+import androidx.media3.common.util.UnstableApi
+import com.exo.musicplayer.data.prefs.AppPrefs
+import com.exo.musicplayer.playback.PlayerHost
+import com.exo.musicplayer.playback.SleepTimer
 import com.exo.musicplayer.data.ingest.TrackImporter
 import com.exo.musicplayer.data.repo.LibraryRepository
 import com.exo.musicplayer.data.recognition.ShazamClient
@@ -23,6 +27,7 @@ import kotlinx.coroutines.launch
  * Poor-man's DI. The app has a handful of long-lived collaborators, so a
  * container on the Application beats pulling in a framework.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 class MusicApp : Application() {
 
     /**
@@ -33,20 +38,30 @@ class MusicApp : Application() {
      */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    /** Splash is per process launch, not per Activity, so switching back to
-     *  the app does not replay it. */
-    var splashShown: Boolean = false
-
     val library: LibraryRepository by lazy { LibraryRepository(this) }
     val importer: TrackImporter by lazy { TrackImporter(this) }
     val stats: StatsRepository by lazy { StatsRepository(this) }
     val weather: WeatherRepository by lazy { WeatherRepository(this) }
     val shazam: ShazamClient by lazy { ShazamClient() }
-    val lyrics: LyricsRepository by lazy { LyricsRepository(this) }
+    val lyrics: LyricsRepository by lazy { LyricsRepository(this, prefs) }
     val themeSettings: ThemeSettings by lazy { ThemeSettings(this) }
     val audioFx: AudioFxSettings by lazy { AudioFxSettings(this) }
     val audioOutputs: AudioOutputRepository by lazy { AudioOutputRepository(this) }
     val interruption: InterruptionSettings by lazy { InterruptionSettings(this) }
+    val prefs: AppPrefs by lazy { AppPrefs(this) }
+    val sleep: SleepTimer by lazy { SleepTimer() }
+
+    /** The running player service, while there is one. */
+    private var host: PlayerHost? = null
+
+    fun attachHost(service: PlayerHost) {
+        host = service
+        playback.onHostReady()
+    }
+
+    fun detachHost(service: PlayerHost) {
+        if (host === service) host = null
+    }
 
     private val recorder: ListeningRecorder by lazy {
         ListeningRecorder(appScope, stats, library, weather)
@@ -56,6 +71,7 @@ class MusicApp : Application() {
         PlaybackConnection(
             context = this,
             scope = appScope,
+            host = { host },
             onTrackStarted = { trackId -> recorder.onTrackStarted(trackId) },
             onElapsed = { deltaMs -> recorder.onElapsed(deltaMs) },
             onPlaybackPaused = { recorder.flush() }
@@ -64,6 +80,9 @@ class MusicApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Bound straight away, so the service is up - and has put back what
+        // was playing last time - before anything on screen asks for it.
+        playback.connect()
         appScope.launch {
             // Storage the user cleared behind our back shouldn't leave ghost rows.
             library.pruneMissingFiles()

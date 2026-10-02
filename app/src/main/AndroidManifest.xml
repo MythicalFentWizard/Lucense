@@ -109,6 +109,19 @@
             </intent-filter>
         </activity>
 
+        <!--
+          Lets a headset button or the media controls' play button start the
+          player again after Android has stopped the app. The service then asks
+          for what was playing last (onPlaybackResumption) and carries on.
+        -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"

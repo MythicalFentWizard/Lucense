@@ -319,12 +319,6 @@ private fun BootScreen() {
                 style = MaterialTheme.typography.headlineMedium,
                 color = Palette.Text
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "made by lucent",
-                style = MaterialTheme.typography.bodySmall,
-                color = Palette.TextDim
-            )
         }
     }
 }

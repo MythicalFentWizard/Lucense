@@ -10,9 +10,10 @@ import com.exo.musicplayer.data.lyrics.LyricsOvhProvider
 import com.exo.musicplayer.data.lyrics.LyricsProviderChain
 import com.exo.musicplayer.data.lyrics.NeteaseLyricsProvider
 import com.exo.musicplayer.data.lyrics.LyricsFetch
+import com.exo.musicplayer.data.prefs.AppPrefs
 import kotlinx.coroutines.flow.Flow
 
-class LyricsRepository(context: Context) {
+class LyricsRepository(context: Context, private val prefs: AppPrefs) {
 
     private val dao = MusicDatabase.get(context.applicationContext).lyricsDao()
     // Ordered by what they return: LRCLIB has the most timed LRC, NetEase
@@ -51,9 +52,15 @@ class LyricsRepository(context: Context) {
             return LyricsFetch.Found(existing.plainText, existing.syncedText)
         }
 
+        // What gets searched for follows the setting - the tags as they are,
+        // a tidied title, the file name, or a pattern - as it does on Windows.
+        val fileName = (track.originalName ?: track.title).substringBeforeLast('.')
+        val (title, artist) = prefs.lyricsTerm.value.query(
+            track.artist, track.title, track.album, fileName, prefs.lyricsPattern.value
+        )
         val (result, provider) = chain.fetch(
-            title = track.title,
-            artist = track.artist,
+            title = title,
+            artist = artist,
             album = track.album,
             durationMs = track.durationMs
         )

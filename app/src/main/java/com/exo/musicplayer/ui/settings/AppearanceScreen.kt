@@ -34,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -48,12 +47,16 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.ui.common.LineSlider
 import com.exo.musicplayer.ui.theme.AppPalette
+import com.exo.musicplayer.ui.theme.BackdropStyle
+import com.exo.musicplayer.ui.theme.ReactiveMode
 import com.exo.musicplayer.ui.theme.Starfield
 import com.exo.musicplayer.ui.theme.ThemeMode
 import com.exo.musicplayer.ui.theme.ThemeState
 import kotlin.math.roundToInt
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AppearanceScreen(
     theme: ThemeState,
@@ -61,7 +64,8 @@ fun AppearanceScreen(
     onPalette: (AppPalette) -> Unit,
     onMode: (ThemeMode) -> Unit,
     onDynamic: (Boolean) -> Unit,
-    onStars: (Boolean) -> Unit,
+    onBackdrop: (BackdropStyle) -> Unit,
+    onReactiveMode: (ReactiveMode) -> Unit,
     onWallpaper: (Uri) -> Unit,
     onClearWallpaper: () -> Unit,
     onWallpaperDim: (Float) -> Unit,
@@ -109,9 +113,20 @@ fun AppearanceScreen(
                 }
             }
         }
+        if (theme.palette.fixedDark != null && !theme.dynamicColor) {
+            item {
+                Text(
+                    "${theme.palette.credit ?: theme.palette.label} is a ${if (theme.palette.fixedDark == true) "dark" else "light"} " +
+                        "scheme by design, so this applies to Lucense's own palettes and Material You.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                )
+            }
+        }
 
-        item { SectionLabel("Palette") }
-        items(AppPalette.entries.chunked(2)) { pair ->
+        item { SectionLabel("Lucense palettes") }
+        items(AppPalette.entries.filter { it.fixedDark == null }.chunked(2)) { pair ->
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -131,6 +146,35 @@ fun AppearanceScreen(
             }
         }
 
+        item { SectionLabel("Published schemes") }
+        item {
+            Text(
+                "The same schemes, with the same colours, as the Windows app.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
+        }
+        items(AppPalette.entries.filter { it.fixedDark != null }.chunked(2)) { pair ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                pair.forEach { palette ->
+                    PaletteCard(
+                        palette = palette,
+                        selected = theme.palette == palette && !theme.dynamicColor,
+                        dark = palette.fixedDark == true,
+                        onClick = { onPalette(palette) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             item {
                 ToggleRow(
@@ -142,37 +186,55 @@ fun AppearanceScreen(
             }
         }
 
-        item { SectionLabel("Extras") }
+        item { SectionLabel("Background") }
         item {
-            ToggleRow(
-                title = "Starfield",
-                subtitle = "Drifting, twinkling stars behind the app. Dark themes only.",
-                checked = theme.stars,
-                onCheckedChange = onStars,
-                icon = Icons.Default.AutoAwesome
+            Text(
+                theme.backdrop.note + if (theme.backdrop == BackdropStyle.STARS) " Shown with dark themes." else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp)
             )
         }
         item {
-            // A live sample rather than a description: stars are the one setting
-            // where a still screenshot tells you nothing.
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .height(120.dp)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (theme.stars) {
-                        Starfield(starColor = MaterialTheme.colorScheme.primary, starCount = 55)
-                    }
-                    Text(
-                        text = if (theme.stars) "✨ Starfield on" else "Starfield off",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                BackdropStyle.entries.forEach { style ->
+                    androidx.compose.material3.FilterChip(
+                        selected = theme.backdrop == style,
+                        onClick = { onBackdrop(style) },
+                        label = { Text(style.label) }
                     )
                 }
+            }
+        }
+        if (theme.backdrop == BackdropStyle.REACTIVE) {
+            item {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ReactiveMode.entries.forEach { mode ->
+                        SegmentChip(
+                            label = mode.label,
+                            selected = theme.reactiveMode == mode,
+                            onClick = { onReactiveMode(mode) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Text(
+                    theme.reactiveMode.note,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                )
             }
         }
 
@@ -180,7 +242,7 @@ fun AppearanceScreen(
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
                 Text(
-                    "A picture of your own behind the app. The starfield, when on, is drawn over it.",
+                    "A picture of your own behind the app. The background, when on, is drawn over it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -199,10 +261,11 @@ fun AppearanceScreen(
                         "Dim ${(theme.wallpaperDim * 100).roundToInt()}%",
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    Slider(
+                    LineSlider(
                         value = theme.wallpaperDim,
                         onValueChange = onWallpaperDim,
-                        valueRange = 0f..0.9f
+                        valueRange = 0f..0.9f,
+                        description = "Wallpaper dim"
                     )
                 }
             }

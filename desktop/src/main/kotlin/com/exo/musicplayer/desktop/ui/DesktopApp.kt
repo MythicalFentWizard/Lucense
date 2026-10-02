@@ -155,7 +155,16 @@ fun DesktopApp(
     onChooseMedia: () -> File?,
     onPickPlaylistFile: (save: Boolean, suggested: String) -> File?
 ) {
-    var destination by remember { mutableStateOf(Destination.LIBRARY) }
+    // The page comes back as it was left. Download is the exception: it is a
+    // place you go for a task, not one to land on when the window opens.
+    var destination by remember {
+        mutableStateOf(
+            Destination.entries.firstOrNull { it.name == controller.settings.screen }
+                ?.takeIf { it != Destination.DOWNLOAD }
+                ?: Destination.LIBRARY
+        )
+    }
+    LaunchedEffect(destination) { controller.settings.screen = destination.name }
     var showSettings by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<DialogKind?>(null) }
     var playlistTargets by remember { mutableStateOf<List<DesktopTrack>>(emptyList()) }
@@ -434,12 +443,7 @@ private fun NavigationRail(
 
             Spacer(Modifier.weight(1f))
             RailItem("Settings", Icons.Default.Settings, settingsOpen, onClick = onSettings)
-            Text(
-                "made by lucent",
-                style = MaterialTheme.typography.bodySmall,
-                color = Palette.TextDim,
-                modifier = Modifier.padding(start = 20.dp, top = 10.dp)
-            )
+            Spacer(Modifier.height(10.dp))
         }
     }
 }

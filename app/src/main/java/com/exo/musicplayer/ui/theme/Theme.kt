@@ -13,6 +13,7 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import com.exo.musicplayer.playback.Spectrum
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -61,9 +63,13 @@ private val AppShapes = Shapes(
 @Composable
 fun MusicPlayerTheme(
     theme: ThemeState = ThemeState(),
+    /** The song playing, for the Waves background; null draws its idle ribbon. */
+    song: SongShape? = null,
     content: @Composable () -> Unit
 ) {
-    val dark = when (theme.mode) {
+    // A published scheme is light or dark by design; the setting only steers
+    // the palettes that have both, and Material You.
+    val dark = theme.palette.fixedDark?.takeUnless { theme.dynamicColor } ?: when (theme.mode) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -79,7 +85,12 @@ fun MusicPlayerTheme(
     }
 
     // Stars only in dark mode: on a light background they read as smudges.
-    val starsActive = theme.stars && dark
+    // The other backgrounds are drawn in the accent, so they hold up on both.
+    val style = when {
+        theme.backdrop == BackdropStyle.STARS && !dark -> BackdropStyle.NONE
+        else -> theme.backdrop
+    }
+    val starsActive = style == BackdropStyle.STARS
 
     // Decoded off the main thread, and again only when a new picture is chosen.
     val wallpaper by produceState<ImageBitmap?>(null, theme.wallpaper) {
@@ -89,7 +100,7 @@ fun MusicPlayerTheme(
             withContext(Dispatchers.IO) { decodeWallpaper(File(context.filesDir, "wallpaper.img")) }
         }
     }
-    val backdrop = starsActive || wallpaper != null
+    val backdrop = style != BackdropStyle.NONE || wallpaper != null
 
     MaterialTheme(colorScheme = colorScheme, shapes = AppShapes) {
         CompositionLocalProvider(
@@ -97,6 +108,12 @@ fun MusicPlayerTheme(
             LocalStarsVisible provides starsActive,
             LocalWallpaper provides wallpaper,
             LocalWallpaperDim provides theme.wallpaperDim,
+            LocalBackdrop provides BackdropSpec(
+                style = style,
+                color = if (style == BackdropStyle.STARS) starTint(colorScheme.primary) else colorScheme.primary,
+                reactiveMode = theme.reactiveMode,
+                song = song
+            ),
             LocalLyricsColors provides LyricsColors(
                 active = theme.lyricsActive?.let { Color(it) },
                 inactive = theme.lyricsInactive?.let { Color(it) }
@@ -109,19 +126,19 @@ fun MusicPlayerTheme(
                             Modifier
                                 .fillMaxSize()
                                 .background(
+                                    // Mixed solid: a see-through middle lets the black
+                                    // window through, which greys out light themes.
                                     Brush.verticalGradient(
                                         listOf(
                                             colorScheme.background,
-                                            colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            lerp(colorScheme.background, colorScheme.surfaceVariant, 0.5f),
                                             colorScheme.background
                                         )
                                     )
                                 )
                         )
-                        Starfield(starColor = starTint(colorScheme.primary))
-                    } else {
-                        ScreenBackdrop()
                     }
+                    ScreenBackdrop()
                     content()
                 }
             } else {
@@ -153,11 +170,28 @@ fun ScreenBackdrop() {
                     .background(MaterialTheme.colorScheme.background.copy(alpha = LocalWallpaperDim.current))
             )
         }
-        if (LocalStarsVisible.current) {
-            Starfield(starColor = starTint(MaterialTheme.colorScheme.primary))
+        LocalBackdrop.current?.let { spec ->
+            AppBackdrop(
+                style = spec.style,
+                color = spec.color,
+                spectrum = Spectrum.analyser,
+                reactiveMode = spec.reactiveMode,
+                song = spec.song,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
+
+/** The background in use, so every full-screen page can draw the same one. */
+data class BackdropSpec(
+    val style: BackdropStyle,
+    val color: Color,
+    val reactiveMode: ReactiveMode,
+    val song: SongShape?
+)
+
+val LocalBackdrop = staticCompositionLocalOf<BackdropSpec?> { null }
 
 /** A phone-screen-sized decode: the long edge at most 2400 px, whatever the photo's size. */
 private fun decodeWallpaper(file: File): ImageBitmap? = runCatching {

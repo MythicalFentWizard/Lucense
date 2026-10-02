@@ -5,10 +5,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,17 +56,20 @@ fun PitchMeter(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth()) {
             Canvas(
                 Modifier
                     .fillMaxWidth()
-                    .height(118.dp)
+                    .height(DIAL_HEIGHT)
             ) {
-                val sweep = 220f
+                val sweep = SWEEP
                 val startAngle = 90f + (360f - sweep) / 2f
                 val stroke = 12.dp.toPx()
                 val inset = stroke / 2 + 14.dp.toPx()
-                val diameter = minOf(size.width, size.height * 2f) - inset * 2
+                // The arc dips below its centre at both ends, so the radius is
+                // what fits that dip inside the box too, not half its height.
+                val radiusFits = (size.height - inset - stroke / 2) / (1f + DIP)
+                val diameter = minOf(size.width - inset * 2, radiusFits * 2f)
                 val topLeft = Offset((size.width - diameter) / 2f, inset)
                 val arcSize = Size(diameter, diameter)
 
@@ -126,29 +128,35 @@ fun PitchMeter(
                     st += 3f
                 }
 
-                // Needle.
+                // A pointer just inside the rim rather than a needle from the
+                // middle, which ran straight through the reading.
                 val needleAngle = Math.toRadians(
                     (startAngle + sweep * fraction).toDouble()
                 )
-                val needleEnd = Offset(
-                    centre.x + cos(needleAngle).toFloat() * (radius - stroke - 4.dp.toPx()),
-                    centre.y + sin(needleAngle).toFloat() * (radius - stroke - 4.dp.toPx())
-                )
+                val tip = radius - stroke - 4.dp.toPx()
+                val tail = radius * 0.62f
                 drawLine(
                     color = primary,
-                    start = centre,
-                    end = needleEnd,
+                    start = Offset(
+                        centre.x + cos(needleAngle).toFloat() * tail,
+                        centre.y + sin(needleAngle).toFloat() * tail
+                    ),
+                    end = Offset(
+                        centre.x + cos(needleAngle).toFloat() * tip,
+                        centre.y + sin(needleAngle).toFloat() * tip
+                    ),
                     strokeWidth = 3.dp.toPx(),
                     cap = StrokeCap.Round
                 )
-                drawCircle(color = primary, radius = 5.dp.toPx(), center = centre)
             }
 
+            // The reading, centred on the dial's middle.
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.size(width = 140.dp, height = 70.dp)
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = READING_TOP)
             ) {
-                Spacer(Modifier.height(30.dp))
                 Text(
                     text = formatSemitones(animated),
                     style = MaterialTheme.typography.headlineSmall,
@@ -173,3 +181,15 @@ private fun formatSemitones(value: Float): String {
         else -> "$text st"
     }
 }
+
+private val DIAL_HEIGHT = 150.dp
+private const val SWEEP = 220f
+
+/** How far below its centre the arc reaches, as a share of the radius. */
+private val DIP = sin(Math.toRadians(((SWEEP - 180f) / 2f).toDouble())).toFloat()
+
+/**
+ * Where the reading starts: the dial's middle (inset plus radius on any phone,
+ * where the height and not the width sets the radius) less half the reading.
+ */
+private val READING_TOP = (20.dp + (DIAL_HEIGHT - 20.dp - 6.dp) / (1f + DIP)) - 28.dp

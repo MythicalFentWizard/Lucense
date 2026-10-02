@@ -67,6 +67,22 @@ fun StatsScreen(
 
     LazyColumn(modifier.fillMaxSize()) {
         item {
+            // The same title the other tabs have, at the same height as theirs.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp)
+                    .height(48.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    "Stats",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        item {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -85,7 +101,7 @@ fun StatsScreen(
                 RankedRow(
                     rank = index + 1,
                     track = track,
-                    detail = "${humanDuration(row.totalMs)} · ${row.plays} plays",
+                    detail = "${humanDuration(row.totalMs)} · ${row.plays} ${if (row.plays == 1) "play" else "plays"}",
                     isCurrent = track.id == currentTrackId,
                     onClick = { onPlayTrack(topThisWeek.map { it.first }, index) }
                 )
@@ -108,7 +124,7 @@ fun StatsScreen(
                 RankedRow(
                     rank = index + 1,
                     track = track,
-                    detail = "${humanDuration(row.totalMs)} · ${row.plays} plays",
+                    detail = "${humanDuration(row.totalMs)} · ${row.plays} ${if (row.plays == 1) "play" else "plays"}",
                     isCurrent = track.id == currentTrackId,
                     onClick = { onPlayTrack(topTracks.map { it.first }, index) }
                 )
@@ -327,6 +343,8 @@ private fun humanDuration(ms: Long): String {
     return when {
         hours >= 24 -> "${hours / 24}d ${hours % 24}h"
         hours > 0 -> "${hours}h ${minutes % 60}m"
+        // Under a minute reads as seconds rather than a bare "0m".
+        minutes == 0L -> "${ms / 1000}s"
         else -> "${minutes}m"
     }
 }

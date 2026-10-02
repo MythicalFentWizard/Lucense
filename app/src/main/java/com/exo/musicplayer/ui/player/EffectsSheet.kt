@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,7 +37,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.playback.AudioFxState
+import com.exo.musicplayer.ui.common.LineSlider
 import com.exo.musicplayer.playback.AudioOutput
+import com.exo.musicplayer.playback.ToneProcessor
 import com.exo.musicplayer.playback.FxPreset
 import com.exo.musicplayer.playback.ReverbRoom
 import kotlin.math.roundToInt
@@ -46,22 +47,26 @@ import kotlin.math.roundToInt
 @Composable
 fun EffectsSheet(
     state: AudioFxState,
-    onPreset: (FxPreset) -> Unit,
-    onSpeed: (Float) -> Unit,
-    onPitch: (Float) -> Unit,
-    onReverbEnabled: (Boolean) -> Unit,
-    onReverbRoom: (ReverbRoom) -> Unit,
-    onReverbAmount: (Float) -> Unit,
-    onReset: () -> Unit,
+    /** True while the song playing has effects of its own. */
+    remembered: Boolean,
+    hasSong: Boolean,
+    controls: FxControls,
     outputs: List<AudioOutput>,
     selectedOutputs: Set<String>,
     mirrorOutputs: Boolean,
-    onPickOutput: (String) -> Unit,
-    onMirrorOutputs: (Boolean) -> Unit,
     /** Drives the "live"/"idle" note on the meter. */
     playing: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val onPreset = controls.onPreset
+    val onSpeed = controls.onSpeed
+    val onPitch = controls.onPitch
+    val onReverbEnabled = controls.onReverbEnabled
+    val onReverbRoom = controls.onReverbRoom
+    val onReverbAmount = controls.onReverbAmount
+    val onReset = controls.onReset
+    val onPickOutput = controls.onPickOutput
+    val onMirrorOutputs = controls.onMirrorOutputs
     Column(
         modifier
             .fillMaxWidth()
@@ -97,10 +102,44 @@ fun EffectsSheet(
 
         Spacer(Modifier.height(4.dp))
         Text(
-            "Speed, pitch and reverb are independent — stack them however you like.",
+            "Speed, pitch, reverb and the equalizer are independent — stack them however you like.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        // Effects kept for one song, as on Windows: they come back when that
+        // song plays and give way to the usual ones when it ends.
+        if (hasSong) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (remembered) "Kept for this song" else "Only for this song?",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        if (remembered) "These come back whenever it plays." else
+                            "Remember these effects and they come back whenever it plays.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (remembered) {
+                    TextButton(onClick = controls.onRemember) { Text("Update") }
+                    TextButton(onClick = controls.onForget) { Text("Forget") }
+                } else {
+                    TextButton(onClick = controls.onRemember) { Text("Remember") }
+                }
+            }
+        }
 
         Spacer(Modifier.height(18.dp))
         Text(
@@ -177,13 +216,14 @@ fun EffectsSheet(
 
         Spacer(Modifier.height(20.dp))
         PitchMeter(semitones = state.pitchSemitones)
-        Slider(
+        LineSlider(
             value = state.pitchSemitones,
             onValueChange = onPitch,
             valueRange = AudioFxState.MIN_SEMITONES..AudioFxState.MAX_SEMITONES,
-            // 48 steps gives quarter-semitone resolution without free-running drift.
+            // 96 stops gives quarter-semitone resolution without free-running drift.
             steps = 95,
-            modifier = Modifier.fillMaxWidth()
+            from = 0f,
+            description = "Pitch"
         )
         TickRow(listOf("-12", "-6", "0", "+6", "+12"))
         LabelRow("Pitch", state.pitchLabel)
@@ -205,12 +245,13 @@ fun EffectsSheet(
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        Slider(
+        LineSlider(
             value = state.speed,
             onValueChange = onSpeed,
             valueRange = AudioFxState.MIN_SPEED..AudioFxState.MAX_SPEED,
             steps = 29,
-            modifier = Modifier.fillMaxWidth()
+            from = 1f,
+            description = "Speed"
         )
         Text(
             text = "Tempo only — pitch stays where you set it above.",
@@ -244,13 +285,57 @@ fun EffectsSheet(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Slider(
+                LineSlider(
                     value = state.reverbAmount,
                     onValueChange = onReverbAmount,
-                    valueRange = 0f..1f,
-                    modifier = Modifier.fillMaxWidth()
+                    description = "Reverb amount"
                 )
                 LabelRow("Amount", "${(state.reverbAmount * 100).roundToInt()}%")
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Equalizer", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Ten bands, 31 Hz to 16 kHz, the same as on Windows.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = state.eqEnabled, onCheckedChange = controls.onEqEnabled)
+        }
+        AnimatedVisibility(visible = state.eqEnabled) {
+            Column {
+                Spacer(Modifier.height(6.dp))
+                ToneProcessor.LABELS.forEachIndexed { band, label ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.width(36.dp)
+                        )
+                        LineSlider(
+                            value = state.eqGains.getOrElse(band) { 0f },
+                            onValueChange = { controls.onEqBand(band, (it * 2).roundToInt() / 2f) },
+                            valueRange = -12f..12f,
+                            from = 0f,
+                            description = "$label band",
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "%+.1f".format(state.eqGains.getOrElse(band) { 0f }),
+                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                            modifier = Modifier.width(44.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.End
+                        )
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = controls.onEqFlat) { Text("Flat") }
+                }
             }
         }
 

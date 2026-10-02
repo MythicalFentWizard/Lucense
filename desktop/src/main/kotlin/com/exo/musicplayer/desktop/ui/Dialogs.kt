@@ -513,7 +513,9 @@ fun DuplicatesDialog(controller: DesktopController, onDismiss: () -> Unit) {
     ScrimDialog(
         title = "Duplicates",
         subtitle = when {
-            controller.duplicatesScanning -> "Comparing titles, artists and lengths…"
+            controller.duplicatesScanning -> controller.duplicatesListening?.let { (done, total) ->
+                "Listening to each song: $done of $total"
+            } ?: "Comparing how the songs sound…"
             groups.isEmpty() -> controller.duplicatesNote ?: "Nothing to review."
             else -> "${groups.size} sets · ${groups.sumOf { it.remove.size }} files to remove"
         },
@@ -521,14 +523,20 @@ fun DuplicatesDialog(controller: DesktopController, onDismiss: () -> Unit) {
     ) {
         when {
             controller.duplicatesScanning -> {
-                ThinProgress(null)
+                val listening = controller.duplicatesListening
+                ThinProgress(listening?.let { (done, total) -> if (total > 0) done.toFloat() / total else null })
+                Spacer(Modifier.height(10.dp))
+                Hint(
+                    "Songs are matched by how they sound, not by their names. Each one is " +
+                        "listened to once, thirty seconds from its middle, and remembered, so " +
+                        "later scans only listen to what's new."
+                )
             }
 
             groups.isEmpty() -> {
                 Hint(
                     controller.duplicatesNote
-                        ?: "Nothing looks duplicated. Byte-identical copies never " +
-                        "reach this list — only different files of the same recording do."
+                        ?: "No song is in the library twice, by how they sound."
                 )
                 Spacer(Modifier.height(16.dp))
                 AccentButton("Scan again") { controller.findDuplicates() }

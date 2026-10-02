@@ -1,4 +1,4 @@
-package com.exo.musicplayer.desktop.data
+package com.exo.musicplayer.data.update
 
 import com.exo.musicplayer.data.net.Http
 
