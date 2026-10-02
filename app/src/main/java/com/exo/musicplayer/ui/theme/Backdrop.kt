@@ -31,7 +31,12 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.exo.musicplayer.data.audio.SpectrumAnalyser
+import com.exo.musicplayer.playback.Spectrum
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -299,21 +304,22 @@ fun AppBackdrop(
     val moving = style == BackdropStyle.REACTIVE || style == BackdropStyle.WAVES
     val analyser = if (moving) spectrum else null
 
-    LaunchedEffect(style) {
-        val origin = System.nanoTime() - (seconds.floatValue * 1e9f).toLong()
+    SpectrumWhileVisible(active = analyser != null)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(style, lifecycle) {
         val raw = FloatArray(spectrum?.bands() ?: 1)
-        while (isActive) {
-            if (moving) withFrameNanos { } else delay(50L)
-            val now = (System.nanoTime() - origin) / 1e9f
-            if (analyser != null) {
-                analyser.enabled = true
-                pulse.update(analyser.snapshot(raw), now)
+        // Only while the app is on screen: music plays for hours with the app
+        // in the background, and a hidden background is time spent on nothing.
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            // Picks up where it left off rather than jumping ahead by the time away.
+            val origin = System.nanoTime() - (seconds.floatValue * 1e9f).toLong()
+            while (isActive) {
+                if (moving) withFrameNanos { } else delay(50L)
+                val now = (System.nanoTime() - origin) / 1e9f
+                if (analyser != null) pulse.update(analyser.snapshot(raw), now)
+                seconds.floatValue = now
             }
-            seconds.floatValue = now
         }
-    }
-    DisposableEffect(analyser) {
-        onDispose { if (analyser != null) analyser.enabled = false }
     }
 
     Spacer(
@@ -338,6 +344,32 @@ fun AppBackdrop(
                 }
             }
     )
+}
+
+/**
+ * Keeps the shared spectrum analyser running while this is composed and the
+ * app is on screen, and not otherwise. It costs an FFT on every audio buffer,
+ * and with the app in the background nothing is there to see it.
+ */
+@Composable
+fun SpectrumWhileVisible(active: Boolean = true) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, active) {
+        var holding = false
+        fun follow() {
+            val wanted = active && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (wanted && !holding) Spectrum.acquire()
+            if (!wanted && holding) Spectrum.release()
+            holding = wanted
+        }
+        val observer = LifecycleEventObserver { _, _ -> follow() }
+        lifecycle.addObserver(observer)
+        follow()
+        onDispose {
+            lifecycle.removeObserver(observer)
+            if (holding) Spectrum.release()
+        }
+    }
 }
 
 private fun wrap(value: Float) = ((value % 1f) + 1f) % 1f

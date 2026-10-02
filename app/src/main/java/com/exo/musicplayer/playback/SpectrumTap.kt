@@ -112,4 +112,20 @@ class SpectrumTap(val analyser: SpectrumAnalyser) : TeeAudioProcessor.AudioBuffe
  */
 object Spectrum {
     val analyser = SpectrumAnalyser()
+
+    // Main thread only: the screens showing the spectrum come and go there.
+    private var users = 0
+
+    /**
+     * Something on screen is showing the spectrum. Counted, because the meter
+     * and a background can both be up at once, and closing one must not switch
+     * the analyser off under the other. Pair every call with [release].
+     */
+    fun acquire() {
+        if (users++ == 0) analyser.enabled = true
+    }
+
+    fun release() {
+        if (users > 0 && --users == 0) analyser.enabled = false
+    }
 }

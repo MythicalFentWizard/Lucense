@@ -30,6 +30,7 @@ import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.lyrics.LyricLine
 import com.exo.musicplayer.data.lyrics.LyricsFetch
 import com.exo.musicplayer.data.lyrics.LyricsTerm
+import com.exo.musicplayer.data.lyrics.tidyLyrics
 import com.exo.musicplayer.data.playlist.PlaylistEntry
 import com.exo.musicplayer.data.playlist.PlaylistFile
 import com.exo.musicplayer.data.prefs.GroupSort
@@ -937,6 +938,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Lyrics for whatever is playing, re-queried as the track changes. */
     val currentLyrics: StateFlow<Lyrics?> = currentTrackId
         .flatMapLatest { id -> if (id == null) flowOf(null) else app.lyrics.observe(id) }
+        // Lyrics saved before the Genius leftovers were stripped get the same treatment.
+        .map { saved -> saved?.let { it.copy(plainText = it.plainText?.let(::tidyLyrics)) } }
         .stateIn(viewModelScope, started, null)
 
     val currentLyricLines: StateFlow<List<LyricLine>> = currentLyrics
@@ -1435,9 +1438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // favourite everything. Toggling each independently would leave a
         // mixed selection mixed, which is never what was meant.
         val makeFavorite = chosen.any { !it.isFavorite }
-        for (track in chosen) {
-            if (track.isFavorite != makeFavorite) library.setFavorite(track.id, makeFavorite)
-        }
+        library.setFavorite(chosen.filter { it.isFavorite != makeFavorite }.map { it.id }, makeFavorite)
         clearSelection()
     }
 

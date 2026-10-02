@@ -25,6 +25,7 @@ import com.exo.musicplayer.data.lyrics.LyricsOvhProvider
 import com.exo.musicplayer.data.lyrics.LyricsProviderChain
 import com.exo.musicplayer.data.lyrics.LyricsTerm
 import com.exo.musicplayer.data.lyrics.NeteaseLyricsProvider
+import com.exo.musicplayer.data.lyrics.tidyLyrics
 import com.exo.musicplayer.data.recognition.AudiusProvider
 import com.exo.musicplayer.data.recognition.DeezerProvider
 import com.exo.musicplayer.data.recognition.GeniusLyricSearch
@@ -1663,7 +1664,7 @@ class DesktopController(parent: CoroutineScope) {
         scope.launch {
             val stored = io { store.lyricsFor(track.file.absolutePath) }
             if (stored != null) {
-                lyricsPlain = stored.plain
+                lyricsPlain = stored.plain?.let(::tidyLyrics)
                 lyricsSynced = stored.synced
                 lyricsSource = stored.source
             }

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exo.musicplayer.MainActivity
 import com.exo.musicplayer.musicApp
+import com.exo.musicplayer.ui.theme.BackdropStyle
 import com.exo.musicplayer.ui.theme.MusicPlayerTheme
 
 /**
@@ -55,19 +56,25 @@ class ShareReceiverActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val uris = SharedUris.from(intent)
-        if (uris.isEmpty()) {
-            Toast.makeText(this, "Nothing to add.", Toast.LENGTH_SHORT).show()
-            finish()
-            return
+        // On a rotation the view model already has this share in hand.
+        if (savedInstanceState == null) {
+            val uris = SharedUris.from(intent)
+            if (uris.isEmpty()) {
+                Toast.makeText(this, "Nothing to add.", Toast.LENGTH_SHORT).show()
+                finish()
+                return
+            }
+            viewModel.add(uris, SharedUris.sourceLabel(this), intent.type)
         }
 
         // Warm up the player so "Play now" is instant when the import lands.
         musicApp.playback.connect()
-        viewModel.start(uris, SharedUris.sourceLabel(this), intent.type)
 
         setContent {
-            MusicPlayerTheme {
+            val theme by musicApp.themeSettings.state.collectAsStateWithLifecycle()
+            // The card in your colours, but without the moving background or
+            // wallpaper, which would fill the whole screen behind a small card.
+            MusicPlayerTheme(theme = theme.copy(backdrop = BackdropStyle.NONE, stars = false, wallpaper = 0L)) {
                 val state by viewModel.state.collectAsStateWithLifecycle()
 
                 ImportCard(
@@ -83,10 +90,14 @@ class ShareReceiverActivity : ComponentActivity() {
         }
     }
 
-    /** A second share while one is on screen should not stack another card. */
+    /**
+     * A second share while one is on screen should not stack another card, nor be
+     * lost: it joins the import already showing.
+     */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        viewModel.add(SharedUris.from(intent), SharedUris.sourceLabel(this), intent.type)
     }
 
     private fun openLibrary(alsoOpenPlayer: Boolean) {

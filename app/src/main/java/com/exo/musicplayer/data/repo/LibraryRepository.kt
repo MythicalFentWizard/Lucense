@@ -1,6 +1,7 @@
 package com.exo.musicplayer.data.repo
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.exo.musicplayer.data.db.MusicDatabase
 import com.exo.musicplayer.data.db.Playlist
 import com.exo.musicplayer.data.db.PlaylistSummary
@@ -73,6 +74,12 @@ class LibraryRepository(context: Context) {
     suspend fun allTracks(): List<Track> = trackDao.allOnce()
 
     suspend fun setFavorite(id: Long, favorite: Boolean) = trackDao.setFavorite(id, favorite)
+
+    /** Many at once, in one commit; in pieces, as SQLite takes at most 999 values in one IN (...). */
+    suspend fun setFavorite(ids: List<Long>, favorite: Boolean) {
+        if (ids.isEmpty()) return
+        db.withTransaction { ids.chunked(900).forEach { trackDao.setFavorite(it, favorite) } }
+    }
 
     suspend fun markPlayed(id: Long) = trackDao.markPlayed(id, System.currentTimeMillis())
 
@@ -196,14 +203,14 @@ class LibraryRepository(context: Context) {
      */
     suspend fun fillMissingGenres(limit: Int = 300): Int = withContext(Dispatchers.IO) {
         val pending = trackDao.allOnce().filter { it.genre == null }.take(limit)
-        var read = 0
-        pending.forEach { track ->
+        // Read every file first, then write them all in one go: one commit,
+        // and one refresh of the library on screen instead of one per song.
+        val filled = pending.map { track ->
             val file = File(track.filePath)
-            val genre = if (file.isFile) FileTags.of(file).genre.orEmpty() else ""
-            trackDao.update(track.copy(genre = genre))
-            read++
+            track.copy(genre = if (file.isFile) FileTags.of(file).genre.orEmpty() else "")
         }
-        read
+        db.withTransaction { filled.forEach { trackDao.update(it) } }
+        filled.size
     }
 
     /** Every genre in the library with how many songs carry it, commonest first. */
@@ -320,7 +327,7 @@ class LibraryRepository(context: Context) {
      */
     suspend fun pruneMissingFiles(): Int = withContext(Dispatchers.IO) {
         val missing = trackDao.allOnce().filterNot { File(it.filePath).exists() }
-        missing.forEach { trackDao.deleteById(it.id) }
+        if (missing.isNotEmpty()) db.withTransaction { missing.forEach { trackDao.deleteById(it.id) } }
         missing.size
     }
 
