@@ -62,6 +62,7 @@ import com.exo.musicplayer.desktop.audio.Volume
 import com.exo.musicplayer.desktop.download.DownloadProgress
 import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
+import com.exo.musicplayer.desktop.library.AudioKind
 import com.exo.musicplayer.desktop.library.FolderWatcher
 import com.exo.musicplayer.desktop.system.DiscordPresence
 import com.exo.musicplayer.desktop.system.FileAssociations
@@ -93,6 +94,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
@@ -2222,57 +2225,22 @@ class DesktopController(parent: CoroutineScope) {
                 skipped = skipped
             )
 
-            var done = 0
-            var updated = 0
-            var alreadyHad = 0
-            var failed = 0
-            val inFlight = mutableListOf<String>()
-            val work = Channel<DesktopTrack>(Channel.UNLIMITED)
-            queue.forEach { work.trySend(it) }
-            work.close()
-
-            // Lookups mostly wait on the network, so several songs go at once;
-            // identifying decodes audio, so it stays one at a time. Workers share
-            // the UI thread between suspensions, so the counters need no locking.
-            val workers = if (kind == BulkKind.IDENTIFY) 1 else SONGS_AT_ONCE
-            coroutineScope {
-                repeat(workers) {
-                    launch {
-                        for (track in work) {
-                            inFlight += track.title
-                            bulk = bulk.copy(current = inFlight.joinToString("  ·  "))
-                            val outcome = try {
-                                when (kind) {
-                                    BulkKind.COVERS -> bulkCover(track)
-                                    BulkKind.TAGS -> bulkTags(track, names, tags).asOutcome()
-                                    BulkKind.LYRICS -> bulkLyrics(track).asOutcome()
-                                    BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
-                                    BulkKind.REPAIR -> bulkRepair(track)
-                                    BulkKind.LEVELS -> bulkLevel(track)
-                                    BulkKind.FOLDERS -> bulkFolders(track).asOutcome()
-                                }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (failure: Exception) {
-                                BulkOutcome.NOTHING_FOUND
-                            }
-                            when (outcome) {
-                                BulkOutcome.UPDATED -> updated++
-                                BulkOutcome.ALREADY_HAD -> alreadyHad++
-                                BulkOutcome.NOTHING_FOUND -> failed++
-                            }
-                            if (column != null) io { store.mark(track.file.absolutePath, column) }
-                            done++
-                            inFlight -= track.title
-                            bulk = bulk.copy(
-                                done = done,
-                                updated = updated,
-                                alreadyHad = alreadyHad,
-                                failed = failed,
-                                current = inFlight.joinToString("  ·  ")
-                            )
-                        }
-                    }
+            // Identifying decodes audio, so it stays one at a time.
+            val (updated, alreadyHad, failed) = workThrough(
+                queue,
+                workers = if (kind == BulkKind.IDENTIFY) 1 else SONGS_AT_ONCE,
+                afterEach = { track ->
+                    if (column != null) io { store.mark(track.file.absolutePath, column) }
+                }
+            ) { track ->
+                when (kind) {
+                    BulkKind.COVERS -> bulkCover(track)
+                    BulkKind.TAGS -> bulkTags(track, names, tags).asOutcome()
+                    BulkKind.LYRICS -> bulkLyrics(track).asOutcome()
+                    BulkKind.IDENTIFY -> bulkIdentify(track).asOutcome()
+                    BulkKind.REPAIR -> bulkRepair(track)
+                    BulkKind.LEVELS -> bulkLevel(track)
+                    BulkKind.FOLDERS -> bulkFolders(track).asOutcome()
                 }
             }
 
@@ -2295,6 +2263,206 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
+    private data class Tally(val updated: Int, val alreadyHad: Int, val failed: Int)
+
+    /**
+     * Takes [queue] through [step] a few songs at a time, keeping [bulk] up to
+     * date as it goes.
+     *
+     * Lookups mostly wait on the network, so several songs go at once. Workers
+     * share the UI thread between suspensions, so the counters need no locking.
+     * A song that throws counts as nothing found rather than ending the run.
+     */
+    private suspend fun workThrough(
+        queue: List<DesktopTrack>,
+        workers: Int,
+        afterEach: suspend (DesktopTrack) -> Unit = {},
+        step: suspend (DesktopTrack) -> BulkOutcome
+    ): Tally {
+        var done = 0
+        var updated = 0
+        var alreadyHad = 0
+        var failed = 0
+        val inFlight = mutableListOf<String>()
+        val work = Channel<DesktopTrack>(Channel.UNLIMITED)
+        queue.forEach { work.trySend(it) }
+        work.close()
+
+        coroutineScope {
+            repeat(workers) {
+                launch {
+                    for (track in work) {
+                        inFlight += track.title
+                        bulk = bulk.copy(current = inFlight.joinToString("  ·  "))
+                        val outcome = try {
+                            step(track)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            BulkOutcome.NOTHING_FOUND
+                        }
+                        when (outcome) {
+                            BulkOutcome.UPDATED -> updated++
+                            BulkOutcome.ALREADY_HAD -> alreadyHad++
+                            BulkOutcome.NOTHING_FOUND -> failed++
+                        }
+                        afterEach(track)
+                        done++
+                        inFlight -= track.title
+                        bulk = bulk.copy(
+                            done = done,
+                            updated = updated,
+                            alreadyHad = alreadyHad,
+                            failed = failed,
+                            current = inFlight.joinToString("  ·  ")
+                        )
+                    }
+                }
+            }
+        }
+        return Tally(updated, alreadyHad, failed)
+    }
+
+    // ---- Fix: the songs picked out, the parts ticked -------------------------
+
+    /** The songs the Fix dialog is working on. */
+    var fixTargets by mutableStateOf<List<DesktopTrack>>(emptyList())
+        private set
+
+    fun fixSelection(visible: List<DesktopTrack>) {
+        fixTargets = selectedTracks(visible)
+    }
+
+    fun dismissFix() {
+        fixTargets = emptyList()
+    }
+
+    /** Fingerprinting decodes audio, so however many songs are being fixed, one is heard at a time. */
+    private val listening = Mutex()
+
+    /**
+     * Fetches whichever parts were ticked for [targets] and writes them back.
+     *
+     * Unlike the bulk tools this never skips a song for having been visited
+     * before: picking songs out by hand is the instruction to do them now.
+     */
+    fun runFix(targets: List<DesktopTrack>, tags: Boolean, genres: Boolean, lyrics: Boolean) {
+        if (bulk.running || targets.isEmpty() || !(tags || genres || lyrics)) return
+        bulkJob = scope.launch {
+            bulk = BulkJob(label = FIX_LABEL, running = true, total = targets.size)
+            var tagged = 0
+            var genred = 0
+            var lyricked = 0
+            var heard = 0
+            val (_, _, failed) = workThrough(targets, SONGS_AT_ONCE) { track ->
+                val fixed = fixOne(track, tags, genres, lyrics)
+                if (fixed.tags) tagged++
+                if (fixed.genre) genred++
+                if (fixed.lyrics) lyricked++
+                if (fixed.heard) heard++
+                if (fixed.tags || fixed.genre || fixed.lyrics) BulkOutcome.UPDATED else BulkOutcome.NOTHING_FOUND
+            }
+            val found = buildList {
+                if (tags) add("tags for $tagged")
+                if (genres) add("genres for $genred")
+                if (lyrics) add("lyrics for $lyricked")
+            }
+            bulk = bulk.copy(
+                running = false,
+                done = targets.size,
+                current = "",
+                finishedNote = buildString {
+                    append("Found ${found.joinToString(", ")} of ${targets.size}.")
+                    if (heard > 0) append(" $heard identified by listening.")
+                    if (failed > 0) append(" Nothing at all for $failed.")
+                }
+            )
+            bulkJob = null
+            if (tagged > 0 || genred > 0) rescan()
+        }
+    }
+
+    private class Fixed(val tags: Boolean, val genre: Boolean, val lyrics: Boolean, val heard: Boolean)
+
+    /**
+     * One song: who it is, then whichever parts were asked for.
+     *
+     * By name first when it has a name worth searching for - quick, and the
+     * stores know albums and genres. When it hasn't, or the name finds nothing,
+     * the song is identified by listening to it, and then looked up under the
+     * name that turned out to be its own for the album and genre.
+     */
+    private suspend fun fixOne(track: DesktopTrack, tags: Boolean, genres: Boolean, lyrics: Boolean): Fixed {
+        var details = if (nameWorthSearching(track)) {
+            libraryLookup.findDetails(track.artist, track.title, giveUpMs = TAGS_GIVE_UP_MS)
+        } else {
+            null
+        }
+        var match: MusicMatch? = null
+        if (details == null) {
+            match = listening.withLock { listenTo(track) }
+            if (match != null && (tags || genres)) {
+                details = libraryLookup.findDetails(match.artist, match.title, giveUpMs = TAGS_GIVE_UP_MS)
+            }
+        }
+        val title = details?.title ?: match?.title
+        val artist = details?.artist ?: match?.artist
+        val album = details?.album ?: match?.album
+        val year = details?.year ?: match?.releaseYear
+        val genre = details?.genre ?: match?.genre
+
+        val haveTags = tags && (title != null || artist != null || album != null || year != null)
+        val haveGenre = genres && genre != null
+        val written = (haveTags || haveGenre) && io {
+            // The writer leaves a null field alone, so an unticked part is
+            // simply a part it isn't offered.
+            TagWriter.write(
+                file = track.file,
+                title = title.takeIf { tags },
+                artist = artist.takeIf { tags },
+                album = album.takeIf { tags },
+                year = year.takeIf { tags },
+                genre = genre.takeIf { genres }
+            ).isSuccess
+        }
+        // Looked for under the song's real name whenever one was just found,
+        // whether or not that name was wanted in the file.
+        val gotLyrics = lyrics && bulkLyrics(
+            track.copy(title = title ?: track.title, artist = artist ?: track.artist)
+        )
+        return Fixed(
+            tags = haveTags && written,
+            genre = haveGenre && written,
+            lyrics = gotLyrics,
+            heard = match != null
+        )
+    }
+
+    /**
+     * Whether searching by the song's name stands a chance. An artist makes it
+     * worth a try. Without one, a title made of nothing but digits and the
+     * letters a to f is an id - `9239d7ef-aeb9-45d2-…` - which a search only
+     * ever matches by accident, and an accident written into the file is
+     * worse than nothing.
+     */
+    private fun nameWorthSearching(track: DesktopTrack): Boolean {
+        if (!track.artist.isNullOrBlank()) return true
+        val name = track.title.trim()
+        if (name.isEmpty()) return false
+        val digits = name.count { it.isDigit() }
+        val wordLetters = name.count { it.isLetter() && it.lowercaseChar() !in 'a'..'f' }
+        return wordLetters > 0 || digits < 4
+    }
+
+    /** The song identified from its own audio, as Identify by sound does it. */
+    private suspend fun listenTo(track: DesktopTrack): MusicMatch? {
+        // Through MediaAudio rather than the plain sampler, so m4a and video
+        // files in the library are covered too.
+        val outcome = MediaAudio.sample(track.file, track.durationMs)
+        val samples = (outcome as? SampleOutcome.Ok)?.samples ?: return null
+        return (shazam.recognize(samples) as? RecognitionResult.Found)?.matches?.firstOrNull()
+    }
+
     /**
      * Whether a file is one of the broken ones: no length, or an MP3 with no
      * Xing header, or an MP4 whose index sits after the audio, or nothing but a
@@ -2309,7 +2477,7 @@ class DesktopController(parent: CoroutineScope) {
     internal fun lacksHeader(file: File): Boolean = runCatching {
         val head = file.inputStream().use { stream -> ByteArray(16 * 1024).also { stream.read(it) } }
         val text = String(head, Charsets.ISO_8859_1)
-        when (file.extension.lowercase()) {
+        when (AudioKind.of(file)) {
             // Without one of these an MP3 carries no statement of its length.
             "mp3" -> !text.contains("Xing") && !text.contains("Info") && !text.contains("VBRI")
             // The index has to come before the audio, or nothing can seek until
@@ -2332,18 +2500,27 @@ class DesktopController(parent: CoroutineScope) {
     internal fun rebuildContainer(file: File): Boolean = runCatching {
         val ffmpeg = ToolPaths.ffmpeg
         if (!ffmpeg.isFile) return false
-        val mp3 = file.extension.equals("mp3", ignoreCase = true)
+        val kind = AudioKind.of(file)
+        val mp3 = kind == "mp3"
         val format = if (mp3) {
             listOf("-write_xing", "1", "-id3v2_version", "3")
         } else {
             listOf("-movflags", "+faststart")
+        }
+        // ffmpeg picks the container from the output's name, and a file named
+        // for the wrong format would be rewritten into a container its audio
+        // can't go in. So when the name is wrong, the right one is stated.
+        val muxer = if (kind == file.extension.lowercase()) {
+            emptyList()
+        } else {
+            listOf("-f", if (kind == "m4a") "ipod" else if (kind == "aif") "aiff" else kind)
         }
         val rewritten = File(file.parentFile, file.nameWithoutExtension + ".lucense-fix." + file.extension)
         val process = ProcessBuilder(
             listOf(
                 ffmpeg.absolutePath, "-hide_banner", "-loglevel", "error", "-y",
                 "-i", file.absolutePath, "-map", "0:a:0", "-c", "copy"
-            ) + format + rewritten.absolutePath
+            ) + format + muxer + rewritten.absolutePath
         ).redirectErrorStream(true).start()
         process.inputStream.use { it.readBytes() }
         val finished = process.waitFor(180, TimeUnit.SECONDS)
@@ -2470,12 +2647,7 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     private suspend fun bulkIdentify(track: DesktopTrack): Boolean {
-        // Through MediaAudio rather than the plain sampler, so a bulk run also
-        // covers m4a and video files sitting in the library.
-        val outcome = MediaAudio.sample(track.file, track.durationMs)
-        val samples = (outcome as? SampleOutcome.Ok)?.samples ?: return false
-        val result = shazam.recognize(samples)
-        val match = (result as? RecognitionResult.Found)?.matches?.firstOrNull() ?: return false
+        val match = listenTo(track) ?: return false
         if (writeTags) {
             io {
                 TagWriter.write(
@@ -3921,6 +4093,9 @@ enum class IdentifyMode(val label: String, val placeholder: String) {
 /** The four bulk tools, and the mark each one records so reruns can skip. */
 /** How many songs the cover and tag tools look up at once. */
 private const val SONGS_AT_ONCE = 5
+
+/** What the progress panel calls a Fix run. */
+const val FIX_LABEL = "Fix"
 
 /**
  * How long one song's tag lookup may take. Every track goes through the tag

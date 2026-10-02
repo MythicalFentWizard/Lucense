@@ -44,6 +44,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Cloud
@@ -314,6 +315,10 @@ fun DesktopApp(
 
         if (controller.editMany.isNotEmpty()) {
             EditTracksDialog(controller, controller.editMany) { controller.dismissEditMany() }
+        }
+
+        if (controller.fixTargets.isNotEmpty()) {
+            FixDialog(controller, controller.fixTargets) { controller.dismissFix() }
         }
 
         if (controller.showShortcuts) {
@@ -1597,6 +1602,10 @@ private fun SelectionBar(controller: DesktopController, visible: List<DesktopTra
             Spacer(Modifier.width(6.dp))
             GhostButton("Edit details", icon = Icons.Default.Edit) {
                 controller.editSelection(visible)
+            }
+            Spacer(Modifier.width(6.dp))
+            GhostButton("Fix", icon = Icons.Default.AutoFixHigh) {
+                controller.fixSelection(visible)
             }
             Spacer(Modifier.width(14.dp))
             GhostButton("Revert details", icon = Icons.Default.Undo) {

@@ -129,8 +129,16 @@ are skipped unless you tick *Redo*.
 | **Level volumes** | measures loudness so everything plays at the same level |
 | **Mass fix Telegram songs** | rebuilds files that came without a proper header, so they show their real length and seek properly — the audio itself is untouched |
 
+**Fix** does the same for just the songs you've selected. It asks which of
+tags, genres and lyrics to fetch. Each song is looked up by its name, and one
+whose name is only an id, like `9239d7ef-aeb9-…`, is identified by listening
+to it instead.
+
 You can also select a batch of songs and set their artist, album, year or genre
 all at once. **Duplicates** finds the same song stored twice.
+
+Files named for the wrong format, such as M4A audio saved as `.mp3`, are read
+by what's inside them, so their tags, length, edits and repairs all work.
 
 When a tool guesses wrong, *Revert to the file's own details* puts back what the
 file said before anything touched it.
