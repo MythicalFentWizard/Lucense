@@ -32,6 +32,18 @@ object AudioSampler {
         context: Context,
         uri: Uri,
         seconds: Int = ShazamSignature.WINDOW_SECONDS
+    ): FloatArray? = sampleMono(context, uri, seconds, ShazamSignature.SAMPLE_RATE)
+
+    /**
+     * [seconds] from the middle of the recording, mono, at [rate], padded to
+     * the full window. Asked for at the rate it will be used at, so it is
+     * resampled once rather than twice.
+     */
+    suspend fun sampleMono(
+        context: Context,
+        uri: Uri,
+        seconds: Int,
+        rate: Int
     ): FloatArray? = withContext(Dispatchers.IO) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -133,12 +145,12 @@ object AudioSampler {
             if (written == 0) return@withContext null
 
             val decoded = pcm.copyOf(written)
-            val resampled = Dsp.resample(decoded, sampleRate, ShazamSignature.SAMPLE_RATE)
+            val resampled = Dsp.resample(decoded, sampleRate, rate)
 
             // The reference pads short input rather than fingerprinting a stub,
             // and copyOf does both halves of that: it truncates a long window and
             // zero-pads a short one.
-            val target = seconds * ShazamSignature.SAMPLE_RATE
+            val target = seconds * rate
             resampled.copyOf(target)
         } catch (t: Throwable) {
             Log.w(TAG, "Sampling failed for $uri", t)

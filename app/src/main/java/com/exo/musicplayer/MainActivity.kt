@@ -80,6 +80,7 @@ import com.exo.musicplayer.ui.common.LibraryToolsSheet
 import com.exo.musicplayer.ui.common.LocalTrackActions
 import com.exo.musicplayer.ui.common.RateDialog
 import com.exo.musicplayer.ui.common.TrackActions
+import com.exo.musicplayer.ui.common.launchOrExplain
 import com.exo.musicplayer.ui.download.DownloadRequest
 import com.exo.musicplayer.ui.download.DownloadScreen
 import com.exo.musicplayer.ui.download.DownloadViewModel
@@ -106,6 +107,7 @@ import com.exo.musicplayer.ui.theme.MusicPlayerTheme
 import com.exo.musicplayer.ui.theme.ScreenBackdrop
 import com.exo.musicplayer.ui.theme.ThemeSettings
 import com.exo.musicplayer.ui.theme.ThemeState
+import com.exo.musicplayer.util.counted
 
 private enum class SettingsRoute { HOME, APPEARANCE, SOUND }
 
@@ -447,8 +449,8 @@ private fun AppScaffold(
                         onAlbumSortChange = viewModel::setAlbumSort,
                         onArtistSortChange = viewModel::setArtistSort,
                         onOpenGroup = viewModel::openGroup,
-                        onAddFiles = { audioImportLauncher.launch(AUDIO_MIME_TYPES) },
-                        onAddFolder = { folderImportLauncher.launch(null) },
+                        onAddFiles = { audioImportLauncher.launchOrExplain(AUDIO_MIME_TYPES, context) },
+                        onAddFolder = { folderImportLauncher.launchOrExplain(null, context) },
                         onOpenDownload = { showDownload = true },
                         onOpenTools = { showTools = true },
                         onOpenSettings = { settingsRoute = SettingsRoute.HOME },
@@ -526,16 +528,17 @@ private fun AppScaffold(
                                     export = { playlist ->
                                         viewModel.exportPlaylist(playlist) { name, text ->
                                             pendingText = text
-                                            textExportLauncher.launch("$name.txt")
+                                            textExportLauncher.launchOrExplain("$name.txt", context)
                                             true
                                         }
                                     },
                                     zip = { viewModel.zipPlaylist(it) },
-                                    import = { playlistImportLauncher.launch(arrayOf("text/*")) },
+                                    import = { playlistImportLauncher.launchOrExplain(arrayOf("text/*"), context) },
                                     setPrompt = viewModel::setGenrePrompt,
                                     playPrompt = viewModel::playPrompt,
                                     savePrompt = viewModel::savePromptAsPlaylist,
                                     keepAsRule = { name, rule -> viewModel.createSmartPlaylist(name, rule) },
+                                    countRule = viewModel::countRule,
                                     playSmart = { viewModel.playSmartPlaylist(it) },
                                     deleteSmart = { viewModel.deleteSmartPlaylist(it.id) }
                                 )
@@ -568,8 +571,8 @@ private fun AppScaffold(
                             onSearch = recognition::runSearch,
                             mode = rmode,
                             onModeChange = recognition::setMode,
-                            onPickVideo = { identifyVideoLauncher.launch(VIDEO_MIME_TYPES) },
-                            onPickAudio = { identifyAudioLauncher.launch(AUDIO_MIME_TYPES) },
+                            onPickVideo = { identifyVideoLauncher.launchOrExplain(VIDEO_MIME_TYPES, context) },
+                            onPickAudio = { identifyAudioLauncher.launchOrExplain(AUDIO_MIME_TYPES, context) },
                             onFindInLibrary = { match ->
                                 viewModel.setQuery(match.title)
                                 viewModel.setView(LibraryView.SONGS)
@@ -813,11 +816,11 @@ private fun AppScaffold(
                                     onBackUp = {
                                         viewModel.backUp { text ->
                                             pendingText = text
-                                            textExportLauncher.launch("Lucense backup ${java.time.LocalDate.now()}.txt")
+                                            textExportLauncher.launchOrExplain("Lucense backup ${java.time.LocalDate.now()}.txt", context)
                                             true
                                         }
                                     },
-                                    onRestore = { restoreLauncher.launch(arrayOf("text/*")) },
+                                    onRestore = { restoreLauncher.launchOrExplain(arrayOf("text/*"), context) },
                                     onCheckUpdate = viewModel::checkForUpdate,
                                     onOpenUpdate = { openUrl(context, it) }
                                 )
@@ -837,7 +840,7 @@ private fun AppScaffold(
                 text = {
                     Column {
                         Text(
-                            "${pending.matched.size} of ${pending.total} tracks are already " +
+                            "${pending.matched.size} of ${counted(pending.total, "track")} are already " +
                                 "on this device. Nothing is downloaded — the playlist just " +
                                 "links up what you have."
                         )

@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.ui.common.LineSlider
+import com.exo.musicplayer.ui.common.launchOrExplain
 import com.exo.musicplayer.ui.theme.AppPalette
 import com.exo.musicplayer.ui.theme.BackdropStyle
 import com.exo.musicplayer.ui.theme.ReactiveMode
@@ -73,6 +75,7 @@ fun AppearanceScreen(
     onLyricsInactive: (Int?) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let(onWallpaper)
     }
@@ -248,7 +251,7 @@ fun AppearanceScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { picker.launch("image/*") }) {
+                    Button(onClick = { picker.launchOrExplain("image/*", context) }) {
                         Text(if (theme.wallpaper == 0L) "Choose picture" else "Change picture")
                     }
                     if (theme.wallpaper != 0L) {

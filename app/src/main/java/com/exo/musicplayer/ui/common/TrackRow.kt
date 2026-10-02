@@ -241,7 +241,7 @@ fun TrackRow(
                 MenuItem("Revert to the file's own details", Icons.Default.Undo) { menuOpen = false; actions.revert(track) }
                 HorizontalDivider()
                 MenuItem("Share", Icons.Default.Share) { menuOpen = false; actions.share(track) }
-                MenuItem("Delete from library", Icons.Default.Delete) { menuOpen = false; actions.delete(track) }
+                MenuItem("Delete from library…", Icons.Default.Delete) { menuOpen = false; actions.delete(track) }
             }
         }
     }

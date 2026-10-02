@@ -82,6 +82,54 @@ object Dsp {
         val halfWidth = 16
         val out = FloatArray(outLength)
 
+        // Output sample i sits at input position i * fromRate / toRate, whose
+        // fractional part only ever takes toRate / gcd(fromRate, toRate)
+        // values. Working the filter's weights out once per value, instead of
+        // a sine and a cosine for every tap of every sample, is the difference
+        // between seconds and a fraction of one for half a minute of audio.
+        val divisor = gcd(fromRate, toRate)
+        val phases = toRate / divisor
+        if (phases <= MAX_PHASES) {
+            val step = (fromRate / divisor).toLong()
+            val taps = halfWidth * 2
+            val weights = DoubleArray(phases * taps)
+            val sums = DoubleArray(phases)
+            for (phase in 0 until phases) {
+                val fraction = phase.toDouble() / phases
+                var sum = 0.0
+                for (k in 0 until taps) {
+                    val x = fraction + (halfWidth - 1) - k
+                    val h = sinc(cutoff * x) * cutoff * hannTaper(x, halfWidth)
+                    weights[phase * taps + k] = h
+                    sum += h
+                }
+                sums[phase] = sum
+            }
+            for (i in 0 until outLength) {
+                val position = i * step
+                val phase = (position % phases).toInt()
+                val start = (position / phases).toInt() - halfWidth + 1
+                val base = phase * taps
+                var acc = 0.0
+                var norm: Double
+                if (start >= 0 && start + taps <= input.size) {
+                    for (k in 0 until taps) acc += input[start + k] * weights[base + k]
+                    norm = sums[phase]
+                } else {
+                    // At the edges only the taps that land inside the input count.
+                    norm = 0.0
+                    for (k in 0 until taps) {
+                        val index = start + k
+                        if (index < 0 || index >= input.size) continue
+                        acc += input[index] * weights[base + k]
+                        norm += weights[base + k]
+                    }
+                }
+                out[i] = if (norm != 0.0) (acc / norm).toFloat() else 0f
+            }
+            return out
+        }
+
         for (i in 0 until outLength) {
             val center = i / ratio
             val start = kotlin.math.floor(center).toInt() - halfWidth + 1
@@ -99,6 +147,11 @@ object Dsp {
         }
         return out
     }
+
+    /** Above this many distinct phases the table would outweigh the work it saves. */
+    private const val MAX_PHASES = 4096
+
+    private tailrec fun gcd(a: Int, b: Int): Int = if (b == 0) a else gcd(b, a % b)
 
     private fun sinc(x: Double): Double =
         if (kotlin.math.abs(x) < 1e-9) 1.0 else sin(PI * x) / (PI * x)

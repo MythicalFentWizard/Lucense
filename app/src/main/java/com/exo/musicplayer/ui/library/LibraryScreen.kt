@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,6 +74,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,10 +84,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.prefs.GroupSort
@@ -178,100 +183,110 @@ fun LibraryScreen(
         onQueryChange("")
     }
 
-    Column(modifier.fillMaxSize()) {
+    // The selection bar floats over the header, at the header's height, rather
+    // than taking its place: a taller bar pushed the whole list down the
+    // moment a song was long-pressed, so the next tap landed on another song.
+    var headerHeight by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+
+    Box(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            if (openGroup == null) Column(Modifier.onSizeChanged { headerHeight = it.height }) {
+                Header(
+                    onSearch = {
+                        searchOpen = !searchOpen
+                        if (!searchOpen) onQueryChange("")
+                        if (searchOpen && view != LibraryView.SONGS) onViewChange(LibraryView.SONGS)
+                    },
+                    searchOpen = searchOpen,
+                    onAddFiles = onAddFiles,
+                    onAddFolder = onAddFolder,
+                    onOpenDownload = onOpenDownload,
+                    onOpenTools = onOpenTools,
+                    onOpenSettings = onOpenSettings
+                )
+                if (!searchOpen) {
+                    SingleChoiceSegmentedButtonRow(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        LibraryView.entries.forEachIndexed { index, entry ->
+                            SegmentedButton(
+                                selected = view == entry,
+                                onClick = { onViewChange(entry) },
+                                shape = SegmentedButtonDefaults.itemShape(index, LibraryView.entries.size),
+                                label = { Text(entry.label) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (openGroup != null) {
+                GroupDetail(
+                    group = openGroup,
+                    isAlbum = view == LibraryView.ALBUMS,
+                    currentTrackId = currentTrackId,
+                    isPlaying = isPlaying,
+                    selectedIds = selectedIds,
+                    onBack = { onOpenGroup(null) },
+                    onPlayFrom = onPlayFrom,
+                    onShuffle = onShuffle,
+                    onToggleSelect = onToggleSelect
+                )
+                return@Column
+            }
+
+            when {
+                searchOpen || view == LibraryView.SONGS -> SongsView(
+                    tracks = tracks,
+                    shown = shown,
+                    searching = searching,
+                    searchOpen = searchOpen,
+                    query = query,
+                    recentSearches = recentSearches,
+                    sort = sort,
+                    currentTrackId = currentTrackId,
+                    isPlaying = isPlaying,
+                    selectedIds = selectedIds,
+                    onQueryChange = onQueryChange,
+                    onRememberSearch = onRememberSearch,
+                    onForgetSearches = onForgetSearches,
+                    onSortChange = onSortChange,
+                    onPlayFrom = onPlayFrom,
+                    onShuffle = onShuffle,
+                    onToggleSelect = onToggleSelect
+                )
+
+                view == LibraryView.ALBUMS -> GroupGrid(
+                    groups = albums,
+                    isAlbum = true,
+                    sort = albumSort,
+                    onSortChange = onAlbumSortChange,
+                    onOpen = { onOpenGroup(it.key) },
+                    emptyNote = "No albums yet. Songs with an album in their details gather here."
+                )
+
+                else -> GroupGrid(
+                    groups = artists,
+                    isAlbum = false,
+                    sort = artistSort,
+                    onSortChange = onArtistSortChange,
+                    onOpen = { onOpenGroup(it.key) },
+                    emptyNote = "No artists yet. Songs with an artist in their details gather here."
+                )
+            }
+        }
         if (selecting) {
             SelectionBar(
                 count = selectedIds.size,
                 total = (openGroup?.tracks ?: shown).size,
                 onClear = onClearSelection,
                 onSelectAll = { onSelectAll(openGroup?.tracks ?: shown) },
-                actions = selection
-            )
-        } else if (openGroup == null) {
-            Header(
-                onSearch = {
-                    searchOpen = !searchOpen
-                    if (!searchOpen) onQueryChange("")
-                    if (searchOpen && view != LibraryView.SONGS) onViewChange(LibraryView.SONGS)
-                },
-                searchOpen = searchOpen,
-                onAddFiles = onAddFiles,
-                onAddFolder = onAddFolder,
-                onOpenDownload = onOpenDownload,
-                onOpenTools = onOpenTools,
-                onOpenSettings = onOpenSettings
-            )
-        }
-
-        if (openGroup != null) {
-            GroupDetail(
-                group = openGroup,
-                isAlbum = view == LibraryView.ALBUMS,
-                currentTrackId = currentTrackId,
-                isPlaying = isPlaying,
-                selectedIds = selectedIds,
-                onBack = { onOpenGroup(null) },
-                onPlayFrom = onPlayFrom,
-                onShuffle = onShuffle,
-                onToggleSelect = onToggleSelect
-            )
-            return@Column
-        }
-
-        if (!searchOpen) {
-            SingleChoiceSegmentedButtonRow(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                LibraryView.entries.forEachIndexed { index, entry ->
-                    SegmentedButton(
-                        selected = view == entry,
-                        onClick = { onViewChange(entry) },
-                        shape = SegmentedButtonDefaults.itemShape(index, LibraryView.entries.size),
-                        label = { Text(entry.label) }
-                    )
-                }
-            }
-        }
-
-        when {
-            searchOpen || view == LibraryView.SONGS -> SongsView(
-                tracks = tracks,
-                shown = shown,
-                searching = searching,
-                searchOpen = searchOpen,
-                query = query,
-                recentSearches = recentSearches,
-                sort = sort,
-                currentTrackId = currentTrackId,
-                isPlaying = isPlaying,
-                selectedIds = selectedIds,
-                onQueryChange = onQueryChange,
-                onRememberSearch = onRememberSearch,
-                onForgetSearches = onForgetSearches,
-                onSortChange = onSortChange,
-                onPlayFrom = onPlayFrom,
-                onShuffle = onShuffle,
-                onToggleSelect = onToggleSelect
-            )
-
-            view == LibraryView.ALBUMS -> GroupGrid(
-                groups = albums,
-                isAlbum = true,
-                sort = albumSort,
-                onSortChange = onAlbumSortChange,
-                onOpen = { onOpenGroup(it.key) },
-                emptyNote = "No albums yet. Songs with an album in their details gather here."
-            )
-
-            else -> GroupGrid(
-                groups = artists,
-                isAlbum = false,
-                sort = artistSort,
-                onSortChange = onArtistSortChange,
-                onOpen = { onOpenGroup(it.key) },
-                emptyNote = "No artists yet. Songs with an artist in their details gather here."
+                actions = selection,
+                minHeight = with(density) { (if (openGroup == null) headerHeight else 0).toDp() },
+                modifier = Modifier.align(Alignment.TopCenter)
             )
         }
     }
@@ -742,15 +757,22 @@ private fun SelectionBar(
     total: Int,
     onClear: () -> Unit,
     onSelectAll: () -> Unit,
-    actions: SelectionActions
+    actions: SelectionActions,
+    minHeight: Dp,
+    modifier: Modifier = Modifier
 ) {
     var more by remember { mutableStateOf(false) }
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(vertical = 4.dp)) {
+        Column(
+            Modifier
+                .heightIn(min = minHeight)
+                .padding(vertical = 4.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
             Row(
                 Modifier.padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically

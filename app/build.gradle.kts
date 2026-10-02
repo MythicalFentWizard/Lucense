@@ -32,6 +32,7 @@ android {
         targetSdk = 35
         versionCode = lucenseVersionCode
         versionName = lucenseVersion
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // yt-dlp ships a Python runtime and ffmpeg as native libraries. Building
         // every ABI would roughly triple the APK; arm64 covers every Android
@@ -54,6 +55,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Every APK published so far was a debug build, signed with the debug
+            // key of the machine that builds releases. Android only installs an
+            // update signed by the same key, so the release build is signed with
+            // it too. What changes is the build itself: shrunk by R8, not
+            // debuggable, and carrying the AndroidX baseline profiles, so Compose
+            // is compiled ahead of time instead of interpreted on a debug runtime.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -111,4 +119,7 @@ dependencies {
 
     implementation(libs.ytdlp.library)
     implementation(libs.ytdlp.ffmpeg)
+
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

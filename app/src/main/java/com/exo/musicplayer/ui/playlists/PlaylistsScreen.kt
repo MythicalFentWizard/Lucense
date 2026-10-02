@@ -58,6 +58,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,6 +75,8 @@ import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.ui.common.ArtworkLarge
 import com.exo.musicplayer.ui.common.TrackRow
 import com.exo.musicplayer.util.asDuration
+import com.exo.musicplayer.util.counted
+import kotlinx.coroutines.delay
 
 /** Everything the Playlists page can do, gathered so the page isn't handed twenty lambdas loose. */
 class PlaylistActions(
@@ -91,6 +94,8 @@ class PlaylistActions(
     val playPrompt: () -> Unit,
     val savePrompt: () -> Unit,
     val keepAsRule: (name: String, rule: String) -> Unit,
+    /** How many songs a rule picks out, for the count shown while one is typed. */
+    val countRule: suspend (rule: String) -> Int,
     val playSmart: (SmartPlaylist) -> Unit,
     val deleteSmart: (SmartPlaylist) -> Unit
 )
@@ -119,6 +124,19 @@ fun PlaylistsScreen(
 ) {
     var creating by remember { mutableStateOf(false) }
     var newRule by remember { mutableStateOf(false) }
+    var smartToDelete by remember { mutableStateOf<SmartPlaylist?>(null) }
+
+    smartToDelete?.let { list ->
+        AlertDialog(
+            onDismissRequest = { smartToDelete = null },
+            title = { Text("Delete \"${list.name}\"?") },
+            text = { Text("The rule goes; the songs it found stay in your library.") },
+            confirmButton = {
+                TextButton(onClick = { actions.deleteSmart(list); smartToDelete = null }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { smartToDelete = null }) { Text("Cancel") } }
+        )
+    }
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
@@ -217,7 +235,7 @@ fun PlaylistsScreen(
                 Column(Modifier.weight(1f)) {
                     Text(list.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "${list.rule}  ·  ${smartCounts[list.id] ?: 0} songs",
+                        (smartCounts[list.id] ?: 0).let { n -> "${list.rule}  ·  $n ${if (n == 1) "song" else "songs"}" },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -225,7 +243,7 @@ fun PlaylistsScreen(
                     )
                 }
                 IconButton(onClick = { actions.playSmart(list) }) { Icon(Icons.Default.PlayArrow, "Play ${list.name}") }
-                IconButton(onClick = { actions.deleteSmart(list) }) {
+                IconButton(onClick = { smartToDelete = list }) {
                     Icon(Icons.Default.Delete, "Delete ${list.name}", Modifier.size(18.dp))
                 }
             }
@@ -306,10 +324,19 @@ fun PlaylistsScreen(
                         placeholder = { Text("rating:4+ year:2015-2020") },
                         singleLine = true
                     )
+                    // Counted as it's typed, as on Windows, so a rule that
+                    // matches nothing is caught before it's kept.
+                    val matching by produceState<Int?>(null, rule) {
+                        value = if (rule.isBlank()) null else {
+                            delay(250)
+                            actions.countRule(rule)
+                        }
+                    }
                     Text(
-                        "artist:  album:  genre:  fav:  unplayed:  rating:4+  year:2020+  plays:10+  added:30d",
+                        matching?.let { if (it == 0) "No songs match yet" else "${counted(it, "song")} match" }
+                            ?: "artist:  album:  genre:  fav:  unplayed:  rating:4+  year:2020+  plays:10+  added:30d",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (matching != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },

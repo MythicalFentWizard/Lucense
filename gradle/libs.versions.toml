@@ -50,6 +50,8 @@ jflac = { group = "org.jflac", name = "jflac-codec", version.ref = "jflac" }
 jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 jna-platform = { group = "net.java.dev.jna", name = "jna-platform", version.ref = "jna" }
 ytdlp-library = { group = "io.github.junkfood02.youtubedl-android", name = "library", version.ref = "ytdlp" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.6.2" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version = "1.2.1" }
 ytdlp-ffmpeg = { group = "io.github.junkfood02.youtubedl-android", name = "ffmpeg", version.ref = "ytdlp" }
 
 [plugins]

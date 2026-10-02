@@ -130,15 +130,30 @@ class YtDlpDownloader(private val context: Context) {
         val message = raw.orEmpty()
         return when {
             message.contains("Sign in to confirm", true) ||
-                message.contains("bot", true) ->
+                message.contains("not a bot", true) ->
                 "YouTube asked for sign-in verification. Try again later, or update " +
                     "yt-dlp — this usually means the bundled version is stale."
             message.contains("Video unavailable", true) ->
                 "That video is unavailable, private, or region blocked."
             message.contains("Unsupported URL", true) ->
                 "That link isn't supported."
+            NETWORK_TROUBLE.any { message.contains(it, true) } ->
+                "Couldn't reach the site. Check your connection; if YouTube is " +
+                    "blocked where you are, downloads need a VPN."
+            message.contains("HTTP Error 403", true) ->
+                "The site refused the download. Updating yt-dlp usually fixes this."
             message.isBlank() -> "Download failed."
-            else -> message.lines().firstOrNull { it.contains("ERROR", true) } ?: message.take(300)
+            // yt-dlp's own verdict is the line that starts with ERROR. Warnings
+            // come first and can mention errors too ("TransportError"), so a
+            // line merely containing the word isn't enough.
+            else -> message.lines()
+                .firstOrNull { it.trimStart().startsWith("ERROR:") }
+                ?.substringAfter("ERROR:")
+                ?.replace(Regex("""^\s*\[[^\]]+]\s*([\w-]+:\s*)?"""), "")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: message.lines().lastOrNull { it.isNotBlank() }?.take(300)
+                ?: "Download failed."
         }
     }
 
@@ -148,6 +163,12 @@ class YtDlpDownloader(private val context: Context) {
     }.getOrDefault(false)
 
     private companion object {
+        /** How a connection that never got through reads in yt-dlp's output. */
+        val NETWORK_TROUBLE = listOf(
+            "Connection refused", "timed out", "Network is unreachable",
+            "Temporary failure in name resolution", "Failed to resolve",
+            "getaddrinfo failed", "Connection reset", "No route to host"
+        )
         const val TAG = "YtDlpDownloader"
     }
 }

@@ -2,6 +2,7 @@ package com.exo.musicplayer
 
 import android.app.Application
 import android.content.Context
+import android.os.StrictMode
 import androidx.media3.common.util.UnstableApi
 import com.exo.musicplayer.data.prefs.AppPrefs
 import com.exo.musicplayer.playback.PlayerHost
@@ -80,6 +81,17 @@ class MusicApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Development builds name any disk or network work done on the main
+        // thread, and anything leaked, in the log. Releases don't carry this.
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().detectNetwork().penaltyLog().build()
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder().detectLeakedClosableObjects().detectLeakedSqlLiteObjects()
+                    .detectActivityLeaks().penaltyLog().build()
+            )
+        }
         // Bound straight away, so the service is up - and has put back what
         // was playing last time - before anything on screen asks for it.
         playback.connect()

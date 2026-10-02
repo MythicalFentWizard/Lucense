@@ -1,10 +1,12 @@
 package com.exo.musicplayer.data.library
 
+import androidx.room.withTransaction
 import com.exo.musicplayer.data.db.MusicDatabase
 import com.exo.musicplayer.data.db.PlayEvent
 import com.exo.musicplayer.data.db.Playlist
 import com.exo.musicplayer.data.db.SmartPlaylist
 import com.exo.musicplayer.data.db.Track
+import com.exo.musicplayer.util.counted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -30,13 +32,11 @@ class PhoneBackup(private val db: MusicDatabase) {
     data class Outcome(val favourites: Int, val ratings: Int, val playlists: Int, val plays: Int, val missing: Int) {
         val summary: String
             get() = buildString {
-                append(listOf(count(favourites, "favourite"), count(ratings, "rating"), count(playlists, "playlist"), count(plays, "play")).joinToString(", "))
+                append(listOf(counted(favourites, "favourite"), counted(ratings, "rating"), counted(playlists, "playlist"), counted(plays, "play")).joinToString(", "))
                 if (missing > 0) {
                     append(if (missing == 1) " · 1 song isn't on this phone" else " · $missing songs aren't on this phone")
                 }
             }
-
-        private fun count(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
     }
 
     suspend fun write(): String = withContext(Dispatchers.IO) {
@@ -98,64 +98,69 @@ class PhoneBackup(private val db: MusicDatabase) {
             openTracks.clear()
         }
 
-        for (line in lines.drop(1)) {
-            val parts = line.split('\t')
-            fun song(index: Int): Track? = parts.getOrNull(index)?.toIntOrNull()?.let { songs[it] }
-            when (parts.firstOrNull()) {
-                "song" -> {
-                    val key = parts.getOrNull(1)?.toIntOrNull() ?: continue
-                    val found = byHash[parts.getOrNull(2)]
-                        ?: byName[nameKey(parts.getOrNull(3), parts.getOrNull(4).orEmpty())]?.firstOrNull()
-                    if (found == null) missing++
-                    songs[key] = found
-                }
-                "fav" -> song(1)?.let {
-                    if (!it.isFavorite) {
-                        db.trackDao().setFavorite(it.id, true)
-                        favourites++
+        // One transaction for the lot: a long listening history is thousands of
+        // writes, and one at a time each was its own commit, with the library
+        // on screen re-read after every one.
+        db.withTransaction {
+            for (line in lines.drop(1)) {
+                val parts = line.split('\t')
+                fun song(index: Int): Track? = parts.getOrNull(index)?.toIntOrNull()?.let { songs[it] }
+                when (parts.firstOrNull()) {
+                    "song" -> {
+                        val key = parts.getOrNull(1)?.toIntOrNull() ?: continue
+                        val found = byHash[parts.getOrNull(2)]
+                            ?: byName[nameKey(parts.getOrNull(3), parts.getOrNull(4).orEmpty())]?.firstOrNull()
+                        if (found == null) missing++
+                        songs[key] = found
                     }
-                }
-                "rate" -> {
-                    val track = song(1) ?: continue
-                    val stars = parts.getOrNull(2)?.toIntOrNull() ?: continue
-                    if (track.rating == 0 && stars in 1..5) {
-                        db.trackDao().setRating(track.id, stars)
-                        ratings++
+                    "fav" -> song(1)?.let {
+                        if (!it.isFavorite) {
+                            db.trackDao().setFavorite(it.id, true)
+                            favourites++
+                        }
                     }
-                }
-                "play" -> {
-                    val track = song(1) ?: continue
-                    val count = parts.getOrNull(2)?.toIntOrNull() ?: continue
-                    val listenedMs = parts.getOrNull(3)?.toLongOrNull() ?: 0L
-                    val owed = count - track.playCount
-                    if (owed <= 0) continue
-                    // Stamped now: the original times aren't in the file, so
-                    // the by-hour chart can't be rebuilt, as on Windows.
-                    val now = System.currentTimeMillis()
-                    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-                    val each = if (count > 0) listenedMs / count else 0L
-                    repeat(owed) {
-                        db.playEventDao().insert(
-                            PlayEvent(trackId = track.id, startedAt = now, listenedMs = each, hourOfDay = hour)
-                        )
-                        db.trackDao().markPlayed(track.id, now)
-                        plays++
+                    "rate" -> {
+                        val track = song(1) ?: continue
+                        val stars = parts.getOrNull(2)?.toIntOrNull() ?: continue
+                        if (track.rating == 0 && stars in 1..5) {
+                            db.trackDao().setRating(track.id, stars)
+                            ratings++
+                        }
                     }
-                }
-                "playlist" -> {
-                    closeList()
-                    openList = parts.getOrNull(1)
-                }
-                "track" -> song(1)?.let { openTracks += it.id }
-                "smart" -> {
-                    closeList()
-                    val name = parts.getOrNull(1) ?: continue
-                    val rule = parts.getOrNull(2) ?: continue
-                    if (name !in existingSmart) db.smartPlaylistDao().insert(SmartPlaylist(name = name, rule = rule))
+                    "play" -> {
+                        val track = song(1) ?: continue
+                        val count = parts.getOrNull(2)?.toIntOrNull() ?: continue
+                        val listenedMs = parts.getOrNull(3)?.toLongOrNull() ?: 0L
+                        val owed = count - track.playCount
+                        if (owed <= 0) continue
+                        // Stamped now: the original times aren't in the file, so
+                        // the by-hour chart can't be rebuilt, as on Windows.
+                        val now = System.currentTimeMillis()
+                        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                        val each = if (count > 0) listenedMs / count else 0L
+                        repeat(owed) {
+                            db.playEventDao().insert(
+                                PlayEvent(trackId = track.id, startedAt = now, listenedMs = each, hourOfDay = hour)
+                            )
+                            db.trackDao().markPlayed(track.id, now)
+                            plays++
+                        }
+                    }
+                    "playlist" -> {
+                        closeList()
+                        openList = parts.getOrNull(1)
+                    }
+                    "track" -> song(1)?.let { openTracks += it.id }
+                    "smart" -> {
+                        closeList()
+                        val name = parts.getOrNull(1) ?: continue
+                        val rule = parts.getOrNull(2) ?: continue
+                        if (name !in existingSmart) db.smartPlaylistDao().insert(SmartPlaylist(name = name, rule = rule))
+                    }
                 }
             }
+            closeList()
         }
-        closeList()
         Outcome(favourites, ratings, playlists, plays, missing)
     }
 

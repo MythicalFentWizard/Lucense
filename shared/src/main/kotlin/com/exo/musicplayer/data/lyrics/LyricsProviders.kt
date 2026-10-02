@@ -73,7 +73,7 @@ class LyricsProviderChain(
             val result = runCatching { provider.fetch(title, artist, album, durationMs) }
                 .getOrElse { LyricsFetch.NotFound }
             when (result) {
-                is LyricsFetch.Found -> return result to provider.label
+                is LyricsFetch.Found -> return result.tidied() to provider.label
                 is LyricsFetch.Instrumental -> sawInstrumental = true
                 else -> Unit
             }
@@ -81,6 +81,33 @@ class LyricsProviderChain(
         return (if (sawInstrumental) LyricsFetch.Instrumental else LyricsFetch.NotFound) to null
     }
 }
+
+/**
+ * Lyrics copied from Genius's pages come with the page around them: a
+ * "12 ContributorsSong Title Lyrics" header glued to the first line, sometimes
+ * a "…Read More" blurb, "You might also like" in the middle, and "Embed" at
+ * the end. Several services carry them verbatim, so they are taken off here,
+ * whichever one answered. Timed lyrics never have them and are left alone.
+ */
+private fun LyricsFetch.Found.tidied(): LyricsFetch.Found {
+    val tidy = tidyLyrics(plain ?: return this)
+    return if (tidy.isEmpty()) this else copy(plain = tidy)
+}
+
+/** [text] without Genius's page furniture; also applied to lyrics saved before this existed. */
+fun tidyLyrics(text: String): String =
+    text
+        .replaceFirst(GENIUS_HEADER, "")
+        .replaceFirst(GENIUS_BLURB, "")
+        .replace(GENIUS_ALSO_LIKE, "\n")
+        .replaceFirst(GENIUS_EMBED, "")
+        .trim()
+        .ifEmpty { text }
+
+private val GENIUS_HEADER = Regex("""^\s*\d+\s+Contributors?[^\n]*? Lyrics""")
+private val GENIUS_BLURB = Regex("""^[^\n]*Read More\s*\n""")
+private val GENIUS_ALSO_LIKE = Regex("""\s*You might also like\s*""")
+private val GENIUS_EMBED = Regex("""\d*\s*Embed\s*$""")
 
 /** Primary: free, no key, and the best source of synced LRC. */
 class LrcLibProvider(private val client: LrcLibClient = LrcLibClient()) : LyricsProvider {

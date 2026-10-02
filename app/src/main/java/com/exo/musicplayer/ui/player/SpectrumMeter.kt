@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,7 +24,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.exo.musicplayer.playback.Spectrum
+import com.exo.musicplayer.ui.theme.SpectrumWhileVisible
 import kotlinx.coroutines.delay
 
 /**
@@ -50,23 +53,23 @@ fun SpectrumMeter(playing: Boolean, modifier: Modifier = Modifier) {
     val analyser = Spectrum.analyser
     var levels by remember { mutableStateOf(FloatArray(analyser.bands())) }
 
-    DisposableEffect(analyser) {
-        analyser.enabled = true
-        onDispose { analyser.enabled = false }
-    }
+    SpectrumWhileVisible()
 
     val live by rememberUpdatedState(playing)
-    LaunchedEffect(analyser) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(analyser, lifecycle) {
         val buffer = FloatArray(analyser.bands())
-        while (true) {
-            levels = if (live) {
-                analyser.snapshot(buffer).copyOf()
-            } else {
-                // Paused, the sink stops sending audio and the analyser keeps
-                // its last reading; let the bars settle instead of freezing.
-                FloatArray(levels.size) { levels[it] * 0.7f }
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                levels = if (live) {
+                    analyser.snapshot(buffer).copyOf()
+                } else {
+                    // Paused, the sink stops sending audio and the analyser keeps
+                    // its last reading; let the bars settle instead of freezing.
+                    FloatArray(levels.size) { levels[it] * 0.7f }
+                }
+                delay(60)
             }
-            delay(60)
         }
     }
 

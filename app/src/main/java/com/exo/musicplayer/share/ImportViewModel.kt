@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.ingest.ImportResult
 import com.exo.musicplayer.musicApp
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,31 +36,42 @@ class ImportViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow(ImportUiState())
     val state: StateFlow<ImportUiState> = _state.asStateFlow()
 
-    private var started = false
+    private class Waiting(val uri: Uri, val sourceApp: String?, val mimeHint: String?)
+
+    private val waiting = ArrayDeque<Waiting>()
+    private var worker: Job? = null
 
     /**
      * Copies each URI in turn. Runs on the ViewModel scope so a rotation mid-import
      * doesn't restart it, but it must finish while the Activity is alive: the read
      * grant the sharing app gave us dies with this task.
+     *
+     * A share that arrives while the card is still up joins this one rather than
+     * being dropped: the card is single-top, so a second share from Telegram lands
+     * here instead of opening a new card. Once the card says it's done, the next
+     * share starts a fresh count, so the summary is about that share alone.
      */
-    fun start(uris: List<Uri>, sourceApp: String?, mimeHint: String? = null) {
-        if (started) return
-        started = true
+    fun add(uris: List<Uri>, sourceApp: String?, mimeHint: String? = null) {
+        if (uris.isEmpty()) return
+        if (_state.value.finished) _state.value = ImportUiState()
+        _state.update { it.copy(total = it.total + uris.size) }
+        uris.forEach { waiting.addLast(Waiting(it, sourceApp, mimeHint)) }
+        if (worker?.isActive != true) worker = viewModelScope.launch { drain() }
+    }
 
-        _state.value = ImportUiState(total = uris.size)
-        viewModelScope.launch {
-            val importer = getApplication<Application>().musicApp.importer
-            for (uri in uris) {
-                val result = importer.import(uri, sourceApp, mimeHint)
-                _state.update {
-                    it.copy(
-                        completed = it.completed + 1,
-                        currentName = result.displayName,
-                        results = it.results + result
-                    )
-                }
+    private suspend fun drain() {
+        val importer = getApplication<Application>().musicApp.importer
+        while (true) {
+            val next = waiting.removeFirstOrNull() ?: break
+            val result = importer.import(next.uri, next.sourceApp, next.mimeHint)
+            _state.update {
+                it.copy(
+                    completed = it.completed + 1,
+                    currentName = result.displayName,
+                    results = it.results + result
+                )
             }
-            _state.update { it.copy(finished = true, currentName = null) }
         }
+        _state.update { it.copy(finished = true, currentName = null) }
     }
 }

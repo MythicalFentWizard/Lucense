@@ -40,6 +40,7 @@ import com.exo.musicplayer.data.weather.Affinity
 import com.exo.musicplayer.data.weather.WeatherSnapshot
 import com.exo.musicplayer.ui.MoodState
 import com.exo.musicplayer.ui.common.TrackRow
+import com.exo.musicplayer.util.counted
 import kotlin.math.roundToInt
 
 @Composable
@@ -153,7 +154,7 @@ fun MoodsScreen(
                     }
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        "${state.tracks.size} songs you play more when it's " +
+                        "${counted(state.tracks.size, "song")} you play more when it's " +
                             state.weather.condition.label.lowercase(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -186,7 +187,7 @@ fun MoodsScreen(
 private fun AffinityNote(affinity: Affinity, weather: WeatherSnapshot) {
     val percent = ((affinity.lift - 1.0) * 100).roundToInt()
     Text(
-        text = "${affinity.playsInCondition} of ${affinity.totalPlays} plays in " +
+        text = "${affinity.playsInCondition} of ${counted(affinity.totalPlays, "play")} in " +
             "${weather.condition.label.lowercase()} · ${percent}% above your average",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.primary,
