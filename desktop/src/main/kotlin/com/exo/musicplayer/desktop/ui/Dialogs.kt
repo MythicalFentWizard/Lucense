@@ -49,9 +49,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.desktop.data.BulkJob
 import com.exo.musicplayer.desktop.data.BulkKind
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.DesktopDuplicateGroup
+import com.exo.musicplayer.desktop.data.FIX_LABEL
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import com.exo.musicplayer.util.asDuration
 import java.util.Locale
@@ -248,53 +250,136 @@ fun BulkToolsDialog(controller: DesktopController, onDismiss: () -> Unit) {
 
         if (job.running || job.finishedNote != null) {
             Spacer(Modifier.height(18.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Palette.Content)
-                    .padding(14.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (job.running) {
-                                "${job.label} — ${job.done} of ${job.total}"
-                            } else {
-                                "${job.label} finished"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Palette.Text,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (job.running) GhostButton("Stop") { controller.cancelBulk() }
-                    }
-                    Spacer(Modifier.height(9.dp))
+            JobProgress(controller, job)
+        }
+    }
+}
+
+/** How far a bulk tool or a Fix has got, with Stop while it runs. */
+@Composable
+private fun JobProgress(controller: DesktopController, job: BulkJob) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Palette.Content)
+            .padding(14.dp)
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
                     if (job.running) {
-                        ThinProgress(job.progress)
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            job.current,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Palette.TextFaint,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    job.finishedNote?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Palette.Accent
-                        )
-                    }
-                    if (job.running && job.skipped > 0) {
-                        Text(
-                            "${job.skipped} skipped as already done",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Palette.TextFaint
-                        )
-                    }
+                        "${job.label} — ${job.done} of ${job.total}"
+                    } else {
+                        "${job.label} finished"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Palette.Text,
+                    modifier = Modifier.weight(1f)
+                )
+                if (job.running) GhostButton("Stop") { controller.cancelBulk() }
+            }
+            Spacer(Modifier.height(9.dp))
+            if (job.running) {
+                ThinProgress(job.progress)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    job.current,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.TextFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            job.finishedNote?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.Accent
+                )
+            }
+            if (job.running && job.skipped > 0) {
+                Text(
+                    "${job.skipped} skipped as already done",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.TextFaint
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Fix, for the songs picked out in the list: which parts to go and get.
+ *
+ * A song with no name worth searching for - nothing but a file name like
+ * `9239d7ef-aeb9-…` - is identified by listening to it, so this works on
+ * exactly the songs a by-name search can do nothing with.
+ */
+@Composable
+fun FixDialog(controller: DesktopController, targets: List<DesktopTrack>, onDismiss: () -> Unit) {
+    var tags by remember { mutableStateOf(true) }
+    var genres by remember { mutableStateOf(true) }
+    var lyrics by remember { mutableStateOf(true) }
+    var started by remember { mutableStateOf(false) }
+    val job = controller.bulk
+    val mine = started && job.label == FIX_LABEL
+    val elsewhere = job.running && !mine
+
+    ScrimDialog(
+        title = "Fix",
+        subtitle = if (targets.size == 1) targets.first().title else "${targets.size} songs selected",
+        onDismiss = onDismiss
+    ) {
+        CheckRow(
+            label = "Tags",
+            checked = tags,
+            enabled = !job.running,
+            note = "Title, artist, album and year"
+        ) { tags = it }
+        Spacer(Modifier.height(14.dp))
+        CheckRow(
+            label = "Genres",
+            checked = genres,
+            enabled = !job.running,
+            note = "Written into the file alongside the rest"
+        ) { genres = it }
+        Spacer(Modifier.height(14.dp))
+        CheckRow(
+            label = "Lyrics",
+            checked = lyrics,
+            enabled = !job.running,
+            note = "Four services in turn, timed where they exist"
+        ) { lyrics = it }
+        Spacer(Modifier.height(16.dp))
+        Hint(
+            "Each song is looked up by its name. One whose name is only a file name " +
+                "like 9239d7ef-aeb9-… is identified by listening to it instead."
+        )
+        if (mine && (job.running || job.finishedNote != null)) {
+            Spacer(Modifier.height(18.dp))
+            JobProgress(controller, job)
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    elsewhere -> "${job.label} is running. It has to finish first."
+                    !tags && !genres && !lyrics -> "Pick at least one of them."
+                    else -> ""
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextFaint,
+                modifier = Modifier.weight(1f)
+            )
+            if (mine && !job.running) {
+                AccentButton("Close", onClick = onDismiss)
+            } else {
+                GhostButton("Cancel", onClick = onDismiss)
+                Spacer(Modifier.width(8.dp))
+                AccentButton("Run", enabled = !job.running && (tags || genres || lyrics)) {
+                    started = true
+                    controller.runFix(targets, tags, genres, lyrics)
                 }
             }
         }

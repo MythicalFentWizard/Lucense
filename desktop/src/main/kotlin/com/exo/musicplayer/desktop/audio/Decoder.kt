@@ -1,6 +1,7 @@
 package com.exo.musicplayer.desktop.audio
 
 import com.exo.musicplayer.desktop.data.ToolPaths
+import com.exo.musicplayer.desktop.library.AudioKind
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.InputStream
@@ -56,7 +57,9 @@ interface Decoder : AutoCloseable {
          * TTA files were listed in the library and then could not be played.
          */
         fun open(file: File, startFrame: Long = 0L): Decoder {
-            if (file.extension.lowercase() in JAVA_SOUND_EXTENSIONS) {
+            // By content, so an M4A called .mp3 goes straight to ffmpeg rather
+            // than to an MP3 decoder hunting through it for frames.
+            if (AudioKind.of(file) in JAVA_SOUND_EXTENSIONS) {
                 val native = runCatching { JavaSoundDecoder(file) }.getOrNull()
                 if (native != null) {
                     if (startFrame > 0) native.skip(startFrame)

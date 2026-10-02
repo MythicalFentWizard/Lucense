@@ -8,7 +8,6 @@ import com.exo.musicplayer.util.AudioTypes
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import java.io.File
 import java.util.logging.Level
@@ -109,7 +108,10 @@ object FolderLibrary {
      * asked of the ffmpeg that ships with the app.
      */
     internal fun measure(file: File): Long = runCatching {
-        if (file.extension.equals("mp3", ignoreCase = true)) mp3Millis(file) else ffmpegMillis(file)
+        // Counting MP3 frames through something that isn't an MP3 finds the
+        // odd chance sync pattern and adds up nonsense: an M4A called .mp3
+        // came out at 1:08 instead of 4:57.
+        if (AudioKind.of(file) == "mp3") mp3Millis(file) else ffmpegMillis(file)
     }.getOrDefault(0L)
 
     private val BITRATES = intArrayOf(0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
@@ -181,7 +183,8 @@ object FolderLibrary {
     }
 
     private fun read(file: File): DesktopTrack? = runCatching {
-        val audio = AudioFileIO.read(file)
+        // As what it is rather than what it is called: see AudioKind.
+        val audio = AudioKind.read(file)
         val tag = audio.tag
         val header = audio.audioHeader
 

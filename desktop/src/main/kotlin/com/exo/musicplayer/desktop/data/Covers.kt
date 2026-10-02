@@ -4,10 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import com.exo.musicplayer.desktop.library.AudioKind
 import com.exo.musicplayer.desktop.library.DesktopTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.Tag
 import org.jaudiotagger.tag.images.ArtworkFactory
@@ -113,7 +113,7 @@ object Covers {
         File(AppDirs.covers, hash(track.file.absolutePath) + ".img")
 
     private fun embedded(file: File): ByteArray? = runCatching {
-        AudioFileIO.read(file).tag?.firstArtwork?.binaryData
+        AudioKind.read(file).tag?.firstArtwork?.binaryData
     }.getOrNull()
 
     private fun sidecar(file: File): ByteArray? {
@@ -129,7 +129,7 @@ object Covers {
         val temp = File.createTempFile("lucense-art", ".jpg")
         try {
             temp.writeBytes(bytes)
-            val audio = AudioFileIO.read(file)
+            val audio = AudioKind.read(file)
             val tag = audio.tagOrCreateAndSetDefault
             tag.deleteArtworkField()
             tag.setField(ArtworkFactory.createArtworkFromFile(temp))
@@ -216,7 +216,7 @@ object TagWriter {
         genre: String? = null,
         clearBlanks: Boolean = false
     ): Result<Unit> = runCatching {
-        val audio = AudioFileIO.read(file)
+        val audio = AudioKind.read(file)
         val tag = audio.tagOrCreateAndSetDefault
         snapshot(file, tag)
 
@@ -238,7 +238,7 @@ object TagWriter {
 
     /** Writes only the fields [change] names, leaving the rest of the tag alone. */
     fun change(change: TagChange): Result<Unit> = runCatching {
-        val audio = AudioFileIO.read(change.file)
+        val audio = AudioKind.read(change.file)
         val tag = audio.tagOrCreateAndSetDefault
         snapshot(change.file, tag)
         change.title?.let { tag.setField(FieldKey.TITLE, it) }
