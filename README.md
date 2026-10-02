@@ -329,12 +329,22 @@ bash tools/fetch-tools.sh
 bash tools/build.sh :desktop:createDistributable
 bash tools/build.sh :desktop:packageMsi
 
-# Android
-bash tools/build.sh :app:assembleDebug
+# Android — the APK that ships (app/build/outputs/apk/release/app-release.apk)
+bash tools/build.sh :app:assembleRelease
+
+# Android tests, on a connected phone or emulator
+bash tools/build.sh :app:connectedDebugAndroidTest
 ```
 
 `tools/build.sh` wraps Gradle with per-host proxy routing, which matters on
 connections where some Maven mirrors are reachable and others aren't.
+
+The Android release build is shrunk by R8 and signed with the building
+machine's debug key, the key every published APK has carried, so each one
+installs over the last. It is not debuggable and carries the AndroidX
+baseline profiles. On an emulator with a 1,075-song library, it opened in
+0.79 s against the debug build's 1.49 s. Scrolling the song list dropped
+from 10–16% janky frames to under 0.3%.
 
 Both apps take their version from `lucenseVersion` in
 [`gradle.properties`](gradle.properties). Bump it for every build you hand out: an
