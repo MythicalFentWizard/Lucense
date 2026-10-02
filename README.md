@@ -62,27 +62,31 @@ yt-dlp reaches, at your choice of quality.
   no silence. Settings → Playback → *Crossfade* overlaps them by 2 to 12 seconds.
 - **Volume levelling.** *Level volumes* measures each song once, and after that
   they all play at the same loudness. Nothing is written to the files.
-- **A volume slider in decibels.** Every part of the slider does something. It
-  takes the mouse wheel, and clicking the speaker (or pressing **M**) mutes and
-  unmutes.
-- **A seek bar you can grab and drag.** The drag keeps following the mouse even
-  after it leaves the bar.
+- **A volume slider in decibels** (Windows; a phone has its own volume keys).
+  Every part of the slider does something. It takes the mouse wheel, and
+  clicking the speaker (or pressing **M**) mutes and unmutes.
+- **A seek bar you can grab and drag.** On Windows the drag keeps following the
+  mouse even after it leaves the bar.
 - **Shuffle and repeat.** Shuffle doesn't interrupt the song that's playing.
   **Previous** restarts the song if you're more than four seconds in.
 - **A queue you can edit.**
   - *Play next* and *Add to queue* are on every song.
   - The **Up next** panel shows the real order, shuffle included. From there you
     can move songs up and down, take them out, or clear the queue.
-- **Resume where you left off**, even after closing the app.
+- **Resume where you left off**, even after closing the app. On Android the
+  song, the place in it and the whole queue come back after the phone has
+  killed the app, and headphone or lock-screen *play* picks up from there.
 - **Sleep timer:** 15 to 90 minutes, or *when this song ends*. It fades out over
   the last half minute instead of cutting off mid-bar.
 - **Effects:** speed, pitch, reverb and EQ, all combinable, with a spectrum meter.
   *Remember for this song* brings a setting back whenever that song plays.
 - **More than one output at once:** several devices play the same audio, exactly
-  in step.
-- **Game ducking:** a global hotkey turns the music down while you're gaming.
-- **Mini player:** a small always-on-top window. There's also a tray icon with
-  play/pause, next, previous and quit.
+  in step on Windows. Android has no real way to do this, so there it's marked
+  experimental.
+- **Game ducking** (Windows): a global hotkey turns the music down while you're
+  gaming.
+- **Mini player** (Windows): a small always-on-top window. There's also a tray
+  icon with play/pause, next, previous and quit.
 
 ### Finding things
 
@@ -98,7 +102,12 @@ Combine as many filters as you like. The last eight searches appear as chips
 when the box is empty.
 
 You can sort by artist, title, album, length, times played, time listened, date
-added, rating or year. **J** scrolls the list to whatever is playing.
+added, rating or year. **J** (or *Playing* on Android) scrolls the list to
+whatever is playing.
+
+**It remembers how you left it.** The sort order of songs, albums and artists,
+the list or grid view, the page you were on and your recent searches all come
+back the next time you open the app, on both platforms.
 
 ### Playlists
 
@@ -114,16 +123,16 @@ added, rating or year. **J** scrolls the list to whatever is playing.
   (`Hip-Hop/Rap`, `Rock; Alternative`).
 - **Star ratings and favourites** on every song.
 
-### Fixing a messy library (Windows)
+### Fixing a messy library
 
-**Bulk tools** works through the whole library. Songs a tool has already handled
+**Bulk tools** (*Library tools* on Android) works through the whole library. Songs a tool has already handled
 are skipped unless you tick *Redo*.
 
 | tool | what it does |
 |---|---|
 | **Names & tags** | looks songs up by name and writes the title and artist, or the album, year and genre, or both — it asks which |
 | **Identify by sound** | fingerprints the audio, for files with no usable name at all |
-| **Names from folders** | reads `Artist/Album/01 Title` out of the folder tree; fills blanks only |
+| **Names from folders** | reads `Artist/Album/01 Title` out of the folder tree; fills blanks only (Windows — a phone's library has no folder tree of yours) |
 | **Covers** | missing cover art from six sources, trying your preferred one first |
 | **Lyrics** | fetches lyrics for everything, keeping timed ones where they exist |
 | **Level volumes** | measures loudness so everything plays at the same level |
@@ -135,7 +144,14 @@ whose name is only an id, like `9239d7ef-aeb9-…`, is identified by listening
 to it instead.
 
 You can also select a batch of songs and set their artist, album, year or genre
-all at once. **Duplicates** finds the same song stored twice.
+all at once.
+
+**Duplicates** finds the same song stored twice by *listening* to it, not by
+its name. Each song gets an acoustic fingerprint taken from the middle of the
+track, so a 96 kbps copy, a file with no tags at all, or one saved under a
+different name all turn up as the same song, while two different songs that
+happen to share a title don't. The fingerprints are kept, so only new songs are
+listened to the next time. Nothing is removed until you've seen the list.
 
 Files named for the wrong format, such as M4A audio saved as `.mp3`, are read
 by what's inside them, so their tags, length, edits and repairs all work.
@@ -143,10 +159,10 @@ by what's inside them, so their tags, length, edits and repairs all work.
 When a tool guesses wrong, *Revert to the file's own details* puts back what the
 file said before anything touched it.
 
-### Around the app (Windows)
+### Around the app
 
-- **Keyboard shortcuts.** They work whenever you're not typing in a box, and
-  **/** lists them all:
+- **Keyboard shortcuts** (Windows). They work whenever you're not typing in a
+  box, and **/** lists them all:
 
   | key | does |
   |---|---|
@@ -161,39 +177,51 @@ file said before anything touched it.
 
   Your keyboard's or headset's **media keys** work even while Lucense is in the
   background.
-- **Discord Rich Presence.** Your profile shows the song, the artist, the song's
+- **Discord Rich Presence** (Windows). Your profile shows the song, the artist, the song's
   own cover with the Lucense badge on its corner, and a running timer. It clears
   when you pause. It talks to the Discord app on your PC, and there's nothing to
   sign in to.
-- **Open with Lucense.** Settings → Playback can offer Lucense in Explorer's
+- **Open with Lucense** (Windows). Settings → Playback can offer Lucense in Explorer's
   *Open with* menu for music files. Windows doesn't let an app make itself the
   default player, so that last step is yours.
-- **Lyrics in their own window**, which can sit anywhere on screen.
+- **Lyrics in their own window** (Windows), which can sit anywhere on screen.
 - **Themes:**
   - Thirteen published colour schemes: Catppuccin Mocha and Latte, Dracula,
     Tokyo Night, Rosé Pine, Nord, Gruvbox, Everforest, Solarized dark and light,
     One Dark, Ayu Mirage and Daylight.
   - Every scheme is checked for readable contrast.
-  - You can also build your own theme.
+  - Android has the same twelve schemes beside its own palettes and Material
+    You. Building your own theme is Windows-only for now.
 - **Backgrounds and wallpaper:** stars, aurora, fireflies, snow, a scrolling graph
-  of the song, or visuals that move with the music. You can set your own picture
-  behind them.
-- **Backups.** Favourites, playlists, play counts and listening time go to a plain
-  text file. Restoring adds them back and never deletes anything.
+  of the song, or visuals that move with the music, on both apps. You can set
+  your own picture behind them.
+- **Backups.** Favourites, ratings, playlists, play counts and listening time go
+  to a plain text file. Restoring adds them back and never deletes anything.
 - **Stats** on what you listen to, and when.
 - **Update check:** Lucense tells you in Settings when a newer build is out.
 
 ### On Android
 
-- The Telegram share that started all this.
-- The same identify, lyrics, moods, stats, playlists and downloads as Windows.
-- Genres, smart lists (*Genres and rules* on the Playlists screen), and *revert to
-  the file's own details*.
-- Speed, pitch and reverb with a spectrum meter, Up next, shuffle and repeat.
-- Wallpaper with a dim slider, the starfield, and your own lyric colours.
+The Android app now does what the Windows one does, wherever a phone allows it:
+crossfade, volume levelling, EQ, the sleep timer, ratings, smart lists, *Made
+for you*, the library tools, Fix, duplicates by sound, edit many, backups, the
+published colour schemes and the moving backgrounds. On top of that it has the
+Telegram share that started all this.
 
-Some things are Windows-only for now: bulk tools, crossfade, ratings, the sleep
-timer, Discord and the keyboard shortcuts.
+Left out, because a phone either can't do them or has its own way:
+
+| Windows feature | on a phone |
+|---|---|
+| Keyboard shortcuts, tray icon, mini player window | no keyboard or desktop; the notification and lock screen have the controls |
+| Discord Rich Presence | Discord's phone app has no way for another app to set it |
+| Lyrics in their own window | Android apps don't float windows over each other |
+| Game-ducking hotkey | no global hotkeys; Android lowers music for calls and alerts itself |
+| Volume slider | the phone's volume keys |
+| Watching a folder, Names from folders | shared songs are copied into the app, so there's no folder of yours to watch |
+| Open with Lucense | sharing a file to Lucense does this |
+
+There's no splash screen on Android any more: the app opens straight to where
+you left it.
 
 ---
 
@@ -208,8 +236,10 @@ desktop/   Windows    (Compose Multiplatform, Java Sound, SQLite over JDBC)
 Everything that decides *what a song is* lives in `shared/`, so the two platforms
 cannot drift apart on it:
 - the relevance scorer
-- the duplicate heuristic
+- the duplicate finder's audio fingerprints ([`AudioPrint`](shared/src/main/kotlin/com/exo/musicplayer/data/library/AudioPrint.kt))
 - the Shazam fingerprinter
+- what a lyrics search asks for, and the Telegram file-name reader
+- the *Made for you* lists and the update check
 - the weather maths
 - the search and smart-list grammar ([`SearchQuery`](shared/src/main/kotlin/com/exo/musicplayer/data/library/SearchQuery.kt))
 

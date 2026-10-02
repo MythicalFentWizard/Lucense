@@ -12,6 +12,9 @@ data class ThemeState(
     val mode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = false,
     val stars: Boolean = true,
+    /** The moving background, as on Windows. */
+    val backdrop: BackdropStyle = BackdropStyle.STARS,
+    val reactiveMode: ReactiveMode = ReactiveMode.BALL,
     /** When the wallpaper was last set, so a new picture reloads; 0 for none. */
     val wallpaper: Long = 0L,
     val wallpaperDim: Float = 0.45f,
@@ -46,6 +49,15 @@ class ThemeSettings(context: Context) {
                 KEY_STARS,
                 AppPalette.fromName(prefs.getString(KEY_PALETTE, null)).starsByDefault
             ),
+            // Before there was a choice of background there was only the
+            // starfield switch, so that decides the starting point.
+            backdrop = BackdropStyle.fromName(prefs.getString(KEY_BACKDROP, null))
+                ?: if (prefs.getBoolean(KEY_STARS, AppPalette.fromName(prefs.getString(KEY_PALETTE, null)).starsByDefault)) {
+                    BackdropStyle.STARS
+                } else {
+                    BackdropStyle.NONE
+                },
+            reactiveMode = ReactiveMode.fromName(prefs.getString(KEY_REACTIVE, null)),
             wallpaper = prefs.getLong(KEY_WALLPAPER, 0L),
             wallpaperDim = prefs.getFloat(KEY_WALLPAPER_DIM, 0.45f),
             lyricsActive = if (prefs.contains(KEY_LYRICS_ACTIVE)) prefs.getInt(KEY_LYRICS_ACTIVE, 0) else null,
@@ -72,6 +84,16 @@ class ThemeSettings(context: Context) {
     fun setDynamicColor(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DYNAMIC, enabled).apply()
         _state.value = _state.value.copy(dynamicColor = enabled)
+    }
+
+    fun setBackdrop(style: BackdropStyle) {
+        prefs.edit().putString(KEY_BACKDROP, style.name).putBoolean(KEY_STARS, style == BackdropStyle.STARS).apply()
+        _state.value = _state.value.copy(backdrop = style, stars = style == BackdropStyle.STARS)
+    }
+
+    fun setReactiveMode(mode: ReactiveMode) {
+        prefs.edit().putString(KEY_REACTIVE, mode.name).apply()
+        _state.value = _state.value.copy(reactiveMode = mode)
     }
 
     fun setStars(enabled: Boolean) {
@@ -126,5 +148,7 @@ class ThemeSettings(context: Context) {
         const val KEY_MODE = "mode"
         const val KEY_DYNAMIC = "dynamic"
         const val KEY_STARS = "stars"
+        const val KEY_BACKDROP = "backdrop"
+        const val KEY_REACTIVE = "reactive_mode"
     }
 }

@@ -51,6 +51,19 @@ interface TrackDao {
     )
     fun observeByPlayCount(): Flow<List<Track>>
 
+    /** Every track, in no particular order: sorting happens in memory, where all nine orders can. */
+    @Query("SELECT * FROM tracks")
+    fun observeAll(): Flow<List<Track>>
+
+    @Query("UPDATE tracks SET durationMs = :ms WHERE id = :id")
+    suspend fun setDuration(id: Long, ms: Long)
+
+    @Query("UPDATE tracks SET rating = :stars WHERE id = :id")
+    suspend fun setRating(id: Long, stars: Int)
+
+    @Query("UPDATE tracks SET levelDb = :db, levelPeak = :peak WHERE id = :id")
+    suspend fun setLevel(id: Long, db: Float?, peak: Float?)
+
     @Query("SELECT * FROM tracks WHERE isFavorite = 1 ORDER BY title COLLATE NOCASE ASC")
     fun observeFavorites(): Flow<List<Track>>
 

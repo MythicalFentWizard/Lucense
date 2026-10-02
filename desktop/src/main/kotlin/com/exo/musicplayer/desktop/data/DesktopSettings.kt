@@ -253,6 +253,33 @@ class DesktopSettings {
         get() = prefs.getInt(KEY_PROXY_PORT, 0)
         set(value) = prefs.putInt(KEY_PROXY_PORT, value)
 
+    /**
+     * How things were last ordered and laid out, by name. Kept as plain names
+     * so an option renamed or removed later just falls back to the default
+     * rather than failing to start.
+     */
+    var librarySort: String
+        get() = prefs.get(KEY_LIBRARY_SORT, "")
+        set(value) = prefs.put(KEY_LIBRARY_SORT, value)
+
+    var albumSort: String
+        get() = prefs.get(KEY_ALBUM_SORT, "")
+        set(value) = prefs.put(KEY_ALBUM_SORT, value)
+
+    var artistSort: String
+        get() = prefs.get(KEY_ARTIST_SORT, "")
+        set(value) = prefs.put(KEY_ARTIST_SORT, value)
+
+    /** The docked panel, or blank for none. */
+    var sidePanel: String
+        get() = prefs.get(KEY_SIDE_PANEL, "")
+        set(value) = prefs.put(KEY_SIDE_PANEL, value)
+
+    /** The page the window was showing when it closed. */
+    var screen: String
+        get() = prefs.get(KEY_SCREEN, "")
+        set(value) = prefs.put(KEY_SCREEN, value)
+
     /** Every setting as it stands, for writing into a backup. */
     fun all(): Map<String, String> = runCatching {
         prefs.keys().associateWith { prefs.get(it, "") }
@@ -280,6 +307,11 @@ class DesktopSettings {
         const val KEY_LEVELLING = "levelling"
         const val KEY_DISCORD_COVER = "discord_cover"
         const val KEY_CROSSFADE = "crossfade_ms"
+        const val KEY_LIBRARY_SORT = "library_sort"
+        const val KEY_ALBUM_SORT = "album_sort"
+        const val KEY_ARTIST_SORT = "artist_sort"
+        const val KEY_SIDE_PANEL = "side_panel"
+        const val KEY_SCREEN = "screen"
         const val KEY_SLEEP_FADE = "sleep_fade"
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_CUSTOM = "lyrics_term_custom"

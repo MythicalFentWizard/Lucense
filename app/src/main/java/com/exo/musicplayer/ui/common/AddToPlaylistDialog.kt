@@ -67,7 +67,7 @@ fun AddToPlaylistDialog(
                                 Column {
                                     Text(playlist.name, style = MaterialTheme.typography.bodyLarge)
                                     Text(
-                                        text = "${playlist.trackCount} songs",
+                                        text = "${playlist.trackCount} ${if (playlist.trackCount == 1) "song" else "songs"}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

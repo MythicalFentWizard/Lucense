@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.data.library.AudioPrint
+import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.library.SearchQuery
 import com.exo.musicplayer.data.library.Genres
 import androidx.compose.runtime.Stable
@@ -15,11 +17,13 @@ import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.data.download.LinkResolver
 import com.exo.musicplayer.data.download.ResolvedLink
 import com.exo.musicplayer.data.library.DuplicateMatcher
+import com.exo.musicplayer.data.library.TelegramName
 import com.exo.musicplayer.data.lyrics.GeniusLyricsProvider
 import com.exo.musicplayer.data.lyrics.LrcLibProvider
 import com.exo.musicplayer.data.lyrics.LyricsFetch
 import com.exo.musicplayer.data.lyrics.LyricsOvhProvider
 import com.exo.musicplayer.data.lyrics.LyricsProviderChain
+import com.exo.musicplayer.data.lyrics.LyricsTerm
 import com.exo.musicplayer.data.lyrics.NeteaseLyricsProvider
 import com.exo.musicplayer.data.recognition.AudiusProvider
 import com.exo.musicplayer.data.recognition.DeezerProvider
@@ -38,6 +42,7 @@ import com.exo.musicplayer.data.recognition.YouTubeSearchProvider
 import com.exo.musicplayer.data.playlist.ImportResult
 import com.exo.musicplayer.data.playlist.PlaylistEntry
 import com.exo.musicplayer.data.playlist.PlaylistFile
+import com.exo.musicplayer.data.update.Updates
 import com.exo.musicplayer.data.weather.Affinity
 import com.exo.musicplayer.data.weather.GeoPlace
 import com.exo.musicplayer.data.weather.OpenMeteo
@@ -64,6 +69,7 @@ import com.exo.musicplayer.desktop.download.ToolStatus
 import com.exo.musicplayer.desktop.download.YtDlp
 import com.exo.musicplayer.desktop.library.AudioKind
 import com.exo.musicplayer.desktop.library.FolderWatcher
+import com.exo.musicplayer.desktop.library.PrintReader
 import com.exo.musicplayer.desktop.system.DiscordPresence
 import com.exo.musicplayer.desktop.system.FileAssociations
 import com.exo.musicplayer.desktop.system.DuckKey
@@ -308,7 +314,17 @@ class DesktopController(parent: CoroutineScope) {
         private set
 
     var query by mutableStateOf("")
-    var sort by mutableStateOf(SortMode.ARTIST)
+    // Ordering is remembered between sessions: each of these writes itself
+    // into the settings as it changes, and is read back by name on the way in.
+    private val sortState = mutableStateOf(
+        SortMode.entries.firstOrNull { it.name == settings.librarySort } ?: SortMode.ARTIST
+    )
+    var sort: SortMode
+        get() = sortState.value
+        set(value) {
+            sortState.value = value
+            settings.librarySort = value.name
+        }
     var favourites by mutableStateOf<Set<String>>(emptySet())
         private set
     var favouritesOnly by mutableStateOf(false)
@@ -953,8 +969,17 @@ class DesktopController(parent: CoroutineScope) {
 
     private var openPlay: OpenPlay? = null
 
-    /** Which docked panel is open, if any. */
-    var sidePanel by mutableStateOf<SidePanelKind?>(null)
+    private val sidePanelState = mutableStateOf(
+        SidePanelKind.entries.firstOrNull { it.name == settings.sidePanel }
+    )
+
+    /** Which docked panel is open, if any. Remembered, like the sort orders. */
+    var sidePanel: SidePanelKind?
+        get() = sidePanelState.value
+        set(value) {
+            sidePanelState.value = value
+            settings.sidePanel = value?.name.orEmpty()
+        }
 
     var accent: AccentChoice
         get() = Palette.choice
@@ -1672,13 +1697,8 @@ class DesktopController(parent: CoroutineScope) {
      * and no lyrics service has heard of that song. Which cleanup helps depends
      * on where a library came from, so it is a setting rather than a guess.
      */
-    internal fun lyricsQueryFor(track: DesktopTrack): Pair<String, String?> = when (lyricsTerm) {
-        LyricsTerm.ARTIST_TITLE -> track.title to track.artist
-        LyricsTerm.CLEAN_TITLE -> LyricsTerm.clean(track.title) to track.artist
-        LyricsTerm.TITLE_ONLY -> LyricsTerm.clean(track.title) to null
-        LyricsTerm.FILENAME -> LyricsTerm.clean(track.file.nameWithoutExtension) to null
-        LyricsTerm.CUSTOM -> LyricsTerm.fill(lyricsTermCustom, track) to null
-    }
+    internal fun lyricsQueryFor(track: DesktopTrack): Pair<String, String?> =
+        lyricsTerm.query(track.artist, track.title, track.album, track.file.nameWithoutExtension, lyricsTermCustom)
 
     fun fetchLyrics(track: DesktopTrack) {
         lyricsLoading = true
@@ -3599,36 +3619,90 @@ class DesktopController(parent: CoroutineScope) {
     var duplicatesNote by mutableStateOf<String?>(null)
         private set
 
+    /** Songs listened to so far in a duplicates scan, and how many need it; null when not listening. */
+    var duplicatesListening by mutableStateOf<Pair<Int, Int>?>(null)
+        private set
+
+    /**
+     * Finds the same recording stored more than once, by how it sounds.
+     *
+     * Each song's print is taken once and kept, so only files that are new or
+     * have changed are listened to; a second scan of an unchanged library is
+     * nearly instant. Names play no part: "Track 03.mp3" and a correctly
+     * tagged copy of the same song are found, and two different songs that
+     * happen to share a title are not.
+     */
     fun findDuplicates(within: List<DesktopTrack>? = null) {
+        if (duplicatesScanning) return
         duplicatesScanning = true
         duplicatesNote = null
         scope.launch {
+            val songs = within ?: tracks
+            val stored = io { store.prints() }
+            val prints = HashMap<String, IntArray>()
+            val todo = mutableListOf<DesktopTrack>()
+            songs.forEach { track ->
+                val path = track.file.absolutePath
+                val saved = stored[path]
+                val decoded = saved?.takeIf {
+                    it.size == track.file.length() && it.modified == track.file.lastModified()
+                }?.let { AudioPrint.decode(it.print) }
+                if (decoded != null) prints[path] = decoded else todo += track
+            }
+
+            if (todo.isNotEmpty()) {
+                duplicatesListening = 0 to todo.size
+                var done = 0
+                val work = Channel<DesktopTrack>(Channel.UNLIMITED)
+                todo.forEach { work.trySend(it) }
+                work.close()
+                coroutineScope {
+                    repeat(PRINTS_AT_ONCE) {
+                        launch {
+                            for (track in work) {
+                                val print = io { PrintReader.read(track.file, track.durationMs) }
+                                if (print != null) {
+                                    val path = track.file.absolutePath
+                                    prints[path] = print
+                                    io {
+                                        store.savePrint(path, track.file.length(), track.file.lastModified(), AudioPrint.encode(print))
+                                    }
+                                }
+                                done++
+                                duplicatesListening = done to todo.size
+                            }
+                        }
+                    }
+                }
+                duplicatesListening = null
+            }
+
             val counts = playCounts
+            val byPath = songs.associateBy { it.file.absolutePath }
             val found = io {
                 // Reading embedded art opens the file, so a comparator that
                 // called it directly would re-read the same track O(log n) times.
                 val hasArt = HashMap<String, Boolean>()
-                DuplicateMatcher.group(
-                    items = within ?: tracks,
-                    artistOf = { it.artist },
-                    titleOf = { it.title },
-                    durationOf = { it.durationMs },
-                    // Biggest file first as a stand-in for bitrate, then one
-                    // with art, then the one actually played.
-                    keeperOrder = compareByDescending<DesktopTrack> { it.sizeBytes }
-                        .thenByDescending {
-                            hasArt.getOrPut(it.file.absolutePath) {
-                                Covers.hasLocalArt(it)
-                            }
-                        }
-                        .thenByDescending { counts[it.file.absolutePath] ?: 0 }
-                        .thenBy { it.file.lastModified() }
-                ).map { DesktopDuplicateGroup(it.keep, it.remove) }
-                    .sortedBy { it.keep.title.lowercase(Locale.ROOT) }
+                // Biggest file first as a stand-in for bitrate, then one with
+                // art, then the one actually played.
+                val keeperOrder = compareByDescending<DesktopTrack> { it.sizeBytes }
+                    .thenByDescending {
+                        hasArt.getOrPut(it.file.absolutePath) { Covers.hasLocalArt(it) }
+                    }
+                    .thenByDescending { counts[it.file.absolutePath] ?: 0 }
+                    .thenBy { it.file.lastModified() }
+                AudioPrint.groups(
+                    prints.mapNotNull { (path, print) ->
+                        byPath[path]?.let { AudioPrint.Entry(path, print, it.durationMs) }
+                    }
+                ).map { paths ->
+                    val members = paths.mapNotNull { byPath[it] }.sortedWith(keeperOrder)
+                    DesktopDuplicateGroup(members.first(), members.drop(1))
+                }.sortedBy { it.keep.title.lowercase(Locale.ROOT) }
             }
             duplicates = found
             duplicatesScanning = false
-            if (found.isEmpty()) duplicatesNote = "No duplicates found."
+            if (found.isEmpty()) duplicatesNote = "No song is in the library twice."
         }
     }
 
@@ -3662,8 +3736,25 @@ class DesktopController(parent: CoroutineScope) {
 
     // ---- Albums and artists -------------------------------------------------
 
-    var albumSort by mutableStateOf(GroupSort.NAME)
-    var artistSort by mutableStateOf(GroupSort.NAME)
+    private val albumSortState = mutableStateOf(
+        GroupSort.entries.firstOrNull { it.name == settings.albumSort && it.albums } ?: GroupSort.NAME
+    )
+    var albumSort: GroupSort
+        get() = albumSortState.value
+        set(value) {
+            albumSortState.value = value
+            settings.albumSort = value.name
+        }
+
+    private val artistSortState = mutableStateOf(
+        GroupSort.entries.firstOrNull { it.name == settings.artistSort && it.artists } ?: GroupSort.NAME
+    )
+    var artistSort: GroupSort
+        get() = artistSortState.value
+        set(value) {
+            artistSortState.value = value
+            settings.artistSort = value.name
+        }
 
     /** Keys of the album or artist cards picked with Ctrl or Shift. */
     var pickedGroups by mutableStateOf<Set<String>>(emptySet())
@@ -4094,6 +4185,9 @@ enum class IdentifyMode(val label: String, val placeholder: String) {
 /** How many songs the cover and tag tools look up at once. */
 private const val SONGS_AT_ONCE = 5
 
+/** Files listened to at once for duplicates by sound: decoding is the slow part. */
+private const val PRINTS_AT_ONCE = 6
+
 /** What the progress panel calls a Fix run. */
 const val FIX_LABEL = "Fix"
 
@@ -4144,57 +4238,6 @@ private val PLAYABLE = setOf(
     "mp3", "m4a", "mp4", "m4b", "flac", "wav", "ogg", "oga", "opus", "aac", "wma", "aiff", "aif"
 )
 
-/**
- * Which words go to the lyrics services when a song is looked up.
- *
- * A file downloaded from YouTube is called "Song (Official Music Video) [4K]",
- * and no lyrics service has heard of that song. Which tidy-up helps depends
- * entirely on where a library came from, so this is a setting rather than a
- * guess made on everyone's behalf.
- */
-enum class LyricsTerm(val label: String, val note: String) {
-    ARTIST_TITLE("Artist and title", "The tags exactly as they are. Right for a tidy library."),
-    CLEAN_TITLE(
-        "Tidied title",
-        "Artist and title, with \"(Official Video)\", \"[HD]\", \"feat. ...\" and the like removed."
-    ),
-    TITLE_ONLY("Title only", "For files whose artist tag is wrong, or missing."),
-    FILENAME("File name", "For files with no useful tags at all."),
-    CUSTOM("Custom", "Your own pattern from {artist}, {title}, {album} and {file}.");
-
-    companion object {
-        fun of(name: String): LyricsTerm = entries.firstOrNull { it.name == name } ?: ARTIST_TITLE
-
-        private val NOISE = Regex(
-            """\s*[(\[][^)\]]*\b(official|video|audio|lyrics?|hd|hq|4k|mv|remaster(ed)?|""" +
-                """visuali[sz]er|explicit|full song|with lyrics)\b[^)\]]*[)\]]""",
-            RegexOption.IGNORE_CASE
-        )
-        private val FEATURING = Regex(
-            """\s*[(\[]?\s*\b(feat|ft|featuring)\b\.?\s[^)\]]*[)\]]?""",
-            RegexOption.IGNORE_CASE
-        )
-        private val SPACES = Regex("""\s+""")
-
-        /** Strips the decoration a downloaded file carries in its title. */
-        fun clean(text: String): String {
-            val stripped = text.replace(NOISE, "").replace(FEATURING, "")
-            val tidy = stripped.replace(SPACES, " ").trim().trim('-', '_', ' ')
-            // Never hand back nothing: a title that was all decoration is
-            // still a better search than an empty string.
-            return tidy.ifBlank { text.trim() }
-        }
-
-        fun fill(pattern: String, track: DesktopTrack): String = pattern
-            .replace("{artist}", track.artist.orEmpty())
-            .replace("{title}", track.title)
-            .replace("{album}", track.album.orEmpty())
-            .replace("{file}", track.file.nameWithoutExtension)
-            .replace(SPACES, " ")
-            .trim()
-    }
-}
-
 enum class BulkKind(val label: String, val markColumn: String?) {
     COVERS("Covers", "artCheckedAt"),
     TAGS("Names & tags", "identifiedAt"),
@@ -4211,16 +4254,6 @@ enum class BulkKind(val label: String, val markColumn: String?) {
     FOLDERS("Names from folders", null)
 }
 
-/** Lists worked out from the library and what has been played, rather than kept. */
-enum class AutoPlaylist(val label: String, val note: String) {
-    RECENT("Recently added", "The newest files in the library."),
-    HISTORY("Recently played", "What you actually listened to, most recent first."),
-    MOST_PLAYED("Most played", "What you keep coming back to."),
-    NEVER_PLAYED("Never played", "In the library, never started."),
-    TOP_RATED("Top rated", "Four stars and up, best first."),
-    FAVOURITES("Favourites", "Everything you hearted.")
-}
-
 /** What happens when a track, or the queue, runs out. */
 enum class RepeatMode(val label: String) {
     OFF("Repeat off"),
@@ -4229,20 +4262,6 @@ enum class RepeatMode(val label: String) {
 
     companion object {
         fun fromName(name: String?): RepeatMode = entries.firstOrNull { it.name == name } ?: OFF
-    }
-}
-
-/** A "Title   Artist" filename, which is the shape Telegram's exports arrive in. */
-internal data class TelegramName(val title: String, val artist: String) {
-    companion object {
-        /** Two or more spaces: one space is part of a title, not a separator. */
-        private val SEPARATOR = Regex("""\s{2,}""")
-
-        fun of(name: String): TelegramName? {
-            val parts = name.split(SEPARATOR).map { it.trim() }.filter { it.isNotEmpty() }
-            if (parts.size < 2) return null
-            return TelegramName(parts.first(), parts.drop(1).joinToString(", "))
-        }
     }
 }
 

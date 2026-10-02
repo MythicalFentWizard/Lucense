@@ -25,6 +25,9 @@ class StatsRepository(context: Context) {
 
     fun observeTotalListenedMs(): Flow<Long> = dao.observeTotalListenedMs()
     fun observePlayCount(): Flow<Int> = dao.observePlayCount(minMs)
+
+    /** Listening time per song, for sorting by it. */
+    fun observeListenTotals(): Flow<List<TrackListenTime>> = dao.observeListenTotals()
     fun observeDistinctTracksPlayed(): Flow<Int> = dao.observeDistinctTracksPlayed(minMs)
     fun observeTopByListenTime(limit: Int = 25): Flow<List<TrackListenTime>> =
         dao.observeTopByListenTime(minMs, limit)

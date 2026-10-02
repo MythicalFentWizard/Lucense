@@ -51,12 +51,6 @@ fun MoodsScreen(
     onRefresh: () -> Unit,
     onPlayMix: () -> Unit,
     onPlayFrom: (Int) -> Unit,
-    onPlayNext: (Track) -> Unit,
-    onAddToQueue: (Track) -> Unit,
-    onAddToPlaylist: (Track) -> Unit,
-    onToggleFavorite: (Track) -> Unit,
-    onFixTags: (Track) -> Unit,
-    onEditDetails: (Track) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier.fillMaxSize()) {
@@ -173,14 +167,7 @@ fun MoodsScreen(
                                 track = track,
                                 isCurrent = track.id == currentTrackId,
                                 isPlaying = isPlaying,
-                                onClick = { onPlayFrom(index) },
-                                onPlayNext = { onPlayNext(track) },
-                                onAddToQueue = { onAddToQueue(track) },
-                                onAddToPlaylist = { onAddToPlaylist(track) },
-                                onToggleFavorite = { onToggleFavorite(track) },
-                                onFixTags = { onFixTags(track) },
-                                onEditDetails = { onEditDetails(track) },
-                                onDelete = { }
+                                onClick = { onPlayFrom(index) }
                             )
                             state.affinities[track.id]?.let { affinity ->
                                 AffinityNote(affinity, state.weather)

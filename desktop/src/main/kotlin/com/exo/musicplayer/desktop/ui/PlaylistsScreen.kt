@@ -51,8 +51,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.playlist.ImportResult
-import com.exo.musicplayer.desktop.data.AutoPlaylist
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.StoredPlaylist
 import com.exo.musicplayer.desktop.data.StoredSmartPlaylist

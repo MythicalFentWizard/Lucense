@@ -1,5 +1,6 @@
 package com.exo.musicplayer.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -57,7 +58,37 @@ data class Track(
     // The "redo" checkbox is what deliberately ignores these.
     val artCheckedAt: Long? = null,
     val identifiedAt: Long? = null,
-    val lyricsCheckedAt: Long? = null
+    val lyricsCheckedAt: Long? = null,
+    /** Stars out of five, as on Windows; 0 means not rated. */
+    @ColumnInfo(defaultValue = "0") val rating: Int = 0,
+    /**
+     * Loudness in dBFS RMS over the first ninety seconds, and the loudest
+     * sample, as Level volumes measures them. Null until it has.
+     */
+    val levelDb: Float? = null,
+    val levelPeak: Float? = null
+)
+
+/**
+ * Effects saved against one song with "Remember for this song". Held as the
+ * same compact text the effects settings use, so a new effect added later is
+ * a new key in it rather than a schema change.
+ */
+/**
+ * A song's sound print (see AudioPrint), kept in its own table rather than on
+ * the track: the song list is re-read constantly, and a few kilobytes per song
+ * of print it never shows would ride along every time.
+ */
+@Entity(tableName = "track_prints")
+data class TrackPrint(
+    @PrimaryKey val trackId: Long,
+    val data: String
+)
+
+@Entity(tableName = "track_fx")
+data class TrackFx(
+    @PrimaryKey val trackId: Long,
+    val data: String
 )
 
 @Entity(tableName = "playlists", indices = [Index(value = ["name"], unique = true)])

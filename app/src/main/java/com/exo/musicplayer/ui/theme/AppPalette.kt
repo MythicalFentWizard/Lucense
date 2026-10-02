@@ -20,7 +20,15 @@ enum class AppPalette(
     /** Whether the starfield suits this palette by default. */
     val starsByDefault: Boolean,
     val light: ColorScheme,
-    val dark: ColorScheme
+    val dark: ColorScheme,
+    /** Where a published scheme comes from, shown under its swatch; null for Lucense's own. */
+    val credit: String? = null,
+    /**
+     * True or false for a scheme that is only ever dark or only ever light -
+     * the published ones are one or the other by design - so the light/dark
+     * setting is set aside while it's chosen. Null for palettes that have both.
+     */
+    val fixedDark: Boolean? = null
 ) {
     MIDNIGHT(
         label = "Midnight",
@@ -244,6 +252,128 @@ enum class AppPalette(
             surfaceVariant = Color(0xFF262C31),
             onSurfaceVariant = Color(0xFFDCDCE3)
         )
+    ),
+
+    // ---- The published schemes, the same values Windows uses -----------------------
+    MOCHA(
+        label = "Mocha",
+        swatch = Color(0xFFCBA6F7),
+        accent = Color(0xFFCBA6F7),
+        starsByDefault = true,
+        light = published(0xFFCBA6F7, 0xFF11111B, 0xFF181825, 0xFF1E1E2E, 0xFF313244, 0xFF45475A, 0xFF585B70, 0xFFCDD6F4, 0xFFBAC2DE, 0xFFA6ADC8, dark = true),
+        dark = published(0xFFCBA6F7, 0xFF11111B, 0xFF181825, 0xFF1E1E2E, 0xFF313244, 0xFF45475A, 0xFF585B70, 0xFFCDD6F4, 0xFFBAC2DE, 0xFFA6ADC8, dark = true),
+        credit = "Catppuccin Mocha",
+        fixedDark = true
+    ),
+    DRACULA(
+        label = "Dracula",
+        swatch = Color(0xFFBD93F9),
+        accent = Color(0xFFBD93F9),
+        starsByDefault = true,
+        light = published(0xFFBD93F9, 0xFF1E1F29, 0xFF242531, 0xFF282A36, 0xFF343746, 0xFF44475A, 0xFF525569, 0xFFF8F8F2, 0xFFD5D6E0, 0xFFA8AEC8, dark = true),
+        dark = published(0xFFBD93F9, 0xFF1E1F29, 0xFF242531, 0xFF282A36, 0xFF343746, 0xFF44475A, 0xFF525569, 0xFFF8F8F2, 0xFFD5D6E0, 0xFFA8AEC8, dark = true),
+        credit = "Dracula",
+        fixedDark = true
+    ),
+    TOKYO(
+        label = "Tokyo",
+        swatch = Color(0xFF7AA2F7),
+        accent = Color(0xFF7AA2F7),
+        starsByDefault = true,
+        light = published(0xFF7AA2F7, 0xFF16161E, 0xFF1A1B26, 0xFF1F2130, 0xFF292E42, 0xFF343A52, 0xFF3B4261, 0xFFC0CAF5, 0xFFA9B1D6, 0xFF8A93B8, dark = true),
+        dark = published(0xFF7AA2F7, 0xFF16161E, 0xFF1A1B26, 0xFF1F2130, 0xFF292E42, 0xFF343A52, 0xFF3B4261, 0xFFC0CAF5, 0xFFA9B1D6, 0xFF8A93B8, dark = true),
+        credit = "Tokyo Night",
+        fixedDark = true
+    ),
+    ROSE_PINE(
+        label = "Rosé",
+        swatch = Color(0xFFC4A7E7),
+        accent = Color(0xFFC4A7E7),
+        starsByDefault = true,
+        light = published(0xFFC4A7E7, 0xFF16141F, 0xFF191724, 0xFF1F1D2E, 0xFF26233A, 0xFF302C4A, 0xFF403C5C, 0xFFE0DEF4, 0xFFC7C4DE, 0xFF9E9ABA, dark = true),
+        dark = published(0xFFC4A7E7, 0xFF16141F, 0xFF191724, 0xFF1F1D2E, 0xFF26233A, 0xFF302C4A, 0xFF403C5C, 0xFFE0DEF4, 0xFFC7C4DE, 0xFF9E9ABA, dark = true),
+        credit = "Rosé Pine",
+        fixedDark = true
+    ),
+    NORD(
+        label = "Nord",
+        swatch = Color(0xFF88C0D0),
+        accent = Color(0xFF88C0D0),
+        starsByDefault = true,
+        light = published(0xFF88C0D0, 0xFF272C36, 0xFF2E3440, 0xFF333B4A, 0xFF3B4252, 0xFF434C5E, 0xFF4C566A, 0xFFECEFF4, 0xFFD8DEE9, 0xFFAEB8C8, dark = true),
+        dark = published(0xFF88C0D0, 0xFF272C36, 0xFF2E3440, 0xFF333B4A, 0xFF3B4252, 0xFF434C5E, 0xFF4C566A, 0xFFECEFF4, 0xFFD8DEE9, 0xFFAEB8C8, dark = true),
+        credit = "Nord",
+        fixedDark = true
+    ),
+    GRUVBOX(
+        label = "Gruvbox",
+        swatch = Color(0xFFFABD2F),
+        accent = Color(0xFFFABD2F),
+        starsByDefault = true,
+        light = published(0xFFFABD2F, 0xFF1D2021, 0xFF232728, 0xFF282828, 0xFF32302F, 0xFF3C3836, 0xFF504945, 0xFFFBF1C7, 0xFFEBDBB2, 0xFFBDAE93, dark = true),
+        dark = published(0xFFFABD2F, 0xFF1D2021, 0xFF232728, 0xFF282828, 0xFF32302F, 0xFF3C3836, 0xFF504945, 0xFFFBF1C7, 0xFFEBDBB2, 0xFFBDAE93, dark = true),
+        credit = "Gruvbox dark",
+        fixedDark = true
+    ),
+    EVERFOREST(
+        label = "Everforest",
+        swatch = Color(0xFFA7C080),
+        accent = Color(0xFFA7C080),
+        starsByDefault = true,
+        light = published(0xFFA7C080, 0xFF1E2326, 0xFF272E33, 0xFF2D353B, 0xFF343F44, 0xFF3D484D, 0xFF4F585E, 0xFFD3C6AA, 0xFFBEC5AE, 0xFF9DA9A0, dark = true),
+        dark = published(0xFFA7C080, 0xFF1E2326, 0xFF272E33, 0xFF2D353B, 0xFF343F44, 0xFF3D484D, 0xFF4F585E, 0xFFD3C6AA, 0xFFBEC5AE, 0xFF9DA9A0, dark = true),
+        credit = "Everforest dark",
+        fixedDark = true
+    ),
+    SOLARIZED(
+        label = "Solarized",
+        swatch = Color(0xFF4FA3DB),
+        accent = Color(0xFF4FA3DB),
+        starsByDefault = true,
+        light = published(0xFF4FA3DB, 0xFF002B36, 0xFF04303B, 0xFF073642, 0xFF0E4451, 0xFF17505E, 0xFF2C5D68, 0xFFFDF6E3, 0xFFEEE8D5, 0xFFA9B5B5, dark = true),
+        dark = published(0xFF4FA3DB, 0xFF002B36, 0xFF04303B, 0xFF073642, 0xFF0E4451, 0xFF17505E, 0xFF2C5D68, 0xFFFDF6E3, 0xFFEEE8D5, 0xFFA9B5B5, dark = true),
+        credit = "Solarized dark",
+        fixedDark = true
+    ),
+    ONE_DARK(
+        label = "One Dark",
+        swatch = Color(0xFF61AFEF),
+        accent = Color(0xFF61AFEF),
+        starsByDefault = true,
+        light = published(0xFF61AFEF, 0xFF21252B, 0xFF23272E, 0xFF282C34, 0xFF2F343D, 0xFF3A3F4B, 0xFF474C55, 0xFFDCDFE4, 0xFFABB2BF, 0xFF8B93A1, dark = true),
+        dark = published(0xFF61AFEF, 0xFF21252B, 0xFF23272E, 0xFF282C34, 0xFF2F343D, 0xFF3A3F4B, 0xFF474C55, 0xFFDCDFE4, 0xFFABB2BF, 0xFF8B93A1, dark = true),
+        credit = "One Dark",
+        fixedDark = true
+    ),
+    AYU(
+        label = "Ayu",
+        swatch = Color(0xFFFFCC66),
+        accent = Color(0xFFFFCC66),
+        starsByDefault = true,
+        light = published(0xFFFFCC66, 0xFF1A1F29, 0xFF1F2430, 0xFF242936, 0xFF2C3242, 0xFF343B4D, 0xFF434A5C, 0xFFD9D7CF, 0xFFC0BEB5, 0xFF9AA1AB, dark = true),
+        dark = published(0xFFFFCC66, 0xFF1A1F29, 0xFF1F2430, 0xFF242936, 0xFF2C3242, 0xFF343B4D, 0xFF434A5C, 0xFFD9D7CF, 0xFFC0BEB5, 0xFF9AA1AB, dark = true),
+        credit = "Ayu Mirage",
+        fixedDark = true
+    ),
+    LATTE(
+        label = "Latte",
+        swatch = Color(0xFF8839EF),
+        accent = Color(0xFF8839EF),
+        starsByDefault = false,
+        light = published(0xFF8839EF, 0xFFDCE0E8, 0xFFE6E9EF, 0xFFEFF1F5, 0xFFE6E9EF, 0xFFCCD0DA, 0xFFBCC0CC, 0xFF3C3F54, 0xFF5C5F77, 0xFF7C7F93, dark = false),
+        dark = published(0xFF8839EF, 0xFFDCE0E8, 0xFFE6E9EF, 0xFFEFF1F5, 0xFFE6E9EF, 0xFFCCD0DA, 0xFFBCC0CC, 0xFF3C3F54, 0xFF5C5F77, 0xFF7C7F93, dark = false),
+        credit = "Catppuccin Latte",
+        fixedDark = false
+    ),
+    DAYLIGHT(
+        label = "Daylight",
+        swatch = Color(0xFF1C6FA5),
+        accent = Color(0xFF1C6FA5),
+        starsByDefault = false,
+        light = published(0xFF1C6FA5, 0xFFEEE8D5, 0xFFF3EDDC, 0xFFFDF6E3, 0xFFEEE8D5, 0xFFE0D9C0, 0xFFCFC8AF, 0xFF073642, 0xFF3F5B63, 0xFF6C7D7D, dark = false),
+        dark = published(0xFF1C6FA5, 0xFFEEE8D5, 0xFFF3EDDC, 0xFFFDF6E3, 0xFFEEE8D5, 0xFFE0D9C0, 0xFFCFC8AF, 0xFF073642, 0xFF3F5B63, 0xFF6C7D7D, dark = false),
+        credit = "Solarized Light",
+        fixedDark = false
     );
 
     companion object {
@@ -261,5 +391,62 @@ enum class ThemeMode(val label: String) {
     companion object {
         fun fromName(name: String?): ThemeMode =
             entries.firstOrNull { it.name == name } ?: SYSTEM
+    }
+}
+
+/**
+ * A Material colour scheme from a published scheme's own tones, mapped the way
+ * Windows lays them out: [content] is the page, [raised] and [hover] the
+ * surfaces on it, [base] and [sidebar] the chrome around it, and the three
+ * text tones as the scheme's authors paired them with those surfaces.
+ */
+private fun published(
+    accent: Long, base: Long, sidebar: Long, content: Long, raised: Long,
+    hover: Long, line: Long, text: Long, textDim: Long, textFaint: Long,
+    dark: Boolean
+): ColorScheme {
+    val a = Color(accent)
+    val page = Color(content)
+    val up = Color(raised)
+    val words = Color(text)
+    // A tint of the accent over the raised surface, for selected things.
+    val container = Color(
+        red = up.red * 0.72f + a.red * 0.28f,
+        green = up.green * 0.72f + a.green * 0.28f,
+        blue = up.blue * 0.72f + a.blue * 0.28f
+    )
+    val onAccent = if (dark) Color(base) else Color.White
+    return if (dark) {
+        darkColorScheme(
+            primary = a, onPrimary = onAccent,
+            primaryContainer = container, onPrimaryContainer = words,
+            secondary = Color(textDim), onSecondary = Color(base),
+            secondaryContainer = up, onSecondaryContainer = words,
+            tertiary = a, onTertiary = onAccent,
+            background = page, onBackground = words,
+            surface = page, onSurface = words,
+            surfaceVariant = up, onSurfaceVariant = Color(textDim),
+            surfaceContainerLowest = Color(base), surfaceContainerLow = Color(sidebar),
+            surfaceContainer = Color(sidebar), surfaceContainerHigh = up,
+            surfaceContainerHighest = Color(hover),
+            outline = Color(textFaint), outlineVariant = Color(line),
+            inverseSurface = words, inverseOnSurface = page, inversePrimary = a
+        )
+    } else {
+        lightColorScheme(
+            primary = a, onPrimary = onAccent,
+            primaryContainer = container, onPrimaryContainer = words,
+            secondary = Color(textDim), onSecondary = Color.White,
+            secondaryContainer = up, onSecondaryContainer = words,
+            tertiary = a, onTertiary = onAccent,
+            background = page, onBackground = words,
+            surface = page, onSurface = words,
+            surfaceVariant = up, onSurfaceVariant = Color(textDim),
+            surfaceContainerLowest = Color.White, surfaceContainerLow = Color(sidebar),
+            surfaceContainer = Color(sidebar), surfaceContainerHigh = Color(base),
+            surfaceContainerHighest = Color(hover),
+            outline = Color(textFaint), outlineVariant = Color(line),
+            inverseSurface = words, inverseOnSurface = page, inversePrimary = a
+        )
     }
 }

@@ -1,28 +1,40 @@
 package com.exo.musicplayer.ui
 
 import android.app.Application
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.exo.musicplayer.data.db.HourBucket
-import com.exo.musicplayer.data.db.Lyrics
+import com.exo.musicplayer.BuildConfig
 import com.exo.musicplayer.data.archive.ArchiveEntry
 import com.exo.musicplayer.data.archive.MusicArchive
+import com.exo.musicplayer.data.db.HourBucket
+import com.exo.musicplayer.data.db.Lyrics
+import com.exo.musicplayer.data.db.MusicDatabase
 import com.exo.musicplayer.data.db.PlaylistSummary
-import com.exo.musicplayer.data.playlist.ImportResult as PlaylistImport
-import com.exo.musicplayer.data.playlist.PlaylistEntry
-import com.exo.musicplayer.data.playlist.PlaylistFile
 import com.exo.musicplayer.data.db.SmartPlaylist
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.db.TrackListenTime
 import com.exo.musicplayer.data.db.WeatherBucket
 import com.exo.musicplayer.data.ingest.FolderScanner
+import com.exo.musicplayer.data.ingest.ImportResult
+import com.exo.musicplayer.data.library.AudioPrint
+import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.library.DuplicateFinder
 import com.exo.musicplayer.data.library.DuplicateGroup
+import com.exo.musicplayer.data.library.LoudnessMeter
+import com.exo.musicplayer.data.library.PhoneBackup
+import com.exo.musicplayer.data.library.SearchQuery
+import com.exo.musicplayer.data.library.TelegramName
 import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.lyrics.LyricLine
 import com.exo.musicplayer.data.lyrics.LyricsFetch
-import com.exo.musicplayer.data.ingest.ImportResult
+import com.exo.musicplayer.data.lyrics.LyricsTerm
+import com.exo.musicplayer.data.playlist.PlaylistEntry
+import com.exo.musicplayer.data.playlist.PlaylistFile
+import com.exo.musicplayer.data.prefs.GroupSort
+import com.exo.musicplayer.data.prefs.LibrarySort
+import com.exo.musicplayer.data.prefs.LibraryView
 import com.exo.musicplayer.data.recognition.AudioSampler
 import com.exo.musicplayer.data.recognition.AudiusProvider
 import com.exo.musicplayer.data.recognition.DeezerProvider
@@ -33,24 +45,26 @@ import com.exo.musicplayer.data.recognition.MusicBrainzProvider
 import com.exo.musicplayer.data.recognition.MusicMatch
 import com.exo.musicplayer.data.recognition.RecognitionResult
 import com.exo.musicplayer.data.recognition.YouTubeSearchProvider
-import com.exo.musicplayer.data.repo.SortMode
+import com.exo.musicplayer.data.update.Updates
 import com.exo.musicplayer.data.weather.Affinity
 import com.exo.musicplayer.data.weather.WeatherAffinity
 import com.exo.musicplayer.data.weather.WeatherSnapshot
 import com.exo.musicplayer.musicApp
 import com.exo.musicplayer.playback.AudioFxState
 import com.exo.musicplayer.playback.AudioOutput
+import com.exo.musicplayer.playback.FxPreset
 import com.exo.musicplayer.playback.InterruptionBehavior
 import com.exo.musicplayer.playback.InterruptionState
-import com.exo.musicplayer.playback.FxPreset
 import com.exo.musicplayer.playback.PlaybackState
 import com.exo.musicplayer.playback.ReverbRoom
+import com.exo.musicplayer.playback.Sleep
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -61,10 +75,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import java.io.File
 
 /** What the Moods tab should be showing right now. */
@@ -89,12 +106,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val playback = app.playback
     private val stats = app.stats
     private val weather = app.weather
+    private val prefs = app.prefs
 
     private val started = SharingStarted.WhileSubscribed(5_000)
 
-    // The same sources and order as the Windows cover tool: YouTube first, then
-    // the stores and free catalogues, MusicBrainz last.
-    private val coverSearch = MetadataProviderChain(
+    // The same sources, in the same order, as Windows uses for covers and for
+    // looking a song up by name: YouTube first, then the stores and free
+    // catalogues, MusicBrainz last.
+    private val lookup = MetadataProviderChain(
         listOf(
             YouTubeSearchProvider(),
             ITunesProvider(),
@@ -105,18 +124,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     )
 
-    private val _sort = MutableStateFlow(SortMode.TITLE)
-    val sort: StateFlow<SortMode> = _sort.asStateFlow()
+    /** The cover services, in their usual order, for the Settings choice. */
+    val coverProviders: List<String> get() = lookup.labels
 
-    val tracks: StateFlow<List<Track>> = _sort
-        .flatMapLatest { library.observeTracks(it) }
+    // ---- The library, and how it's ordered ------------------------------------
+
+    private val allTracks: StateFlow<List<Track>> = library.observeAllTracks()
         .stateIn(viewModelScope, started, emptyList())
+
+    private val listenTotals: StateFlow<Map<Long, Long>> = stats.observeListenTotals()
+        .map { rows -> rows.associate { it.trackId to it.totalMs } }
+        .stateIn(viewModelScope, started, emptyMap())
+
+    val sort: StateFlow<LibrarySort> = prefs.sort
+    val view: StateFlow<LibraryView> = prefs.view
+    val albumSort: StateFlow<GroupSort> = prefs.albumSort
+    val artistSort: StateFlow<GroupSort> = prefs.artistSort
+    val savedTab: StateFlow<String> = prefs.tab
+
+    fun setSort(value: LibrarySort) = prefs.setSort(value)
+    fun setView(value: LibraryView) = prefs.setView(value)
+    fun setAlbumSort(value: GroupSort) = prefs.setAlbumSort(value)
+    fun setArtistSort(value: GroupSort) = prefs.setArtistSort(value)
+    fun rememberTab(name: String) = prefs.setTab(name)
+
+    val tracks: StateFlow<List<Track>> = combine(allTracks, prefs.sort, listenTotals) { all, sort, listened ->
+        withContext(Dispatchers.Default) { Sorting.tracks(all, sort, listened) }
+    }.stateIn(viewModelScope, started, emptyList())
+
+    val albums: StateFlow<List<TrackGroup>> = combine(allTracks, prefs.albumSort) { all, sort ->
+        withContext(Dispatchers.Default) { Sorting.albums(all, sort) }
+    }.stateIn(viewModelScope, started, emptyList())
+
+    val artists: StateFlow<List<TrackGroup>> = combine(allTracks, prefs.artistSort) { all, sort ->
+        withContext(Dispatchers.Default) { Sorting.artists(all, sort) }
+    }.stateIn(viewModelScope, started, emptyList())
+
+    private val _openGroup = MutableStateFlow<String?>(null)
+
+    /** The album or artist opened from its card, if any; kept current as its songs change. */
+    val openGroup: StateFlow<TrackGroup?> = combine(_openGroup, albums, artists, prefs.view) { key, a, b, view ->
+        if (key == null) null else (if (view == LibraryView.ARTISTS) b else a).firstOrNull { it.key == key }
+    }.stateIn(viewModelScope, started, null)
+
+    fun openGroup(key: String?) { _openGroup.value = key }
 
     val favorites: StateFlow<List<Track>> = library.observeFavorites()
         .stateIn(viewModelScope, started, emptyList())
 
     val playlists: StateFlow<List<PlaylistSummary>> = library.observePlaylists()
         .stateIn(viewModelScope, started, emptyList())
+
+    val libraryIsEmpty: StateFlow<Boolean> = allTracks
+        .map { it.isEmpty() }
+        .stateIn(viewModelScope, started, false)
+
+    /** The lists worked out from the library and what's been played, as on Windows. */
+    val autoLists: StateFlow<Map<AutoPlaylist, List<Track>>> = allTracks.map { all ->
+        withContext(Dispatchers.Default) {
+            val cap = AutoPlaylist.CAP
+            mapOf(
+                AutoPlaylist.RECENT to all.sortedByDescending { it.addedAt }.take(cap),
+                AutoPlaylist.HISTORY to all.filter { it.lastPlayedAt != null }
+                    .sortedByDescending { it.lastPlayedAt }.take(cap),
+                AutoPlaylist.MOST_PLAYED to all.filter { it.playCount > 0 }
+                    .sortedByDescending { it.playCount }.take(cap),
+                AutoPlaylist.NEVER_PLAYED to all.filter { it.playCount == 0 },
+                AutoPlaylist.TOP_RATED to all.filter { it.rating >= 4 }
+                    .sortedWith(compareByDescending<Track> { it.rating }.thenBy { it.title.lowercase() }),
+                AutoPlaylist.FAVOURITES to all.filter { it.isFavorite }.sortedBy { it.title.lowercase() }
+            )
+        }
+    }.stateIn(viewModelScope, started, emptyMap())
+
+    fun playAuto(kind: AutoPlaylist, shuffled: Boolean = false) {
+        val list = autoLists.value[kind].orEmpty()
+        if (list.isEmpty()) return
+        playback.play(if (shuffled) list.shuffled() else list, 0)
+    }
+
+    // ---- Playback -------------------------------------------------------------
 
     val playbackState: StateFlow<PlaybackState> = playback.state
 
@@ -132,31 +219,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .distinctUntilChanged()
         .stateIn(viewModelScope, started, false)
 
-    val currentTrack: StateFlow<Track?> = combine(playback.state, tracks) { state, all ->
-        all.firstOrNull { it.id == state.currentTrackId }
+    val currentTrack: StateFlow<Track?> = combine(currentTrackId, allTracks) { id, all ->
+        all.firstOrNull { it.id == id }
     }.stateIn(viewModelScope, started, null)
 
-    val queue: StateFlow<List<Track>> = combine(playback.state, tracks) { state, all ->
+    /** The queue in the order it will play, current song included. */
+    val queue: StateFlow<List<Track>> = combine(
+        playback.state.map { it.queueTrackIds }.distinctUntilChanged(),
+        allTracks
+    ) { ids, all ->
         val byId = all.associateBy { it.id }
-        state.queueTrackIds.mapNotNull { byId[it] }
+        ids.mapNotNull { byId[it] }
     }.stateIn(viewModelScope, started, emptyList())
 
-    // ---- Search ----
+    fun playFrom(list: List<Track>, index: Int) = playback.play(list, index)
+    fun playAll() = playback.play(tracks.value, 0)
+
+    fun shuffleAll() {
+        val all = tracks.value
+        if (all.isEmpty()) return
+        playback.play(all.shuffled(), 0)
+    }
+
+    fun togglePlayPause() = playback.togglePlayPause()
+    fun next() = playback.next()
+    fun previous() = playback.previous()
+    fun seekToFraction(fraction: Float) = playback.seekToFraction(fraction)
+    fun toggleShuffle() = playback.toggleShuffle()
+    fun cycleRepeat() = playback.cycleRepeat()
+    fun playNext(track: Track) = playback.playNext(listOf(track))
+    fun addToQueue(track: Track) = playback.addToQueue(listOf(track))
+    fun jumpToQueueIndex(position: Int) = playback.jumpToQueueIndex(position)
+    fun removeFromQueue(position: Int) = playback.removeFromQueue(position)
+    fun moveInQueue(from: Int, to: Int) = playback.moveInQueue(from, to)
+    fun clearQueue() = playback.clearQueue()
+
+    // ---- Sleep timer, crossfade, levelling --------------------------------------
+
+    val sleep: StateFlow<Sleep> = app.sleep.state
+    fun sleepIn(minutes: Int) = app.sleep.setMinutes(minutes)
+    fun sleepAtEndOfSong() = app.sleep.endOfSong()
+    fun cancelSleep() = app.sleep.cancel()
+
+    val crossfadeSeconds: StateFlow<Int> = prefs.crossfadeSeconds
+    fun setCrossfadeSeconds(seconds: Int) = prefs.setCrossfadeSeconds(seconds)
+    val levelling: StateFlow<Boolean> = prefs.levelling
+    fun setLevelling(on: Boolean) = prefs.setLevelling(on)
+    val sleepFade: StateFlow<Boolean> = prefs.sleepFade
+    fun setSleepFade(on: Boolean) = prefs.setSleepFade(on)
+
+    // ---- Search ---------------------------------------------------------------
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
-    val searchResults: StateFlow<List<Track>> = _query
-        .debounce(180)
-        .flatMapLatest { text ->
-            if (text.isBlank()) flowOf(emptyList()) else library.search(text.trim())
+    /**
+     * The box understands the same filters as on Windows - artist:, album:,
+     * genre:, rating:4+, year:2015-2020, plays:0, added:30d, fav:, quoted
+     * phrases - and ignores accents, because it's the same parser.
+     */
+    val searchResults: StateFlow<List<Track>> = combine(_query.debounce(150), tracks) { text, all ->
+        if (text.isBlank()) emptyList() else withContext(Dispatchers.Default) {
+            val parsed = SearchQuery.of(text.trim())
+            all.filter { library.matches(parsed, it) }
         }
-        .stateIn(viewModelScope, started, emptyList())
+    }.stateIn(viewModelScope, started, emptyList())
+
+    val recentSearches: StateFlow<List<String>> = prefs.searches
 
     fun setQuery(value: String) { _query.value = value }
-    fun setSort(value: SortMode) { _sort.value = value }
+    fun rememberSearch() = prefs.rememberSearch(_query.value)
+    fun forgetSearches() = prefs.forgetSearches()
 
-    // ---- Stats ----
+    init {
+        // Something typed and left alone for a moment, with results, is worth
+        // offering again; a half-typed word that was deleted isn't.
+        viewModelScope.launch {
+            _query.debounce(1_500).collect { text ->
+                if (text.isNotBlank() && searchResults.value.isNotEmpty()) prefs.rememberSearch(text)
+            }
+        }
+    }
+
+    // ---- Stats ----------------------------------------------------------------
 
     val totalListenedMs: StateFlow<Long> = stats.observeTotalListenedMs()
         .stateIn(viewModelScope, started, 0L)
@@ -168,13 +313,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, started, 0)
 
     val topTracks: StateFlow<List<Pair<Track, TrackListenTime>>> =
-        combine(stats.observeTopByListenTime(25), tracks) { rows, all ->
+        combine(stats.observeTopByListenTime(25), allTracks) { rows, all ->
             val byId = all.associateBy { it.id }
             rows.mapNotNull { row -> byId[row.trackId]?.let { it to row } }
         }.stateIn(viewModelScope, started, emptyList())
 
     val topThisWeek: StateFlow<List<Pair<Track, TrackListenTime>>> =
-        combine(stats.observeTopThisWeek(10), tracks) { rows, all ->
+        combine(stats.observeTopThisWeek(10), allTracks) { rows, all ->
             val byId = all.associateBy { it.id }
             rows.mapNotNull { row -> byId[row.trackId]?.let { it to row } }
         }.stateIn(viewModelScope, started, emptyList())
@@ -185,7 +330,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val listeningByWeather: StateFlow<List<WeatherBucket>> = stats.observeByWeather()
         .stateIn(viewModelScope, started, emptyList())
 
-    // ---- Moods (weather matching) ----
+    // ---- Moods (weather matching) ---------------------------------------------
 
     private val _mood = MutableStateFlow<MoodState>(MoodState.Loading)
     val mood: StateFlow<MoodState> = _mood.asStateFlow()
@@ -225,39 +370,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (ready.tracks.isNotEmpty()) playback.play(ready.tracks, 0)
     }
 
-    // ---- Playback actions ----
-
-    fun playFrom(list: List<Track>, index: Int) = playback.play(list, index)
-    fun playAll() = playback.play(tracks.value, 0)
-
-    fun shuffleAll() {
-        val all = tracks.value
-        if (all.isEmpty()) return
-        playback.play(all.shuffled(), 0)
-    }
-
-    fun togglePlayPause() = playback.togglePlayPause()
-    fun next() = playback.next()
-    fun previous() = playback.previous()
-    fun seekToFraction(fraction: Float) = playback.seekToFraction(fraction)
-    fun toggleShuffle() = playback.toggleShuffle()
-    fun cycleRepeat() = playback.cycleRepeat()
-    fun playNext(track: Track) = playback.playNext(track)
-    fun addToQueue(track: Track) = playback.addToQueue(listOf(track))
-    fun jumpToQueueIndex(index: Int) = playback.jumpToQueueIndex(index)
-    fun removeFromQueue(index: Int) = playback.removeFromQueue(index)
-
-    // ---- Importing from the file picker ----
-
-    private val _importing = MutableStateFlow(false)
-    val importing: StateFlow<Boolean> = _importing.asStateFlow()
+    // ---- Importing ------------------------------------------------------------
 
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
     fun consumeNotice() { _notice.value = null }
 
-    /** Live progress for a bulk folder import. */
+    /** Live progress for a folder import. */
     data class BulkProgress(
         val done: Int = 0,
         val total: Int = 0,
@@ -273,11 +393,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _bulk = MutableStateFlow<BulkProgress?>(null)
     val bulk: StateFlow<BulkProgress?> = _bulk.asStateFlow()
 
-    private var bulkJob: Job? = null
+    private var importJob: Job? = null
 
     fun cancelBulkImport() {
-        bulkJob?.cancel()
-        bulkJob = null
+        importJob?.cancel()
+        importJob = null
         _bulk.value = null
     }
 
@@ -288,18 +408,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun importFromUris(uris: List<Uri>) = viewModelScope.launch {
         if (uris.isEmpty()) return@launch
-        _importing.value = true
         var added = 0
         var duplicates = 0
         var failed = 0
-        for (uri in uris) {
+        _bulk.value = BulkProgress(total = uris.size)
+        for ((index, uri) in uris.withIndex()) {
+            _bulk.value = BulkProgress(done = index, total = uris.size, added = added, duplicates = duplicates, failed = failed)
             when (app.importer.import(uri, sourceApp = "Files")) {
                 is ImportResult.Imported -> added++
                 is ImportResult.Duplicate -> duplicates++
                 else -> failed++
             }
         }
-        _importing.value = false
+        _bulk.value = null
         _notice.value = summarise(added, duplicates, failed)
     }
 
@@ -311,8 +432,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * again rather than resumed.
      */
     fun importFolder(treeUri: Uri, label: String?) {
-        bulkJob?.cancel()
-        bulkJob = viewModelScope.launch {
+        importJob?.cancel()
+        importJob = viewModelScope.launch {
             _bulk.value = BulkProgress(scanning = true)
             val found = runCatching {
                 FolderScanner.findAudio(getApplication(), treeUri)
@@ -357,139 +478,329 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (failed > 0) append(", $failed skipped")
     }
 
-    // ---- Bulk cover refresh ----
+    // ---- Library tools ----------------------------------------------------------
+    //
+    // One job at a time, shown where it was started: the tools sheet, or Fix.
 
-    /** How much work each bulk job has left, for the tools dialog. */
-    data class BulkCounts(val covers: Int, val identify: Int, val lyrics: Int, val total: Int)
+    private val _job = MutableStateFlow<ToolJob?>(null)
+    val job: StateFlow<ToolJob?> = _job.asStateFlow()
+    private var toolJob: Job? = null
 
-    val bulkCounts: StateFlow<BulkCounts> = tracks.map { all ->
-        BulkCounts(
-            covers = all.count { it.artCheckedAt == null },
-            identify = all.count { it.identifiedAt == null },
-            lyrics = all.count { it.lyricsCheckedAt == null },
-            total = all.size
-        )
-    }.stateIn(viewModelScope, started, BulkCounts(0, 0, 0, 0))
+    fun cancelJob() {
+        toolJob?.cancel()
+        toolJob = null
+        _job.value = _job.value?.copy(running = false, current = "", note = "Stopped.")
+    }
 
-    /**
-     * Fills in missing cover art across the library.
-     *
-     * Uses the free metadata search on each track's existing tags rather than
-     * fingerprinting: a fingerprint costs a decode plus a network round trip per
-     * song, which on a large library is minutes of work for art a title lookup
-     * already finds.
-     *
-     * Five songs at a time, each asking every catalogue at once, as on Windows;
-     * a dead image link moves on to the next catalogue's picture.
-     */
-    fun updateAllCovers(redo: Boolean = false) =
-        runBulk("cover", redo, parallel = 5) { track ->
-            val query = listOfNotNull(track.artist, track.title).joinToString(" ")
-            val ok = runCatching {
-                coverSearch.findArtwork(query) { url ->
-                    library.updateArtwork(track, url).takeIf { it }
-                }
-            }.getOrNull() == true
-            library.markArtChecked(track.id)
-            ok
+    fun dismissJob() {
+        if (_job.value?.running != true) _job.value = null
+    }
+
+    /** How many songs each tool would visit without redo, for the tools sheet. */
+    val toolCounts: StateFlow<Map<LibraryTool, Int>> = allTracks.map { all ->
+        LibraryTool.entries.associateWith { tool -> all.count { needs(tool, it, names = true, tags = true) } }
+    }.stateIn(viewModelScope, started, emptyMap())
+
+    private fun fileStem(track: Track): String =
+        (track.originalName ?: File(track.filePath).name).substringBeforeLast('.')
+
+    /** Whether [tool] has something to do for [track] when not redoing everything. */
+    private fun needs(tool: LibraryTool, track: Track, names: Boolean, tags: Boolean): Boolean = when (tool) {
+        LibraryTool.NAMES_TAGS ->
+            (names && (track.artist.isNullOrBlank() || track.title == fileStem(track))) ||
+                (tags && (track.album.isNullOrBlank() || track.year == null || track.genre.isNullOrBlank()))
+        LibraryTool.IDENTIFY -> track.identifiedAt == null
+        LibraryTool.TELEGRAM ->
+            track.durationMs <= 0L ||
+                (track.artist.isNullOrBlank() && TelegramName.of(fileStem(track)) != null)
+        LibraryTool.COVERS -> track.artCheckedAt == null
+        LibraryTool.LYRICS -> track.lyricsCheckedAt == null
+        LibraryTool.LEVELS -> track.levelDb == null
+    }
+
+    /** Runs one of the library tools over the whole library. */
+    fun runTool(tool: LibraryTool, redo: Boolean, names: Boolean = true, tags: Boolean = true) {
+        if (_job.value?.running == true) return
+        val targets = allTracks.value.filter { redo || needs(tool, it, names, tags) }
+        if (targets.isEmpty()) {
+            _job.value = ToolJob(tool.label, running = false, note = "Nothing left to do. Tick Redo to run it again.")
+            return
         }
-
-    /**
-     * Fingerprints every track and rewrites its tags from what comes back.
-     *
-     * Far slower than the cover pass — each track is decoded and sent to Shazam —
-     * so it is a separate, explicit action rather than part of a general
-     * "tidy up my library" button.
-     */
-    fun identifyAll(redo: Boolean = false) = runBulk("identify", redo) { track ->
-        val samples = runCatching {
-            AudioSampler.sampleMono16k(getApplication(), Uri.fromFile(File(track.filePath)))
-        }.getOrNull()
-
-        val matched = samples != null &&
-            (runCatching { app.shazam.recognize(samples) }.getOrNull()
-                as? RecognitionResult.Found)
-                ?.matches?.firstOrNull()
-                ?.let { runCatching { library.applyMatch(track, it) }.isSuccess } == true
-
-        library.markIdentified(track.id)
-        matched
-    }
-
-    /** Fetches lyrics for the whole library through the four-tier chain. */
-    fun fetchAllLyrics(redo: Boolean = false) = runBulk("lyrics", redo, parallel = 5) { track ->
-        val found = runCatching { app.lyrics.fetch(track, force = redo) }
-            .getOrNull() is LyricsFetch.Found
-        library.markLyricsChecked(track.id)
-        found
+        val workers = when (tool) {
+            // Decoding audio, so a couple at most.
+            LibraryTool.IDENTIFY -> 1
+            LibraryTool.LEVELS -> 2
+            else -> 5
+        }
+        runJob(tool.label, targets, workers, rescan = false) { track ->
+            when (tool) {
+                LibraryTool.NAMES_TAGS -> namesAndTags(track, names, tags)
+                LibraryTool.IDENTIFY -> identify(track)
+                LibraryTool.TELEGRAM -> telegram(track)
+                LibraryTool.COVERS -> cover(track)
+                LibraryTool.LYRICS -> lyricsFor(track, redo)
+                LibraryTool.LEVELS -> level(track)
+            }
+        }
     }
 
     /**
-     * Shared driver for the bulk jobs.
-     *
-     * Every track is stamped once attempted, successfully or not, so a song the
-     * services simply don't know is not retried on every subsequent run. Passing
-     * [redo] ignores those stamps and reprocesses everything.
+     * Works through [targets] a few at a time, keeping [job] current. A song
+     * that throws counts as nothing found rather than ending the run.
      */
-    private fun runBulk(
-        kind: String,
-        redo: Boolean = false,
-        parallel: Int = 1,
-        work: suspend (Track) -> Boolean
+    private fun runJob(
+        label: String,
+        targets: List<Track>,
+        workers: Int,
+        rescan: Boolean,
+        finish: ((updated: Int, missed: Int) -> String)? = null,
+        step: suspend (Track) -> Boolean
     ) {
-        bulkJob?.cancel()
-        bulkJob = viewModelScope.launch {
-            val all = tracks.value
-            val targets = if (redo) all else all.filter {
-                when (kind) {
-                    "cover" -> it.artCheckedAt == null
-                    "identify" -> it.identifiedAt == null
-                    else -> it.lyricsCheckedAt == null
-                }
-            }
-            if (targets.isEmpty()) {
-                _notice.value = "Nothing left to do — tick redo to run it again"
-                return@launch
-            }
-
-            var finished = 0
+        toolJob = viewModelScope.launch {
             var done = 0
-            var failed = 0
+            var updated = 0
+            var missed = 0
+            val inFlight = mutableListOf<String>()
             val queue = Channel<Track>(Channel.UNLIMITED)
             targets.forEach { queue.trySend(it) }
             queue.close()
-            _bulk.value = BulkProgress(total = targets.size)
-            // Workers share the main thread between suspensions, so the counters
-            // need no locking.
+            _job.value = ToolJob(label, total = targets.size)
             coroutineScope {
-                repeat(parallel) {
+                repeat(workers) {
                     launch {
                         for (track in queue) {
-                            _bulk.value = BulkProgress(
-                                done = finished,
-                                total = targets.size,
-                                added = done,
-                                failed = failed,
-                                currentName = track.title
-                            )
-                            if (runCatching { work(track) }.getOrDefault(false)) done++ else failed++
-                            finished++
+                            inFlight += track.title
+                            _job.value = _job.value?.copy(current = inFlight.joinToString("  ·  "))
+                            val ok = try {
+                                step(track)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                false
+                            }
+                            if (ok) updated++ else missed++
+                            done++
+                            inFlight -= track.title
+                            _job.value = _job.value?.copy(done = done, current = inFlight.joinToString("  ·  "))
                         }
                     }
                 }
             }
-
-            _bulk.value = null
-            _notice.value = when (kind) {
-                "cover" -> "Updated $done covers, $failed not found"
-                "identify" -> "Identified $done tracks, $failed no match"
-                else -> "Found lyrics for $done tracks, $failed missing"
-            }
+            _job.value = ToolJob(
+                label,
+                done = targets.size,
+                total = targets.size,
+                running = false,
+                note = finish?.invoke(updated, missed) ?: buildString {
+                    append("$updated updated")
+                    if (missed > 0) append(", $missed with nothing found")
+                    append(".")
+                }
+            )
+            toolJob = null
         }
     }
 
+    /** By name: the title and artist, or the album, year and genre, or both. */
+    private suspend fun namesAndTags(track: Track, names: Boolean, tags: Boolean): Boolean {
+        val details = lookup.findDetails(track.artist, track.title, giveUpMs = LOOKUP_GIVE_UP_MS) ?: return false
+        val useful = (names && (details.title != null || details.artist != null)) ||
+            (tags && (details.album != null || details.year != null || details.genre != null))
+        if (!useful) return false
+        library.applyDetails(
+            track,
+            title = details.title.takeIf { names },
+            artist = details.artist.takeIf { names },
+            album = details.album.takeIf { tags },
+            year = details.year.takeIf { tags },
+            genre = details.genre.takeIf { tags }
+        )
+        return true
+    }
 
-    // ---- Duplicates ----
+    private suspend fun identify(track: Track): Boolean {
+        val match = listenTo(track)
+        val applied = match != null && runCatching { library.applyMatch(track, match) }.isSuccess
+        library.markIdentified(track.id)
+        return applied
+    }
+
+    /**
+     * Telegram's exports: a name from "Title   Artist" for a song with no
+     * artist, and a length for one whose file never stated it. Seeking in
+     * those works on the phone regardless; the player counts frames.
+     */
+    private suspend fun telegram(track: Track): Boolean {
+        var mended = false
+        val named = TelegramName.of(fileStem(track))
+        if (named != null && track.artist.isNullOrBlank()) {
+            library.applyDetails(track, title = named.title, artist = named.artist)
+            mended = true
+        }
+        if (track.durationMs <= 0L) {
+            val measured = withContext(Dispatchers.IO) {
+                runCatching {
+                    MediaMetadataRetriever().run {
+                        try {
+                            setDataSource(track.filePath)
+                            extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                        } finally {
+                            release()
+                        }
+                    }
+                }.getOrNull()
+            }
+            if (measured != null && measured > 0) {
+                library.setDuration(track.id, measured)
+                mended = true
+            }
+        }
+        return mended
+    }
+
+    private suspend fun cover(track: Track): Boolean {
+        val query = listOfNotNull(track.artist, track.title).joinToString(" ")
+        val ok = runCatching {
+            lookup.preferring(prefs.coverProvider.value.ifBlank { null }).findArtwork(query) { url ->
+                library.updateArtwork(track, url).takeIf { it }
+            }
+        }.getOrNull() == true
+        library.markArtChecked(track.id)
+        return ok
+    }
+
+    private suspend fun lyricsFor(track: Track, force: Boolean): Boolean {
+        val found = runCatching { app.lyrics.fetch(track, force = force) }.getOrNull() is LyricsFetch.Found
+        library.markLyricsChecked(track.id)
+        return found
+    }
+
+    private suspend fun level(track: Track): Boolean {
+        val reading = withContext(Dispatchers.IO) { LoudnessMeter.measure(File(track.filePath)) } ?: return false
+        library.setLevel(track.id, reading.dbfs, reading.peak)
+        return true
+    }
+
+    /** Fingerprinting decodes audio, so however many songs are being fixed, one is heard at a time. */
+    private val listening = Mutex()
+
+    /** The song identified from its own audio. */
+    private suspend fun listenTo(track: Track): MusicMatch? = listening.withLock {
+        val samples = runCatching {
+            AudioSampler.sampleMono16k(getApplication(), Uri.fromFile(File(track.filePath)))
+        }.getOrNull() ?: return null
+        (runCatching { app.shazam.recognize(samples) }.getOrNull() as? RecognitionResult.Found)
+            ?.matches?.firstOrNull()
+    }
+
+    // ---- Fix, for the songs picked out ------------------------------------------
+
+    private val _fixTargets = MutableStateFlow<List<Track>>(emptyList())
+    val fixTargets: StateFlow<List<Track>> = _fixTargets.asStateFlow()
+
+    fun fixSelection(visible: List<Track>) {
+        _fixTargets.value = selectedTracks(visible)
+    }
+
+    fun fixOne(track: Track) {
+        _fixTargets.value = listOf(track)
+    }
+
+    fun dismissFix() {
+        _fixTargets.value = emptyList()
+        dismissJob()
+    }
+
+    /**
+     * Fetches whichever parts were ticked for the songs picked out.
+     *
+     * Unlike the tools this never skips a song for having been visited before:
+     * picking songs out is the instruction to do them now. A song is looked up
+     * by name when it has one worth searching for; one whose name is only an
+     * id is identified by listening first, then looked up under the name that
+     * turned out to be its own.
+     */
+    fun runFix(tags: Boolean, genres: Boolean, lyrics: Boolean) {
+        val targets = _fixTargets.value
+        if (_job.value?.running == true || targets.isEmpty() || !(tags || genres || lyrics)) return
+        var tagged = 0
+        var genred = 0
+        var lyricked = 0
+        var heard = 0
+        runJob(
+            FIX_LABEL, targets, workers = 4, rescan = false,
+            finish = { _, missed ->
+                val found = buildList {
+                    if (tags) add("tags for $tagged")
+                    if (genres) add("genres for $genred")
+                    if (lyrics) add("lyrics for $lyricked")
+                }
+                buildString {
+                    append("Found ${found.joinToString(", ")} of ${targets.size}.")
+                    if (heard > 0) append(" $heard identified by listening.")
+                    if (missed > 0) append(" Nothing at all for $missed.")
+                }
+            }
+        ) { track ->
+            var details = if (nameWorthSearching(track)) {
+                lookup.findDetails(track.artist, track.title, giveUpMs = LOOKUP_GIVE_UP_MS)
+            } else {
+                null
+            }
+            var match: MusicMatch? = null
+            if (details == null) {
+                match = listenTo(track)
+                if (match != null && (tags || genres)) {
+                    details = lookup.findDetails(match.artist, match.title, giveUpMs = LOOKUP_GIVE_UP_MS)
+                }
+            }
+            if (match != null) heard++
+            val title = details?.title ?: match?.title
+            val artist = details?.artist ?: match?.artist
+            val album = details?.album ?: match?.album
+            val year = details?.year ?: match?.releaseYear
+            val genre = details?.genre ?: match?.genre
+
+            val haveTags = tags && (title != null || artist != null || album != null || year != null)
+            val haveGenre = genres && genre != null
+            if (haveTags || haveGenre) {
+                library.applyDetails(
+                    track,
+                    title = title.takeIf { tags },
+                    artist = artist.takeIf { tags },
+                    album = album.takeIf { tags },
+                    year = year.takeIf { tags },
+                    genre = genre.takeIf { genres }
+                )
+                if (haveTags) tagged++
+                if (haveGenre) genred++
+            }
+            // Looked for under the song's real name whenever one was just found,
+            // whether or not that name was wanted in the library.
+            val gotLyrics = lyrics && runCatching {
+                app.lyrics.fetch(track.copy(title = title ?: track.title, artist = artist ?: track.artist), force = true)
+            }.getOrNull() is LyricsFetch.Found
+            if (gotLyrics) lyricked++
+            haveTags || haveGenre || gotLyrics
+        }
+    }
+
+    /**
+     * Whether searching by the song's name stands a chance. An artist makes it
+     * worth a try. Without one, a title of nothing but digits and the letters
+     * a to f is an id - `9239d7ef-aeb9-45d2-…` - which a search only ever
+     * matches by accident.
+     */
+    private fun nameWorthSearching(track: Track): Boolean {
+        if (!track.artist.isNullOrBlank()) return true
+        val name = track.title.trim()
+        if (name.isEmpty()) return false
+        val digits = name.count { it.isDigit() }
+        val wordLetters = name.count { it.isLetter() && it.lowercaseChar() !in 'a'..'f' }
+        return wordLetters > 0 || digits < 4
+    }
+
+    // ---- Duplicates -----------------------------------------------------------
 
     private val _duplicates = MutableStateFlow<List<DuplicateGroup>>(emptyList())
     val duplicates: StateFlow<List<DuplicateGroup>> = _duplicates.asStateFlow()
@@ -497,11 +808,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _duplicateScanning = MutableStateFlow(false)
     val duplicateScanning: StateFlow<Boolean> = _duplicateScanning.asStateFlow()
 
+    private val _duplicateListening = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** Songs listened to so far and how many need it, while a scan is listening. */
+    val duplicateListening: StateFlow<Pair<Int, Int>?> = _duplicateListening.asStateFlow()
+
+    private val printDao by lazy { MusicDatabase.get(getApplication()).trackPrintDao() }
+
+    /**
+     * Finds the same recording stored twice, by how it sounds. Each song is
+     * listened to once - thirty seconds from its middle - and the print kept,
+     * so a second scan only listens to songs added since.
+     */
     fun scanDuplicates() = viewModelScope.launch {
+        if (_duplicateScanning.value) return@launch
         _duplicateScanning.value = true
-        _duplicates.value = withContext(Dispatchers.Default) {
-            DuplicateFinder.find(library.allTracks())
+        val songs = library.allTracks()
+        val prints = HashMap<Long, IntArray>()
+        printDao.all().forEach { stored -> AudioPrint.decode(stored.data)?.let { prints[stored.trackId] = it } }
+        val todo = songs.filter { it.id !in prints }
+        if (todo.isNotEmpty()) {
+            _duplicateListening.value = 0 to todo.size
+            var done = 0
+            val work = Channel<Track>(Channel.UNLIMITED)
+            todo.forEach { work.trySend(it) }
+            work.close()
+            coroutineScope {
+                // Two at a time: each one decodes audio, and a phone has the
+                // cores for two without the rest of the app stuttering.
+                repeat(2) {
+                    launch {
+                        for (track in work) {
+                            val print = withContext(Dispatchers.Default) {
+                                runCatching {
+                                    AudioSampler.sampleMono16k(
+                                        getApplication(), Uri.fromFile(File(track.filePath)), AudioPrint.SECONDS
+                                    )?.let { AudioPrint.of(it, 16_000) }?.takeIf { it.isNotEmpty() }
+                                }.getOrNull()
+                            }
+                            if (print != null) {
+                                prints[track.id] = print
+                                printDao.save(com.exo.musicplayer.data.db.TrackPrint(track.id, AudioPrint.encode(print)))
+                            }
+                            done++
+                            _duplicateListening.value = done to todo.size
+                        }
+                    }
+                }
+            }
+            _duplicateListening.value = null
         }
+        _duplicates.value = withContext(Dispatchers.Default) { DuplicateFinder.find(songs, prints) }
         _duplicateScanning.value = false
     }
 
@@ -518,7 +874,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _notice.value = if (removed == 1) "Removed 1 duplicate" else "Removed $removed duplicates"
     }
 
-    // ---- Interruption behaviour ----
+    // ---- Interruption behaviour -------------------------------------------------
 
     val interruption: StateFlow<InterruptionState> = app.interruption.state
 
@@ -527,7 +883,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setPlayDuringCalls(enabled: Boolean) = app.interruption.setPlayDuringCalls(enabled)
 
-    // ---- Audio output ----
+    // ---- Audio output -----------------------------------------------------------
 
     val audioOutputs: StateFlow<List<AudioOutput>> = app.audioOutputs.outputs
     val selectedOutputs: StateFlow<Set<String>> = app.audioOutputs.selectedKeys
@@ -550,11 +906,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun refreshOutputs() = app.audioOutputs.refresh()
-
-    // ---- Audio effects ----
+    // ---- Audio effects ----------------------------------------------------------
 
     val audioFx: StateFlow<AudioFxState> = app.audioFx.state
+    val fxRemembered: StateFlow<Boolean> = app.audioFx.remembered
 
     fun applyFxPreset(preset: FxPreset) = app.audioFx.applyPreset(preset)
     fun setFxSpeed(value: Float) = app.audioFx.setSpeed(value)
@@ -562,14 +917,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setReverbEnabled(enabled: Boolean) = app.audioFx.setReverbEnabled(enabled)
     fun setReverbRoom(room: ReverbRoom) = app.audioFx.setReverbRoom(room)
     fun setReverbAmount(amount: Float) = app.audioFx.setReverbAmount(amount)
+    fun setEqEnabled(enabled: Boolean) = app.audioFx.setEqEnabled(enabled)
+    fun setEqBand(band: Int, db: Float) = app.audioFx.setEqBand(band, db)
+    fun flattenEq() = app.audioFx.flattenEq()
     fun resetFx() = app.audioFx.reset()
 
-    // ---- Lyrics ----
+    fun rememberFxForSong() {
+        app.audioFx.rememberForCurrent()
+        currentTrack.value?.let { _notice.value = "These effects will come back with \"${it.title}\"." }
+    }
+
+    fun forgetFxForSong() {
+        app.audioFx.forgetForCurrent()
+        currentTrack.value?.let { _notice.value = "\"${it.title}\" plays with the usual effects again." }
+    }
+
+    // ---- Lyrics -----------------------------------------------------------------
 
     /** Lyrics for whatever is playing, re-queried as the track changes. */
-    val currentLyrics: StateFlow<Lyrics?> = playback.state
-        .map { it.currentTrackId }
-        .distinctUntilChanged()
+    val currentLyrics: StateFlow<Lyrics?> = currentTrackId
         .flatMapLatest { id -> if (id == null) flowOf(null) else app.lyrics.observe(id) }
         .stateIn(viewModelScope, started, null)
 
@@ -583,7 +949,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _lyricsMessage = MutableStateFlow<String?>(null)
     val lyricsMessage: StateFlow<String?> = _lyricsMessage.asStateFlow()
 
-    fun clearLyricsMessage() { _lyricsMessage.value = null }
+    init {
+        // A message about one song's lyrics means nothing on the next song.
+        viewModelScope.launch { currentTrackId.collect { _lyricsMessage.value = null } }
+    }
 
     fun fetchLyrics(force: Boolean = false) {
         val track = currentTrack.value ?: return
@@ -619,7 +988,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ---- Fix tags (Shazam the file already in the library) ----
+    val lyricsTerm: StateFlow<LyricsTerm> = prefs.lyricsTerm
+    val lyricsPattern: StateFlow<String> = prefs.lyricsPattern
+    fun setLyricsTerm(term: LyricsTerm) = prefs.setLyricsTerm(term)
+    fun setLyricsPattern(pattern: String) = prefs.setLyricsPattern(pattern)
+
+    val coverProvider: StateFlow<String> = prefs.coverProvider
+    fun setCoverProvider(label: String) = prefs.setCoverProvider(label)
+
+    // ---- Identify one song by listening, and choose the match -------------------
 
     private val _tagTarget = MutableStateFlow<Track?>(null)
     val tagTarget: StateFlow<Track?> = _tagTarget.asStateFlow()
@@ -658,7 +1035,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val track = _tagTarget.value ?: return
         viewModelScope.launch {
             runCatching { library.applyMatch(track, match) }
-            _notice.value = "Tags updated"
+            _notice.value = "Details updated"
             dismissFixTags()
         }
     }
@@ -669,128 +1046,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _tagBusy.value = false
     }
 
-    // ---- Library actions ----
+    // ---- Library actions ----------------------------------------------------------
 
     fun toggleFavorite(track: Track) = viewModelScope.launch {
         library.setFavorite(track.id, !track.isFavorite)
     }
 
+    fun setRating(track: Track, stars: Int) = viewModelScope.launch {
+        library.setRating(track.id, stars)
+    }
+
+    private val _rateTarget = MutableStateFlow<Track?>(null)
+    val rateTarget: StateFlow<Track?> = _rateTarget.asStateFlow()
+    fun rate(track: Track?) { _rateTarget.value = track }
+
     fun deleteTrack(track: Track) = viewModelScope.launch {
         playback.evictTrack(track.id)
         library.deleteTrack(track)
-    }
-
-    // ---- Playlist actions ----
-
-    private val _openPlaylistId = MutableStateFlow<Long?>(null)
-
-    val openPlaylist: StateFlow<PlaylistSummary?> =
-        combine(_openPlaylistId, playlists) { id, all -> all.firstOrNull { it.id == id } }
-            .stateIn(viewModelScope, started, null)
-
-    val openPlaylistTracks: StateFlow<List<Track>> = _openPlaylistId
-        .flatMapLatest { id ->
-            if (id == null) flowOf(emptyList()) else library.observePlaylistTracks(id)
-        }
-        .stateIn(viewModelScope, started, emptyList())
-
-    fun showPlaylist(playlistId: Long?) { _openPlaylistId.value = playlistId }
-
-    fun createPlaylist(name: String, seedTrackIds: List<Long> = emptyList()) =
-        viewModelScope.launch {
-            if (name.isBlank()) return@launch
-            val id = runCatching { library.createPlaylist(name) }.getOrNull() ?: return@launch
-            if (seedTrackIds.isNotEmpty()) library.addToPlaylist(id, seedTrackIds)
-        }
-
-    fun addToPlaylist(playlistId: Long, trackId: Long) = viewModelScope.launch {
-        library.addToPlaylist(playlistId, listOf(trackId))
-    }
-
-    fun removeFromPlaylist(playlistId: Long, trackId: Long) = viewModelScope.launch {
-        library.removeFromPlaylist(playlistId, trackId)
-    }
-
-    fun deletePlaylist(playlistId: Long) = viewModelScope.launch {
-        library.deletePlaylist(playlistId)
-    }
-
-    // ---- Editing a track by hand ----
-
-    // ---- Genres, rules, and going back to the file --------------------------
-
-    init {
-        // A library imported before the app read genres has none. One bounded
-        // pass fills them in, and writes an empty genre for files that carry
-        // none so the same songs are not re-read on every launch.
-        viewModelScope.launch { runCatching { library.fillMissingGenres() } }
-    }
-
-    val smartPlaylists: StateFlow<List<SmartPlaylist>> = library.observeSmartPlaylists()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    private val _genrePrompt = MutableStateFlow("")
-    val genrePrompt: StateFlow<String> = _genrePrompt.asStateFlow()
-
-    private val _genreNote = MutableStateFlow<String?>(null)
-    val genreNote: StateFlow<String?> = _genreNote.asStateFlow()
-
-    fun setGenrePrompt(text: String) { _genrePrompt.value = text }
-
-    fun dismissGenreNote() { _genreNote.value = null }
-
-    fun playPrompt() {
-        val prompt = _genrePrompt.value
-        viewModelScope.launch {
-            val list = library.promptTracks(prompt)
-            if (list.isEmpty()) {
-                _genreNote.value = "Nothing matches \"${prompt.trim()}\"."
-            } else {
-                playFrom(list, 0)
-                _genreNote.value = "Playing ${list.size} songs."
-            }
-        }
-    }
-
-    /** Freezes what a prompt matches right now into an ordinary playlist. */
-    fun savePromptAsPlaylist() {
-        val prompt = _genrePrompt.value.trim()
-        viewModelScope.launch {
-            val list = library.promptTracks(prompt)
-            if (list.isEmpty()) {
-                _genreNote.value = "Nothing matches \"$prompt\"."
-                return@launch
-            }
-            val id = library.createPlaylist(prompt.replaceFirstChar { it.uppercase() })
-            library.addToPlaylist(id, list.map { it.id })
-            _genreNote.value = "Saved ${list.size} songs as a playlist."
-        }
-    }
-
-    fun createSmartPlaylist(name: String, rule: String) {
-        viewModelScope.launch {
-            if (rule.isBlank()) {
-                _genreNote.value = "A smart list needs a rule — try rating:4+ or year:2015-2020."
-                return@launch
-            }
-            library.createSmartPlaylist(name, rule)
-            _genreNote.value = "\"$name\" holds ${library.smartTracks(rule).size} songs."
-        }
-    }
-
-    fun deleteSmartPlaylist(id: Long) {
-        viewModelScope.launch { library.deleteSmartPlaylist(id) }
-    }
-
-    fun playSmartPlaylist(list: SmartPlaylist) {
-        viewModelScope.launch {
-            val songs = library.smartTracks(list.rule)
-            if (songs.isEmpty()) {
-                _genreNote.value = "\"${list.name}\" matches nothing right now."
-            } else {
-                playFrom(songs, 0)
-            }
-        }
     }
 
     /** Puts a song's details back to whatever its own file says. */
@@ -798,7 +1070,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _editTarget.value = null
         viewModelScope.launch {
             val back = library.revertToFile(track)
-            _genreNote.value = if (back == null) {
+            _notice.value = if (back == null) {
                 "That file is not where it used to be."
             } else {
                 "\"${back.title}\" is back to what the file says."
@@ -827,7 +1099,185 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ---- Zip and ship ----
+    /** The songs the edit-many dialog is working on. */
+    private val _editMany = MutableStateFlow<List<Track>>(emptyList())
+    val editMany: StateFlow<List<Track>> = _editMany.asStateFlow()
+
+    fun editSelection(visible: List<Track>) { _editMany.value = selectedTracks(visible) }
+    fun dismissEditMany() { _editMany.value = emptyList() }
+
+    /**
+     * Sets whichever fields were filled in on every song being edited. A field
+     * left blank is left alone rather than cleared: the point of editing thirty
+     * songs at once is to set one thing about them.
+     */
+    fun applyToMany(artist: String, album: String, year: String, genre: String) {
+        val targets = _editMany.value
+        _editMany.value = emptyList()
+        clearSelection()
+        val newYear = year.trim().toIntOrNull()
+        viewModelScope.launch {
+            targets.forEach { track ->
+                library.applyDetails(
+                    track,
+                    artist = artist.takeIf { it.isNotBlank() },
+                    album = album.takeIf { it.isNotBlank() },
+                    year = newYear,
+                    genre = genre.takeIf { it.isNotBlank() }
+                )
+            }
+            _notice.value = "Updated ${targets.size} ${if (targets.size == 1) "song" else "songs"}."
+        }
+    }
+
+    // ---- Playlists ----------------------------------------------------------------
+
+    private val _openPlaylistId = MutableStateFlow<Long?>(null)
+
+    val openPlaylist: StateFlow<PlaylistSummary?> =
+        combine(_openPlaylistId, playlists) { id, all -> all.firstOrNull { it.id == id } }
+            .stateIn(viewModelScope, started, null)
+
+    val openPlaylistTracks: StateFlow<List<Track>> = _openPlaylistId
+        .flatMapLatest { id ->
+            if (id == null) flowOf(emptyList()) else library.observePlaylistTracks(id)
+        }
+        .stateIn(viewModelScope, started, emptyList())
+
+    fun showPlaylist(playlistId: Long?) { _openPlaylistId.value = playlistId }
+
+    fun createPlaylist(name: String, seedTrackIds: List<Long> = emptyList()) =
+        viewModelScope.launch {
+            if (name.isBlank()) return@launch
+            val id = runCatching { library.createPlaylist(name.trim()) }.getOrNull()
+            if (id == null) {
+                _notice.value = "There's already a playlist called \"${name.trim()}\"."
+                return@launch
+            }
+            if (seedTrackIds.isNotEmpty()) library.addToPlaylist(id, seedTrackIds)
+            _notice.value = if (seedTrackIds.isEmpty()) "Created \"${name.trim()}\"." else
+                "Created \"${name.trim()}\" with ${seedTrackIds.size} ${if (seedTrackIds.size == 1) "song" else "songs"}."
+        }
+
+    fun renamePlaylist(playlistId: Long, name: String) = viewModelScope.launch {
+        if (name.isBlank()) return@launch
+        runCatching { library.renamePlaylist(playlistId, name.trim()) }
+            .onFailure { _notice.value = "There's already a playlist called \"${name.trim()}\"." }
+    }
+
+    fun addToPlaylist(playlistId: Long, trackId: Long) = viewModelScope.launch {
+        library.addToPlaylist(playlistId, listOf(trackId))
+        _notice.value = "Added to the playlist."
+    }
+
+    fun removeFromPlaylist(playlistId: Long, trackId: Long) = viewModelScope.launch {
+        library.removeFromPlaylist(playlistId, trackId)
+    }
+
+    fun deletePlaylist(playlistId: Long) = viewModelScope.launch {
+        library.deletePlaylist(playlistId)
+    }
+
+    fun playPlaylist(playlistId: Long, startIndex: Int = 0, shuffled: Boolean = false) = viewModelScope.launch {
+        val items = library.playlistTracksOnce(playlistId)
+        if (items.isNotEmpty()) playback.play(if (shuffled) items.shuffled() else items, startIndex)
+    }
+
+    // ---- Genres and rules ---------------------------------------------------------
+
+    init {
+        // A library imported before the app read genres has none. One bounded
+        // pass fills them in, and writes an empty genre for files that carry
+        // none so the same songs are not re-read on every launch.
+        viewModelScope.launch { runCatching { library.fillMissingGenres() } }
+    }
+
+    val smartPlaylists: StateFlow<List<SmartPlaylist>> = library.observeSmartPlaylists()
+        .stateIn(viewModelScope, started, emptyList())
+
+    /** How many songs each smart list holds right now, kept current as the library changes. */
+    val smartCounts: StateFlow<Map<Long, Int>> = combine(smartPlaylists, allTracks) { lists, all ->
+        withContext(Dispatchers.Default) {
+            lists.associate { list ->
+                val parsed = SearchQuery.of(list.rule)
+                list.id to all.count { library.matches(parsed, it) }
+            }
+        }
+    }.stateIn(viewModelScope, started, emptyMap())
+
+    private val _genrePrompt = MutableStateFlow("")
+    val genrePrompt: StateFlow<String> = _genrePrompt.asStateFlow()
+
+    /** How many songs the prompt picks out, as it's typed. */
+    val promptCount: StateFlow<Int> = combine(_genrePrompt.debounce(200), allTracks) { prompt, _ ->
+        if (prompt.isBlank()) 0 else library.promptTracks(prompt).size
+    }.stateIn(viewModelScope, started, 0)
+
+    fun setGenrePrompt(text: String) { _genrePrompt.value = text }
+
+    /** The genres in the library, most songs first, for the chips under the prompt. */
+    val genres: StateFlow<List<Pair<String, Int>>> = allTracks
+        .mapLatest { runCatching { library.genres() }.getOrDefault(emptyList()) }
+        .stateIn(viewModelScope, started, emptyList())
+
+    fun playPrompt() {
+        val prompt = _genrePrompt.value
+        viewModelScope.launch {
+            val list = library.promptTracks(prompt)
+            if (list.isEmpty()) {
+                _notice.value = "Nothing matches \"${prompt.trim()}\"."
+            } else {
+                playFrom(list, 0)
+            }
+        }
+    }
+
+    /** Freezes what a prompt matches right now into an ordinary playlist. */
+    fun savePromptAsPlaylist() {
+        val prompt = _genrePrompt.value.trim()
+        viewModelScope.launch {
+            val list = library.promptTracks(prompt)
+            if (list.isEmpty()) {
+                _notice.value = "Nothing matches \"$prompt\"."
+                return@launch
+            }
+            val id = runCatching { library.createPlaylist(prompt.replaceFirstChar { it.uppercase() }) }.getOrNull()
+            if (id == null) {
+                _notice.value = "There's already a playlist called \"$prompt\"."
+                return@launch
+            }
+            library.addToPlaylist(id, list.map { it.id })
+            _notice.value = "Saved ${list.size} songs as a playlist."
+        }
+    }
+
+    fun createSmartPlaylist(name: String, rule: String) {
+        viewModelScope.launch {
+            if (rule.isBlank()) {
+                _notice.value = "A smart list needs a rule — try rating:4+ or year:2015-2020."
+                return@launch
+            }
+            library.createSmartPlaylist(name.ifBlank { rule.replaceFirstChar { it.uppercase() } }, rule)
+            _notice.value = "\"${name.ifBlank { rule }}\" holds ${library.smartTracks(rule).size} songs."
+        }
+    }
+
+    fun deleteSmartPlaylist(id: Long) {
+        viewModelScope.launch { library.deleteSmartPlaylist(id) }
+    }
+
+    fun playSmartPlaylist(list: SmartPlaylist) {
+        viewModelScope.launch {
+            val songs = library.smartTracks(list.rule)
+            if (songs.isEmpty()) {
+                _notice.value = "\"${list.name}\" matches nothing right now."
+            } else {
+                playFrom(songs, 0)
+            }
+        }
+    }
+
+    // ---- Zip and ship ---------------------------------------------------------------
     //
     // Packs the library or a playlist into one file, reports where it landed,
     // and can hand it straight to another app. Written into the app's own
@@ -932,7 +1382,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissArchive() { _archive.value = ArchiveState() }
 
-    // ---- Selecting several tracks ----
+    // ---- Selecting several tracks ---------------------------------------------------
     //
     // Held as a set of ids rather than of Tracks: the list is re-queried
     // constantly as playback counts and favourites change, so holding entities
@@ -940,10 +1390,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
-
-    val selectionMode: StateFlow<Boolean> =
-        _selectedIds.map { it.isNotEmpty() }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun toggleSelected(trackId: Long) {
         _selectedIds.value = _selectedIds.value.let {
@@ -963,6 +1409,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return visible.filter { it.id in chosen }
     }
 
+    fun playSelected(visible: List<Track>) {
+        val chosen = selectedTracks(visible)
+        clearSelection()
+        if (chosen.isNotEmpty()) playback.play(chosen, 0)
+    }
+
+    fun playNextSelected(visible: List<Track>) {
+        val chosen = selectedTracks(visible)
+        clearSelection()
+        playback.playNext(chosen)
+        if (chosen.isNotEmpty()) _notice.value = "${chosen.size} ${if (chosen.size == 1) "song" else "songs"} up next."
+    }
+
+    fun queueSelected(visible: List<Track>) {
+        val chosen = selectedTracks(visible)
+        clearSelection()
+        playback.addToQueue(chosen)
+        if (chosen.isNotEmpty()) _notice.value = "Added ${chosen.size} to the queue."
+    }
+
     fun favoriteSelected(visible: List<Track>) = viewModelScope.launch {
         val chosen = selectedTracks(visible)
         // One decision for the whole selection: if any are not favourites,
@@ -975,31 +1441,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         clearSelection()
     }
 
-    fun addSelectedToPlaylist(playlistId: Long, visible: List<Track>) =
+    fun revertSelected(visible: List<Track>) = viewModelScope.launch {
+        val chosen = selectedTracks(visible)
+        clearSelection()
+        val back = chosen.count { library.revertToFile(it) != null }
+        _notice.value = "$back ${if (back == 1) "song is" else "songs are"} back to what the file says."
+    }
+
+    fun addSelectedToPlaylist(playlistId: Long, chosen: List<Track>) =
         viewModelScope.launch {
-            library.addToPlaylist(playlistId, selectedTracks(visible).map { it.id })
+            library.addToPlaylist(playlistId, chosen.map { it.id })
             clearSelection()
+            _notice.value = "Added ${chosen.size} to the playlist."
         }
 
     fun deleteSelected(visible: List<Track>) = viewModelScope.launch {
         for (track in selectedTracks(visible)) {
+            playback.evictTrack(track.id)
             runCatching { library.deleteTrack(track) }
         }
         clearSelection()
     }
 
-    // ---- Sharing playlists ----
+    // ---- Sharing playlists ------------------------------------------------------------
     //
     // Plain text so a playlist can be sent to someone the way any other file is
     // sent. Nothing is uploaded, no account is involved, and an import matches
     // against what is already on the device rather than fetching anything.
 
     private val _importResult =
-        MutableStateFlow<PlaylistImport<Track>?>(null)
-    val importResult: StateFlow<PlaylistImport<Track>?> = _importResult.asStateFlow()
-
-    private val _playlistNote = MutableStateFlow<String?>(null)
-    val playlistNote: StateFlow<String?> = _playlistNote.asStateFlow()
+        MutableStateFlow<com.exo.musicplayer.data.playlist.ImportResult<Track>?>(null)
+    val importResult: StateFlow<com.exo.musicplayer.data.playlist.ImportResult<Track>?> =
+        _importResult.asStateFlow()
 
     fun exportPlaylist(playlist: PlaylistSummary, into: (String, String) -> Boolean) {
         viewModelScope.launch {
@@ -1008,7 +1481,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 PlaylistEntry(it.artist, it.title, it.durationMs)
             }
             val text = PlaylistFile.export(playlist.name, entries)
-            _playlistNote.value = if (into(playlist.name, text)) {
+            _notice.value = if (into(playlist.name, text)) {
                 "Exported ${entries.size} tracks."
             } else {
                 "Couldn't write that file."
@@ -1020,7 +1493,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val parsed = PlaylistFile.parse(text, fallbackName)
             if (parsed.entries.isEmpty()) {
-                _playlistNote.value = "That file had no tracks in it."
+                _notice.value = "That file had no tracks in it."
                 return@launch
             }
             _importResult.value = PlaylistFile.matchAgainst(
@@ -1030,17 +1503,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 titleOf = { it.title },
                 durationOf = { it.durationMs }
             )
-            _playlistNote.value = null
         }
     }
 
-    fun confirmImport(result: PlaylistImport<Track>) {
+    fun confirmImport(result: com.exo.musicplayer.data.playlist.ImportResult<Track>) {
         viewModelScope.launch {
             val id = runCatching { library.createPlaylist(result.name) }.getOrNull()
                 ?: return@launch
             library.addToPlaylist(id, result.matched.map { it.second.id })
             _importResult.value = null
-            _playlistNote.value = buildString {
+            _notice.value = buildString {
                 append("Added ${result.matched.size} tracks as \"${result.name}\"")
                 if (result.missing.isNotEmpty()) {
                     append("; ${result.missing.size} not on this device")
@@ -1052,15 +1524,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissImport() {
         _importResult.value = null
-        _playlistNote.value = null
     }
 
-    fun playPlaylist(playlistId: Long, startIndex: Int = 0) = viewModelScope.launch {
-        val items = library.playlistTracksOnce(playlistId)
-        if (items.isNotEmpty()) playback.play(items, startIndex)
+    // ---- Backups ------------------------------------------------------------------------
+
+    private val backups by lazy { PhoneBackup(MusicDatabase.get(getApplication())) }
+
+    /** Builds the backup text and hands it to [write], which saves it where the user chose. */
+    fun backUp(write: (String) -> Boolean) = viewModelScope.launch {
+        val text = backups.write()
+        _notice.value = if (write(text)) "Backup saved." else "Couldn't write that file."
     }
 
-    val libraryIsEmpty: StateFlow<Boolean> = tracks
-        .map { it.isEmpty() }
-        .stateIn(viewModelScope, started, false)
+    fun restore(text: String) = viewModelScope.launch {
+        val outcome = backups.restore(text)
+        _notice.value = outcome?.let { "Restored ${it.summary}." }
+            ?: "That isn't a Lucense phone backup."
+    }
+
+    // ---- Updates ----------------------------------------------------------------------------
+
+    private val _update = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val update: StateFlow<UpdateState> = _update.asStateFlow()
+
+    fun checkForUpdate() {
+        if (_update.value == UpdateState.Checking) return
+        _update.value = UpdateState.Checking
+        viewModelScope.launch {
+            val newest = withContext(Dispatchers.IO) { runCatching { Updates.newest() }.getOrNull() }
+            _update.value = when {
+                newest == null -> UpdateState.Failed
+                Updates.isNewer(newest.version, BuildConfig.VERSION_NAME) ->
+                    UpdateState.Available(newest.version, newest.url)
+                else -> UpdateState.UpToDate(BuildConfig.VERSION_NAME)
+            }
+        }
+    }
+
+    init {
+        // Once a launch, quietly, as on Windows.
+        checkForUpdate()
+    }
+
+    companion object {
+        const val FIX_LABEL = "Fix"
+        private const val LOOKUP_GIVE_UP_MS = 10_000L
+    }
 }

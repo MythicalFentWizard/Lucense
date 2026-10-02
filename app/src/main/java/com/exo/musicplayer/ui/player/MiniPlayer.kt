@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.db.Track
@@ -50,10 +51,16 @@ fun MiniPlayer(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column {
+                // A plain line for how far through the song is: no gap after
+                // the played part and no end dot, which read as a second handle.
                 LinearProgressIndicator(
                     progress = { state.progress },
                     modifier = Modifier.fillMaxWidth(),
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    strokeCap = StrokeCap.Butt,
+                    gapSize = 0.dp,
+                    drawStopIndicator = {}
                 )
                 Row(
                     modifier = Modifier

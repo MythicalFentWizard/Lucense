@@ -33,13 +33,22 @@ import kotlinx.coroutines.launch
 class AudioFocusController(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val settingsProvider: () -> InterruptionState
+    private val settingsProvider: () -> InterruptionState,
+    /** Where the ducking level goes; the players multiply it into their own volume. */
+    private val onVolume: (Float) -> Unit
 ) {
 
     private val audioManager =
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var player: ExoPlayer? = null
+
+    /** The ducking level last applied, 1 when nothing is in the way. */
+    private var focusVolume = 1f
+        set(value) {
+            field = value
+            onVolume(value)
+        }
     private var focusRequest: AudioFocusRequest? = null
     private var holdsFocus = false
 
@@ -47,23 +56,32 @@ class AudioFocusController(
     private var pausedByFocusLoss = false
     private var fadeJob: Job? = null
 
+    /**
+     * Follows [player], and stops following whichever one it had before - the
+     * crossfade hands the music from one player to another mid-song, and focus
+     * belongs to whichever is now the one being heard.
+     */
     fun attach(player: ExoPlayer) {
+        if (this.player === player) return
+        this.player?.removeListener(playWhenReadyListener)
         this.player = player
-        player.addListener(object : Player.Listener {
-            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (playWhenReady) {
-                    if (!requestFocus()) {
-                        // Refused outright: don't sit there silently "playing".
-                        player.playWhenReady = false
-                        return
-                    }
-                    // Starting up mid-call is allowed but stays out of the way.
-                    applyVolume(target = if (isCallActive()) duckVolume() else 1f)
-                } else if (!pausedByFocusLoss) {
-                    abandonFocus()
+        player.addListener(playWhenReadyListener)
+    }
+
+    private val playWhenReadyListener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) {
+                if (!requestFocus()) {
+                    // Refused outright: don't sit there silently "playing".
+                    player?.playWhenReady = false
+                    return
                 }
+                // Starting up mid-call is allowed but stays out of the way.
+                applyVolume(target = if (isCallActive()) duckVolume() else 1f)
+            } else if (!pausedByFocusLoss) {
+                abandonFocus()
             }
-        })
+        }
     }
 
     /** True when the telephony stack has the audio mode, no permission needed. */
@@ -164,34 +182,34 @@ class AudioFocusController(
     private fun fadeOutAndPause(player: ExoPlayer) {
         fadeJob?.cancel()
         fadeJob = scope.launch {
-            fade(player, from = player.volume, to = 0f, durationMs = FADE_OUT_MS)
+            fade(from = focusVolume, to = 0f, durationMs = FADE_OUT_MS)
             player.pause()
             // Restore the level so a later resume isn't silent.
-            player.volume = 1f
+            focusVolume = 1f
         }
     }
 
     private fun applyVolume(target: Float) {
-        val player = this.player ?: return
         fadeJob?.cancel()
         fadeJob = scope.launch {
-            fade(player, from = player.volume, to = target, durationMs = FADE_MS)
+            fade(from = focusVolume, to = target, durationMs = FADE_MS)
         }
     }
 
-    private suspend fun fade(player: ExoPlayer, from: Float, to: Float, durationMs: Long) {
+    private suspend fun fade(from: Float, to: Float, durationMs: Long) {
         val steps = (durationMs / STEP_MS).toInt().coerceAtLeast(1)
         for (step in 1..steps) {
             if (!scope.isActive) return
-            player.volume = from + (to - from) * (step.toFloat() / steps)
+            focusVolume = from + (to - from) * (step.toFloat() / steps)
             delay(STEP_MS)
         }
-        player.volume = to
+        focusVolume = to
     }
 
     fun release() {
         fadeJob?.cancel()
         abandonFocus()
+        player?.removeListener(playWhenReadyListener)
         player = null
     }
 

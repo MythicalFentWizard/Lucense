@@ -108,6 +108,19 @@ class DesktopStore(databaseFile: File) {
                 )
                 """.trimIndent()
             )
+            // A song's sound print, kept so duplicates by sound only ever
+            // listen to new or changed files. Size and modified time say
+            // whether the file is still the one that was printed.
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS prints (
+                    path TEXT PRIMARY KEY,
+                    size INTEGER NOT NULL,
+                    modified INTEGER NOT NULL,
+                    print TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
             st.executeUpdate(
                 """
                 CREATE TABLE IF NOT EXISTS levels (
@@ -411,6 +424,28 @@ class DesktopStore(databaseFile: File) {
 
     // ---- Favourites ----
 
+    class StoredPrint(val size: Long, val modified: Long, val print: String)
+
+    fun prints(): Map<String, StoredPrint> = buildMap {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT path, size, modified, print FROM prints").use { rs ->
+                while (rs.next()) put(rs.getString(1), StoredPrint(rs.getLong(2), rs.getLong(3), rs.getString(4)))
+            }
+        }
+    }
+
+    fun savePrint(path: String, size: Long, modified: Long, print: String) {
+        connection.prepareStatement(
+            "INSERT OR REPLACE INTO prints(path, size, modified, print) VALUES(?, ?, ?, ?)"
+        ).use { ps ->
+            ps.setString(1, path)
+            ps.setLong(2, size)
+            ps.setLong(3, modified)
+            ps.setString(4, print)
+            ps.executeUpdate()
+        }
+    }
+
     fun saveLevel(path: String, dbfs: Float, peak: Float) {
         connection.prepareStatement(
             "INSERT OR REPLACE INTO levels(path, dbfs, peak) VALUES(?, ?, ?)"
@@ -656,7 +691,7 @@ class DesktopStore(databaseFile: File) {
         if (paths.isEmpty()) return
         for (table in listOf(
             "play_events", "lyrics", "marks", "playlist_items", "favourites", "track_fx",
-            "cover_urls", "original_tags"
+            "cover_urls", "original_tags", "prints"
         )) {
             connection.prepareStatement("DELETE FROM $table WHERE path = ?").use { ps ->
                 for (path in paths) { ps.setString(1, path); ps.addBatch() }

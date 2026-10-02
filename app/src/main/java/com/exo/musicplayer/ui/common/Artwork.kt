@@ -48,8 +48,10 @@ fun Artwork(
         Icon(
             imageVector = Icons.Default.MusicNote,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(size / 2.4f)
+            // A quiet stand-in: in the album and artist grids a note at full
+            // strength and a third of the tile read heavier than the covers.
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.size((size / 2.4f).coerceAtMost(44.dp))
         )
         // AsyncImage sizes its decode to these constraints, so a 1000px cover is
         // never decoded at full resolution for a 52dp thumbnail.
@@ -78,8 +80,8 @@ fun ArtworkLarge(track: Track?, modifier: Modifier = Modifier) {
         Icon(
             imageVector = Icons.Default.MusicNote,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(96.dp)
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.size(72.dp)
         )
         track?.artPath?.let { path ->
             AsyncImage(

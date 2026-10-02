@@ -43,6 +43,15 @@ class LibraryRepository(context: Context) {
         SortMode.MOST_PLAYED -> trackDao.observeByPlayCount()
     }
 
+    /** Every song, unsorted; the ordering happens where all nine sorts can be applied. */
+    fun observeAllTracks(): Flow<List<Track>> = trackDao.observeAll()
+
+    suspend fun setRating(id: Long, stars: Int) = trackDao.setRating(id, stars.coerceIn(0, 5))
+
+    suspend fun setLevel(id: Long, db: Float?, peak: Float?) = trackDao.setLevel(id, db, peak)
+
+    suspend fun setDuration(id: Long, ms: Long) = trackDao.setDuration(id, ms)
+
     fun observeFavorites(): Flow<List<Track>> = trackDao.observeFavorites()
 
     fun observeTrackCount(): Flow<Int> = trackDao.observeCount()
@@ -53,7 +62,11 @@ class LibraryRepository(context: Context) {
 
     suspend fun tracksByIds(ids: List<Long>): List<Track> {
         if (ids.isEmpty()) return emptyList()
-        val byId = trackDao.findByIds(ids).associateBy { it.id }
+        // SQLite takes at most 999 values in one IN (...); a long queue is
+        // looked up in pieces rather than failing outright.
+        val byId = ids.distinct().chunked(900)
+            .flatMap { trackDao.findByIds(it) }
+            .associateBy { it.id }
         return ids.mapNotNull { byId[it] }
     }
 
@@ -90,6 +103,32 @@ class LibraryRepository(context: Context) {
             artPath = artPath
         )
         trackDao.update(updated)
+        updated
+    }
+
+    /**
+     * Sets whichever of these are given and leaves the rest as they are - for
+     * editing many songs at once, Names & tags and Fix, where a blank means
+     * "don't touch" rather than "clear".
+     */
+    suspend fun applyDetails(
+        track: Track,
+        title: String? = null,
+        artist: String? = null,
+        album: String? = null,
+        year: Int? = null,
+        genre: String? = null
+    ): Track = withContext(Dispatchers.IO) {
+        // Re-read, so two edits in a row don't undo each other through a stale copy.
+        val fresh = trackDao.findById(track.id) ?: track
+        val updated = fresh.copy(
+            title = title?.trim()?.takeIf { it.isNotEmpty() } ?: fresh.title,
+            artist = artist?.trim()?.takeIf { it.isNotEmpty() } ?: fresh.artist,
+            album = album?.trim()?.takeIf { it.isNotEmpty() } ?: fresh.album,
+            year = year ?: fresh.year,
+            genre = genre?.trim()?.takeIf { it.isNotEmpty() } ?: fresh.genre
+        )
+        if (updated != fresh) trackDao.update(updated)
         updated
     }
 
@@ -194,9 +233,7 @@ class LibraryRepository(context: Context) {
      * Whether a song answers a rule.
      *
      * The same parser the desktop app uses, so a rule written on one reads the
-     * same on the other. Star ratings are the one thing it cannot answer here,
-     * because this app has never had them - a rule mentioning them simply
-     * matches nothing rather than pretending.
+     * same on the other, star ratings included.
      */
     fun matches(query: SearchQuery, track: Track): Boolean = query.matches(
         title = track.title,
@@ -204,7 +241,7 @@ class LibraryRepository(context: Context) {
         album = track.album.orEmpty(),
         favourite = track.isFavorite,
         plays = track.playCount,
-        rating = 0,
+        rating = track.rating,
         year = track.year,
         addedAt = track.addedAt,
         genre = track.genre
@@ -266,6 +303,8 @@ class LibraryRepository(context: Context) {
     /** Removes the row *and* the audio and artwork files it owns. */
     suspend fun deleteTrack(track: Track) = withContext(Dispatchers.IO) {
         trackDao.deleteById(track.id)
+        db.trackFxDao().delete(track.id)
+        db.trackPrintDao().delete(track.id)
         runCatching { File(track.filePath).delete() }
         track.artPath?.let { path ->
             // Artwork is shared by content hash, so only drop it when nothing points at it.
