@@ -51,37 +51,25 @@ fun StatsScreen(
     modifier: Modifier = Modifier
 ) {
     if (totalPlays == 0 && favorites.isEmpty()) {
-        Box(
-            modifier.fillMaxSize().padding(32.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "Play some music and your listening history will show up here.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
+        Column(modifier.fillMaxSize()) {
+            StatsTitle()
+            Box(
+                Modifier.fillMaxSize().padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Play some music and your listening history will show up here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
         return
     }
 
     LazyColumn(modifier.fillMaxSize()) {
-        item {
-            // The same title the other tabs have, at the same height as theirs.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp)
-                    .height(48.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Text(
-                    "Stats",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
+        item { StatsTitle() }
         item {
             Row(
                 Modifier
@@ -334,6 +322,24 @@ private fun WeatherChart(buckets: List<WeatherBucket>) {
                 )
             }
         }
+    }
+}
+
+/** The same title the other tabs have, at the same height as theirs. */
+@Composable
+private fun StatsTitle() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp)
+            .height(48.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            "Stats",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

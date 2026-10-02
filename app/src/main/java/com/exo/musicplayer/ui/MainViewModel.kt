@@ -842,9 +842,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         for (track in work) {
                             val print = withContext(Dispatchers.Default) {
                                 runCatching {
-                                    AudioSampler.sampleMono16k(
-                                        getApplication(), Uri.fromFile(File(track.filePath)), AudioPrint.SECONDS
-                                    )?.let { AudioPrint.of(it, 16_000) }?.takeIf { it.isNotEmpty() }
+                                    AudioSampler.sampleMono(
+                                        getApplication(), Uri.fromFile(File(track.filePath)), AudioPrint.SECONDS, AudioPrint.RATE
+                                    )?.let { AudioPrint.of(it, AudioPrint.RATE) }?.takeIf { it.isNotEmpty() }
                                 }.getOrNull()
                             }
                             if (print != null) {

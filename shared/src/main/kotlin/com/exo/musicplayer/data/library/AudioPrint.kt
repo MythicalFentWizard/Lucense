@@ -35,7 +35,8 @@ object AudioPrint {
     /** Seconds of audio a print is taken from, centred on the middle of the song. */
     const val SECONDS = 30
 
-    private const val RATE = 5_512
+    /** The rate prints are taken at; audio handed over at it isn't resampled again. */
+    const val RATE = 5_512
     private const val FRAME = 2_048
     /** About 46 ms, so 30 seconds is around 640 frames. */
     private const val HOP = 256
