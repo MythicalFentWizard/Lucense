@@ -59,6 +59,7 @@ import com.exo.musicplayer.playback.InterruptionState
 import com.exo.musicplayer.playback.PlaybackState
 import com.exo.musicplayer.playback.ReverbRoom
 import com.exo.musicplayer.playback.Sleep
+import com.exo.musicplayer.util.counted
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1218,6 +1219,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setGenrePrompt(text: String) { _genrePrompt.value = text }
 
+    suspend fun countRule(rule: String): Int = if (rule.isBlank()) 0 else library.smartTracks(rule).size
+
     /** The genres in the library, most songs first, for the chips under the prompt. */
     val genres: StateFlow<List<Pair<String, Int>>> = allTracks
         .mapLatest { runCatching { library.genres() }.getOrDefault(emptyList()) }
@@ -1250,7 +1253,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             library.addToPlaylist(id, list.map { it.id })
-            _notice.value = "Saved ${list.size} songs as a playlist."
+            _notice.value = "Saved ${counted(list.size, "song")} as a playlist."
         }
     }
 
@@ -1261,7 +1264,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             library.createSmartPlaylist(name.ifBlank { rule.replaceFirstChar { it.uppercase() } }, rule)
-            _notice.value = "\"${name.ifBlank { rule }}\" holds ${library.smartTracks(rule).size} songs."
+            _notice.value = "\"${name.ifBlank { rule }}\" holds ${counted(library.smartTracks(rule).size, "song")}."
         }
     }
 
@@ -1362,7 +1365,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 onSuccess = { done ->
                     ArchiveState(
                         note = buildString {
-                            append("${done.included} tracks, ")
+                            append("${counted(done.included, "track")}, ")
                             append("%.1f MB".format(done.bytes / 1_048_576.0))
                             if (done.skipped.isNotEmpty()) {
                                 append(" - ${done.skipped.size} missing from storage")
@@ -1483,7 +1486,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             val text = PlaylistFile.export(playlist.name, entries)
             _notice.value = if (into(playlist.name, text)) {
-                "Exported ${entries.size} tracks."
+                "Exported ${counted(entries.size, "track")}."
             } else {
                 "Couldn't write that file."
             }
@@ -1514,7 +1517,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             library.addToPlaylist(id, result.matched.map { it.second.id })
             _importResult.value = null
             _notice.value = buildString {
-                append("Added ${result.matched.size} tracks as \"${result.name}\"")
+                append("Added ${counted(result.matched.size, "track")} as \"${result.name}\"")
                 if (result.missing.isNotEmpty()) {
                     append("; ${result.missing.size} not on this device")
                 }

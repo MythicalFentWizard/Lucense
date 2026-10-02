@@ -106,6 +106,7 @@ import com.exo.musicplayer.ui.theme.MusicPlayerTheme
 import com.exo.musicplayer.ui.theme.ScreenBackdrop
 import com.exo.musicplayer.ui.theme.ThemeSettings
 import com.exo.musicplayer.ui.theme.ThemeState
+import com.exo.musicplayer.util.counted
 
 private enum class SettingsRoute { HOME, APPEARANCE, SOUND }
 
@@ -536,6 +537,7 @@ private fun AppScaffold(
                                     playPrompt = viewModel::playPrompt,
                                     savePrompt = viewModel::savePromptAsPlaylist,
                                     keepAsRule = { name, rule -> viewModel.createSmartPlaylist(name, rule) },
+                                    countRule = viewModel::countRule,
                                     playSmart = { viewModel.playSmartPlaylist(it) },
                                     deleteSmart = { viewModel.deleteSmartPlaylist(it.id) }
                                 )
@@ -837,7 +839,7 @@ private fun AppScaffold(
                 text = {
                     Column {
                         Text(
-                            "${pending.matched.size} of ${pending.total} tracks are already " +
+                            "${pending.matched.size} of ${counted(pending.total, "track")} are already " +
                                 "on this device. Nothing is downloaded — the playlist just " +
                                 "links up what you have."
                         )

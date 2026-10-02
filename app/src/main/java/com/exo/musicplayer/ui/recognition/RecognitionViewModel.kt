@@ -26,6 +26,7 @@ import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
 import com.exo.musicplayer.data.youtube.YouTubePreviewPlayer
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
+import com.exo.musicplayer.util.counted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -120,11 +121,11 @@ class RecognitionViewModel(
                 result.videos.isEmpty() ->
                     "Nothing came back. Try updating yt-dlp from the download screen."
                 result.skipped.isEmpty() ->
-                    "${result.videos.size} results via ${result.via}"
+                    "${counted(result.videos.size, "result")} via ${result.via}"
                 else ->
                     // Named rather than hidden: a slow search is worth
                     // explaining, and a dead Piped instance is the usual cause.
-                    "${result.videos.size} results via ${result.via} — " +
+                    "${counted(result.videos.size, "result")} via ${result.via} — " +
                         "${result.skipped.joinToString(", ")} did not answer"
             }
             _stage.value = RecognitionStage.IDLE

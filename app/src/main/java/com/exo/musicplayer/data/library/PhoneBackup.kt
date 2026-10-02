@@ -6,6 +6,7 @@ import com.exo.musicplayer.data.db.PlayEvent
 import com.exo.musicplayer.data.db.Playlist
 import com.exo.musicplayer.data.db.SmartPlaylist
 import com.exo.musicplayer.data.db.Track
+import com.exo.musicplayer.util.counted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -31,13 +32,11 @@ class PhoneBackup(private val db: MusicDatabase) {
     data class Outcome(val favourites: Int, val ratings: Int, val playlists: Int, val plays: Int, val missing: Int) {
         val summary: String
             get() = buildString {
-                append(listOf(count(favourites, "favourite"), count(ratings, "rating"), count(playlists, "playlist"), count(plays, "play")).joinToString(", "))
+                append(listOf(counted(favourites, "favourite"), counted(ratings, "rating"), counted(playlists, "playlist"), counted(plays, "play")).joinToString(", "))
                 if (missing > 0) {
                     append(if (missing == 1) " · 1 song isn't on this phone" else " · $missing songs aren't on this phone")
                 }
             }
-
-        private fun count(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
     }
 
     suspend fun write(): String = withContext(Dispatchers.IO) {
