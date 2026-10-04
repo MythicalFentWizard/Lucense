@@ -161,7 +161,12 @@ private fun YouTubeRow(
                             Modifier.fillMaxSize().background(Color(0x55000000)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Stop, null, Modifier.size(28.dp), tint = Color.White)
+                            Icon(
+                                if (preview.paused) Icons.Default.PlayArrow else Icons.Default.Stop,
+                                null,
+                                Modifier.size(28.dp),
+                                tint = Color.White
+                            )
                         }
                     }
 
@@ -259,13 +264,15 @@ private fun YouTubeRow(
                     contentPadding = PaddingValues(horizontal = 10.dp),
                     modifier = Modifier.height(36.dp)
                 ) {
+                    // Paused from the small player: this carries on rather than stops.
+                    val stops = isPreviewing && !preview.paused
                     Icon(
-                        if (isPreviewing) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        if (stops) Icons.Default.Stop else Icons.Default.PlayArrow,
                         null,
                         Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(4.dp))
-                    Text(if (isPreviewing) "Stop" else "Preview")
+                    Text(if (stops) "Stop" else if (isPreviewing) "Carry on" else "Preview")
                 }
                 Spacer(Modifier.width(4.dp))
                 FilledTonalButton(

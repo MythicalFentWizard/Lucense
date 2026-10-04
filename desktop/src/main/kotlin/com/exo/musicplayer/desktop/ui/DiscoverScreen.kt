@@ -49,7 +49,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -78,6 +77,7 @@ import com.exo.musicplayer.data.discover.GenreState
 import com.exo.musicplayer.data.discover.LibrarySong
 import com.exo.musicplayer.data.discover.LibraryView
 import com.exo.musicplayer.data.discover.ReleaseState
+import com.exo.musicplayer.data.youtube.PreviewLabel
 import com.exo.musicplayer.data.youtube.PreviewState
 import com.exo.musicplayer.data.youtube.YouTubeFormat
 import com.exo.musicplayer.desktop.data.DesktopController
@@ -93,9 +93,31 @@ private class Shared(
     /** Opens YouTube search in Identify with this text. */
     val youTube: (String) -> Unit
 ) {
-    fun hearSong(track: DiscoverTrack) = controller.hear(DiscoverBrowser.previewKey(track)) { track.previewUrl }
-    fun hearArtist(artist: DiscoverArtist) = controller.hear(DiscoverBrowser.sampleKey(artist)) { browser.sample(artist) }
-    fun hearGenre(genre: String) = controller.hear(DiscoverBrowser.genreSampleKey(genre)) { browser.sampleGenre(genre) }
+    fun hearSong(track: DiscoverTrack) = controller.hear(
+        DiscoverBrowser.previewKey(track),
+        PreviewLabel(track.title, track.artist, track.coverUrl)
+    ) { track.previewUrl }
+
+    // Which song an artist or a genre is heard by isn't known until it has been found.
+    fun hearArtist(artist: DiscoverArtist) {
+        val key = DiscoverBrowser.sampleKey(artist)
+        controller.hear(
+            key,
+            PreviewLabel(artist.name, "Finding a song…", artist.pictureUrl),
+            found = {
+                browser.samples.value[key]?.let { PreviewLabel(it.title, it.artist, it.coverUrl ?: artist.pictureUrl) }
+            }
+        ) { browser.sample(artist) }
+    }
+
+    fun hearGenre(genre: String) {
+        val key = DiscoverBrowser.genreSampleKey(genre)
+        controller.hear(
+            key,
+            PreviewLabel(genre, "Finding a song…"),
+            found = { browser.samples.value[key]?.let { PreviewLabel(it.title, "${it.artist} · $genre", it.coverUrl) } }
+        ) { browser.sampleGenre(genre) }
+    }
 }
 
 /**
@@ -122,9 +144,6 @@ fun DiscoverScreen(controller: DesktopController, onOpenIdentify: () -> Unit) {
         delay(500)
         browser.setLibrary(controller.tracks.map { LibrarySong(it.title, it.artist, it.genre) })
     }
-    // A clip left playing would carry on over whichever page came next.
-    DisposableEffect(Unit) { onDispose { controller.stopPreview() } }
-
     val shared = Shared(controller, browser, preview, library, samples) { text ->
         controller.searchYouTubeFor(text)
         onOpenIdentify()
@@ -794,6 +813,8 @@ private fun SongRow(track: DiscoverTrack, shared: Shared, withArtist: Boolean, n
                 previewing && shared.preview.loading -> "Loading the preview…"
                 previewing && shared.preview.playing ->
                     "Preview · ${YouTubeFormat.duration(shared.preview.secondsPlayed)} of 0:30"
+                previewing && shared.preview.ended -> "Preview finished · click to hear it again"
+                previewing && shared.preview.paused -> "Preview paused · click to carry on"
                 entry != null && !entry.done -> entry.status.lineSequence().firstOrNull().orEmpty()
                 entry != null && entry.failed -> entry.status.lineSequence().firstOrNull().orEmpty()
                 else -> listOfNotNull(

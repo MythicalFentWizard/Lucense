@@ -62,6 +62,7 @@ import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import com.exo.musicplayer.data.youtube.PreviewLabel
 import java.util.concurrent.atomic.AtomicInteger
 import com.exo.musicplayer.desktop.download.DownloadArchive
 import androidx.compose.runtime.mutableStateMapOf
@@ -1866,7 +1867,10 @@ class DesktopController(parent: CoroutineScope) {
         // The main player keeps its place; two things playing at once is never
         // what a preview tap meant.
         if (engine.status.value.playing) engine.togglePlay()
-        preview.toggle(video.id) { id -> youtubeBackend.audioStreamUrl(id, downloadQuality) }
+        preview.toggle(
+            video.id,
+            PreviewLabel(video.title, video.channel, video.thumbnail(YouTubeVideo.ThumbSize.SMALL))
+        ) { id -> youtubeBackend.audioStreamUrl(id, downloadQuality) }
     }
 
     fun stopPreview() = preview.stop()
@@ -1905,11 +1909,18 @@ class DesktopController(parent: CoroutineScope) {
 
     /**
      * Plays a half-minute clip from Discover: a song's own, or the one an
-     * artist or a genre is heard by. Asking for the clip already playing stops it.
+     * artist or a genre is heard by. Asking for the clip already playing
+     * stops it. [label] is what the small player says it is; [found] replaces
+     * that once the song has been found, for an artist or a genre.
      */
-    fun hear(key: String, address: suspend (String) -> String?) {
+    fun hear(
+        key: String,
+        label: PreviewLabel,
+        found: () -> PreviewLabel? = { null },
+        address: suspend (String) -> String?
+    ) {
         if (preview.state.value.videoId != key && engine.status.value.playing) engine.togglePlay()
-        preview.toggle(key, address)
+        preview.toggle(key, label, found, address)
     }
 
     /** Opens YouTube search in Identify with [text] already searched for. */

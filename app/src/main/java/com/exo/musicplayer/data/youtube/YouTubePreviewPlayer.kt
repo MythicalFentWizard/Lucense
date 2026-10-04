@@ -13,7 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Plays a YouTube result without downloading it.
+ * Plays a preview without downloading it: a YouTube result, a song's
+ * half-minute clip from Discover, or the song an artist or a genre is heard by.
  *
  * ExoPlayer cannot open a YouTube watch page, but it plays the signed
  * googlevideo.com URL behind one perfectly well: the audio is Opus in a WebM
@@ -27,6 +28,9 @@ import kotlinx.coroutines.launch
  * because the point of previewing is to hear what the recording actually
  * sounds like. It also means stopping a preview cannot disturb whatever the
  * user had queued up.
+ *
+ * One of these serves every page, so only one preview plays at a time and the
+ * small player at the bottom of the screen can pause or close it from anywhere.
  */
 class YouTubePreviewPlayer(
     private val context: Context,
@@ -49,33 +53,47 @@ class YouTubePreviewPlayer(
     private var job: Job? = null
     private var ticker: Job? = null
 
-    /** Tapping the row that is already previewing stops it. */
-    fun toggle(videoId: String, resolve: suspend (String) -> String?) {
-        if (_state.value.videoId == videoId) {
-            stop()
+    /**
+     * Starts previewing what [key] names, or acts on it if it is already the
+     * one: a tap on what is playing stops it, a tap on what is paused carries
+     * on. [label] is shown at once; [found] replaces it once the stream has
+     * been found, for an artist or a genre, where which song it is isn't
+     * known until then.
+     */
+    fun toggle(
+        key: String,
+        label: PreviewLabel? = null,
+        found: () -> PreviewLabel? = { null },
+        resolve: suspend (String) -> String?
+    ) {
+        val current = _state.value
+        if (current.videoId == key) {
+            if (current.paused) pauseOrResume() else stop()
             return
         }
-        start(videoId, resolve)
+        start(key, label, found, resolve)
     }
 
-    private fun start(videoId: String, resolve: suspend (String) -> String?) {
+    private fun start(key: String, label: PreviewLabel?, found: () -> PreviewLabel?, resolve: suspend (String) -> String?) {
         job?.cancel()
         ticker?.cancel()
         releasePlayback()
 
-        _state.value = PreviewState(videoId = videoId, loading = true)
+        _state.value = PreviewState(videoId = key, loading = true, label = label)
 
         job = scope.launch {
-            val url = runCatching { resolve(videoId) }.getOrNull()
+            val url = runCatching { resolve(key) }.getOrNull()
 
             // The row may have been tapped again, or another one started, while
             // the URL was being signed - that takes seconds, not milliseconds.
-            if (_state.value.videoId != videoId) return@launch
+            if (_state.value.videoId != key) return@launch
+            val named = found() ?: label
 
             if (url == null) {
                 _state.value = PreviewState(
-                    videoId = videoId,
-                    error = "Couldn't get a playable stream. yt-dlp may need updating."
+                    videoId = key,
+                    error = "Couldn't get a playable stream. yt-dlp may need updating.",
+                    label = named
                 )
                 return@launch
             }
@@ -83,16 +101,26 @@ class YouTubePreviewPlayer(
             val active = player ?: ExoPlayer.Builder(context).build().also { built ->
                 built.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_ENDED) stop()
+                        if (playbackState != Player.STATE_ENDED) return
+                        // Left in place, wound back, rather than cleared: the
+                        // small player stays until it is closed, and play
+                        // starts it again.
+                        built.pause()
+                        built.seekTo(0)
+                        val now = _state.value
+                        if (now.videoId != null) {
+                            _state.value = now.copy(playing = false, paused = true, ended = true, secondsPlayed = 0)
+                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        val current = _state.value
+                        val now = _state.value
                         _state.value = PreviewState(
-                            videoId = current.videoId,
+                            videoId = now.videoId,
                             // Signed URLs expire, and a stale one fails here
                             // rather than at resolution time.
-                            error = "Playback failed: ${error.errorCodeName}"
+                            error = "Playback failed: ${error.errorCodeName}",
+                            label = now.label
                         )
                     }
                 })
@@ -103,19 +131,34 @@ class YouTubePreviewPlayer(
             active.prepare()
             active.play()
 
-            _state.value = PreviewState(videoId = videoId, loading = false, playing = true)
+            _state.value = PreviewState(videoId = key, loading = false, playing = true, label = named)
 
             ticker = scope.launch {
                 while (true) {
                     delay(500)
-                    val current = _state.value
-                    if (current.videoId != videoId) break
+                    val now = _state.value
+                    if (now.videoId != key) break
+                    if (!now.playing) continue
                     val seconds = (active.currentPosition / 1000).toInt()
-                    if (current.secondsPlayed != seconds) {
-                        _state.value = current.copy(secondsPlayed = seconds)
+                    if (now.secondsPlayed != seconds) {
+                        _state.value = now.copy(secondsPlayed = seconds)
                     }
                 }
             }
+        }
+    }
+
+    /** Holds what is playing, or carries on with what is held. Does nothing while a stream is still being found. */
+    fun pauseOrResume() {
+        val now = _state.value
+        val active = player ?: return
+        if (now.videoId == null || now.loading || now.error != null) return
+        if (now.playing) {
+            active.pause()
+            _state.value = now.copy(playing = false, paused = true)
+        } else if (now.paused) {
+            active.play()
+            _state.value = now.copy(playing = true, paused = false, ended = false)
         }
     }
 

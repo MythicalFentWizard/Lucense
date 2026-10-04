@@ -133,7 +133,7 @@ private fun YouTubeRow(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        if (isPreviewing) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        if (isPreviewing && !preview.paused) Icons.Default.Stop else Icons.Default.PlayArrow,
                         null,
                         Modifier.size(34.dp),
                         tint = Color.White
@@ -235,9 +235,11 @@ private fun YouTubeRow(
         Column(horizontalAlignment = Alignment.End) {
             AccentButton("Download mp3", icon = Icons.Default.Download) { onDownload() }
             Spacer(Modifier.height(7.dp))
+            // Paused from the small player: this carries on rather than stops.
+            val stops = isPreviewing && !preview.paused
             GhostButton(
-                if (isPreviewing) "Stop" else "Preview",
-                icon = if (isPreviewing) Icons.Default.Stop else Icons.Default.PlayArrow
+                if (stops) "Stop" else if (isPreviewing) "Carry on" else "Preview",
+                icon = if (stops) Icons.Default.Stop else Icons.Default.PlayArrow
             ) { onPreview() }
         }
     }

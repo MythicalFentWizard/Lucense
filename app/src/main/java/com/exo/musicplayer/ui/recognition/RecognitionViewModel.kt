@@ -23,6 +23,7 @@ import com.exo.musicplayer.data.recognition.RecognitionResult
 import com.exo.musicplayer.data.recognition.ShazamClient
 import com.exo.musicplayer.data.youtube.AndroidYouTubeBackend
 import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
+import com.exo.musicplayer.data.youtube.PreviewLabel
 import com.exo.musicplayer.data.youtube.YouTubePreviewPlayer
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
@@ -134,7 +135,10 @@ class RecognitionViewModel(
 
     /** Plays a result without downloading it. Tapping the same row stops it. */
     fun previewYouTube(video: YouTubeVideo) {
-        preview.toggle(video.id) { id -> youtubeBackend.audioStreamUrl(id, quality) }
+        preview.toggle(
+            video.id,
+            PreviewLabel(video.title, video.channel, video.thumbnail(YouTubeVideo.ThumbSize.SMALL))
+        ) { id -> youtubeBackend.audioStreamUrl(id, quality) }
     }
 
     fun stopPreview() = preview.stop()
