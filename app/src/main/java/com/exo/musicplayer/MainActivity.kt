@@ -51,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.discover.DiscoverBrowser
+import com.exo.musicplayer.data.youtube.PreviewLabel
 import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.prefs.LibraryView
 import com.exo.musicplayer.share.ShareTracks
@@ -83,6 +83,7 @@ import com.exo.musicplayer.ui.common.FixDialog
 import com.exo.musicplayer.ui.common.FixTagsDialog
 import com.exo.musicplayer.ui.common.LibraryToolsSheet
 import com.exo.musicplayer.ui.common.LocalTrackActions
+import com.exo.musicplayer.ui.common.PreviewBar
 import com.exo.musicplayer.ui.common.RateDialog
 import com.exo.musicplayer.ui.common.TrackActions
 import com.exo.musicplayer.ui.common.launchOrExplain
@@ -302,6 +303,7 @@ private fun AppScaffold(
     val downloadProxy by viewModel.downloadProxy.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val discoverStack by discover.browser.stack.collectAsStateWithLifecycle()
+    val previewNow by recognition.preview.state.collectAsStateWithLifecycle()
     val queueFailure by download.queueFailure.collectAsStateWithLifecycle()
 
     // Selection actions work on what is on screen: an open album's songs, the
@@ -419,6 +421,13 @@ private fun AppScaffold(
             contentColor = onContainerColor,
             bottomBar = {
                 Column {
+                    // Whatever is being previewed, from Identify or Discover,
+                    // with its pause and its X, on every page.
+                    PreviewBar(
+                        state = previewNow,
+                        onPauseResume = { recognition.preview.pauseOrResume() },
+                        onClose = recognition::stopPreview
+                    )
                     MiniPlayer(
                         track = currentTrack,
                         state = state,
@@ -596,13 +605,18 @@ private fun AppScaffold(
                         val preview by recognition.preview.state.collectAsStateWithLifecycle()
                         val queued by download.queued.collectAsStateWithLifecycle()
                         val dlState by download.state.collectAsStateWithLifecycle()
-                        // A clip left playing would carry on over whichever page came next.
-                        DisposableEffect(Unit) { onDispose { recognition.stopPreview() } }
 
-                        // The clip is the thing to hear, so the library's music makes way for it.
-                        fun hear(key: String, address: suspend (String) -> String?) {
+                        // The clip is the thing to hear, so the library's music
+                        // makes way for it. It carries on over other pages: the
+                        // small player above the tabs is where it is stopped.
+                        fun hear(
+                            key: String,
+                            label: PreviewLabel,
+                            found: () -> PreviewLabel? = { null },
+                            address: suspend (String) -> String?
+                        ) {
                             if (recognition.preview.state.value.videoId != key && isPlaying) viewModel.togglePlayPause()
-                            recognition.preview.toggle(key, address)
+                            recognition.preview.toggle(key, label, found, address)
                         }
 
                         DiscoverScreen(
@@ -611,10 +625,37 @@ private fun AppScaffold(
                             queued = queued,
                             download = dlState,
                             actions = DiscoverActions(
-                                onPreview = { track -> hear(DiscoverBrowser.previewKey(track)) { track.previewUrl } },
-                                onSample = { artist -> hear(DiscoverBrowser.sampleKey(artist)) { discover.browser.sample(artist) } },
+                                onPreview = { track ->
+                                    hear(
+                                        DiscoverBrowser.previewKey(track),
+                                        PreviewLabel(track.title, track.artist, track.coverUrl)
+                                    ) { track.previewUrl }
+                                },
+                                // Which song an artist or a genre is heard by
+                                // isn't known until it has been found.
+                                onSample = { artist ->
+                                    val key = DiscoverBrowser.sampleKey(artist)
+                                    hear(
+                                        key,
+                                        PreviewLabel(artist.name, "Finding a song…", artist.pictureUrl),
+                                        found = {
+                                            discover.browser.samples.value[key]?.let {
+                                                PreviewLabel(it.title, it.artist, it.coverUrl ?: artist.pictureUrl)
+                                            }
+                                        }
+                                    ) { discover.browser.sample(artist) }
+                                },
                                 onSampleGenre = { genre ->
-                                    hear(DiscoverBrowser.genreSampleKey(genre)) { discover.browser.sampleGenre(genre) }
+                                    val key = DiscoverBrowser.genreSampleKey(genre)
+                                    hear(
+                                        key,
+                                        PreviewLabel(genre, "Finding a song…"),
+                                        found = {
+                                            discover.browser.samples.value[key]?.let {
+                                                PreviewLabel(it.title, "${it.artist} · $genre", it.coverUrl)
+                                            }
+                                        }
+                                    ) { discover.browser.sampleGenre(genre) }
                                 },
                                 onDownload = { track ->
                                     // By name, so the finder picks the real upload

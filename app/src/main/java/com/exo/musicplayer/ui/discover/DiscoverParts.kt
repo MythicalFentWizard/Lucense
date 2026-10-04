@@ -443,6 +443,8 @@ internal fun SongRow(track: DiscoverTrack, shared: DiscoverShared, showArtist: B
                     previewing && shared.preview.loading -> "Loading the preview…"
                     previewing && shared.preview.playing ->
                         "Preview · ${YouTubeFormat.duration(shared.preview.secondsPlayed)} of 0:30"
+                    previewing && shared.preview.ended -> "Preview finished · tap to hear it again"
+                    previewing && shared.preview.paused -> "Preview paused · tap to carry on"
                     else -> listOfNotNull(
                         track.artist.takeIf { showArtist && it.isNotBlank() },
                         (track.durationMs / 1000).toInt().takeIf { it > 0 }?.let(YouTubeFormat::duration),

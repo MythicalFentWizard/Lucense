@@ -174,6 +174,9 @@ fun DesktopApp(
     val status by controller.engine.status.collectAsState()
     val visible = controller.visibleTracks
 
+    // Starting the library's own music stops a preview, rather than playing over it.
+    LaunchedEffect(status.playing) { if (status.playing) controller.stopPreview() }
+
     // Being on the Download page counts as having seen what finished, so the
     // Download item stops shining once you have been there.
     val onDownloadPage = !showSettings && destination == Destination.DOWNLOAD
@@ -295,6 +298,9 @@ fun DesktopApp(
                                 DownloadScreen(controller, onChooseFolder)
                         }
                     }
+                    // Whatever is being previewed, from Identify or Discover,
+                    // with its pause and its X, in the corner of every page.
+                    PreviewCard(controller, Modifier.align(Alignment.BottomEnd).padding(16.dp))
                 }
 
                 val panel = controller.sidePanel

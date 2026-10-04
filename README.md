@@ -63,6 +63,11 @@ Lucense finds the real upload on YouTube by artist, title and length, as it
 does everywhere else. Downloads queue, so you can keep browsing. *Search on
 YouTube* is there for picking an upload by hand.
 
+**One small preview player.** Whatever is being previewed, a YouTube result in
+Identify or a clip in Discover, shows in a small player above the tabs on a
+phone and in the corner of the page on Windows. It says what is playing, pauses
+it, and the X closes it, from whichever page you have moved on to.
+
 The genres and who is tagged with them come from MusicBrainz; the songs,
 releases, pictures and previews from Deezer. Neither needs an account or a key.
 Deezer is blocked in some countries: without it genres still work, and the
