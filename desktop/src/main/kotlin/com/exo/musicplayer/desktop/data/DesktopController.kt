@@ -50,7 +50,7 @@ import com.exo.musicplayer.data.weather.OpenMeteo
 import com.exo.musicplayer.data.weather.WeatherAffinity
 import com.exo.musicplayer.data.weather.WeatherCondition
 import com.exo.musicplayer.data.weather.WeatherSnapshot
-import com.exo.musicplayer.data.youtube.SoundCloudFallback
+import com.exo.musicplayer.data.download.YouTubeTrouble
 import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.audio.AudioDevices
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
@@ -62,6 +62,8 @@ import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import java.util.concurrent.atomic.AtomicInteger
+import com.exo.musicplayer.desktop.download.DownloadArchive
 import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.Semaphore
@@ -3033,6 +3035,29 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
+    /**
+     * Looks for a newer yt-dlp when the one here hasn't been checked for a
+     * couple of days. YouTube changes under it every few weeks, and the usual
+     * sign is every download failing at once; nobody should have to know
+     * there is an update button to get past that. Quiet: it says nothing
+     * unless it installed something.
+     */
+    private fun updateYtDlpIfStale() {
+        scope.launch {
+            val mark = File(AppDirs.tools, "yt-dlp.checked")
+            val stale = System.currentTimeMillis() - mark.lastModified() > YT_DLP_STALE_AFTER_MS
+            if (!stale || !io { ToolPaths.ytDlp.isFile }) return@launch
+            val before = YtDlp.version()
+            val result = YtDlp.update { }
+            if (result.isSuccess) {
+                io { runCatching { mark.writeText(System.currentTimeMillis().toString()) } }
+                val after = YtDlp.version()
+                if (after != null && after != before) toolNote = "yt-dlp updated itself to $after."
+                refreshTools()
+            }
+        }
+    }
+
     fun updateYtDlp() {
         scope.launch {
             toolNote = "Updating yt-dlp…"
@@ -3065,6 +3090,26 @@ class DesktopController(parent: CoroutineScope) {
         )
     )
 
+    private companion object {
+        /** YouTube refusals in a row before a playlist stops asking it. */
+        const val REFUSALS_BEFORE_GIVING_UP = 5
+
+        /** How long a yt-dlp is trusted before it is checked for a newer one. */
+        const val YT_DLP_STALE_AFTER_MS = 2L * 24 * 60 * 60 * 1000
+
+        /** Songs of a playlist downloading at once. */
+        const val PLAYLIST_WORKERS = 4
+
+        /** The least time between one song of a playlist starting and the next. */
+        const val PLAYLIST_GAP_MS = 1_000L
+
+        /** How long YouTube is left alone after it refuses a song. */
+        const val PLAYLIST_HOLD_MS = 20_000L
+
+        /** How many of a playlist's missed songs are named before "and N more". */
+        const val MISSED_NAMED = 12
+    }
+
     /**
      * Songs downloading by name at once. A whole album asked for together
      * would otherwise be a dozen searches and a dozen yt-dlps side by side.
@@ -3083,7 +3128,7 @@ class DesktopController(parent: CoroutineScope) {
             target = url,
             display = url
         )
-        downloads = downloads + entry
+        synchronized(queueLock) { downloads = downloads + entry }
 
         scope.launch {
             if (song != null) {
@@ -3096,29 +3141,210 @@ class DesktopController(parent: CoroutineScope) {
         return entry.id
     }
 
+    /** How one link's download went, and whether YouTube refused the connection on the way. */
+    private class Fetched(val result: Result<List<File>>, val refusedByYouTube: Boolean)
+
+    /**
+     * One link fetched. A failure carries what the site said, rather than how
+     * yt-dlp exited, which is all its own error amounts to.
+     */
+    private suspend fun fetch(
+        target: String,
+        wholePlaylist: Boolean,
+        onProgress: (DownloadProgress) -> Unit
+    ): Fetched {
+        var refused = false
+        var said: String? = null
+        val result = YtDlp.download(
+            target = target,
+            destination = File(settings.downloadDir),
+            toMp3 = downloadToMp3 && tools.ffmpeg,
+            embedThumbnail = downloadEmbedArt,
+            wholePlaylist = wholePlaylist,
+            quality = downloadQuality,
+            onProgress = { progress ->
+                if (YouTubeTrouble.refused(progress.line)) refused = true
+                if (progress.line.startsWith("ERROR")) said = progress.line
+                onProgress(progress)
+            }
+        )
+        val line = said
+        return Fetched(
+            if (result.isFailure && line != null) {
+                Result.failure(
+                    IllegalStateException(
+                        if (LinkResolver.isYouTube(target)) YouTubeTrouble.explain(line) else YouTubeTrouble.reason(line)
+                    )
+                )
+            } else {
+                result
+            },
+            refused && LinkResolver.isYouTube(target)
+        )
+    }
+
+    /**
+     * A playlist, song by song.
+     *
+     * It used to be handed to yt-dlp whole. Nothing was saved until the last
+     * song finished, songs that failed were dropped without a word, and when
+     * YouTube refused the lot - it does after a few dozen downloads in a row -
+     * a hundred songs came back as one failure about "this song". Now each
+     * song is its own download, several at a time, lands in the library as it
+     * finishes, and is remembered, so asking for the same playlist again
+     * fetches only what is missing.
+     */
+    private suspend fun downloadSongsOf(entry: DownloadEntry, link: String) {
+        update(entry.id) { it.status = "Reading the playlist…" }
+        val (playlist, problem) = youtubeBackend.playlist(link)
+        val songs = playlist?.songs.orEmpty()
+        if (songs.isEmpty()) {
+            val said = problem?.let(YouTubeTrouble::reason)?.takeIf { it.isNotBlank() }
+            update(entry.id) {
+                it.done = true
+                it.failed = true
+                it.status = if (said != null) {
+                    "The playlist couldn't be read: $said"
+                } else {
+                    "The playlist couldn't be read. A private playlist has to be made public or unlisted first."
+                }
+            }
+            return
+        }
+        update(entry.id) { it.display = "Playlist · ${playlist?.title ?: link}" }
+
+        val saved = ArrayList<File>()
+        val missed = ArrayList<String>()
+        var already = 0
+        var finished = 0
+
+        // What YouTube will put up with, worked out as it goes. A refusal
+        // makes every worker hold off for a while. Several running mean it is
+        // refusing the connection, and asking for the rest would only prolong
+        // that, so the playlist stops there, to be picked up again later.
+        var refusalsRunning = 0
+        var stopped = false
+        var holdUntil = 0L
+        var lastStart = 0L
+
+        val tally = Mutex()
+        val gate = Mutex()
+        val next = AtomicInteger(0)
+
+        fun report(now: String?) = update(entry.id) {
+            it.status = "$finished of ${songs.size}"
+            if (now != null) it.note = now
+            // Never quite nothing, so the row shows how far it is rather than a bar going nowhere.
+            it.percent = (finished + 0.05f) / songs.size
+            it.files = saved.toList()
+        }
+        report(null)
+
+        // Several at a time, each landing in the library as it finishes. The
+        // songs still start no closer together than the gap, so the speed
+        // comes from overlapping the downloads and conversions rather than
+        // from asking YouTube faster.
+        coroutineScope {
+            repeat(minOf(PLAYLIST_WORKERS, songs.size)) {
+                launch {
+                    while (true) {
+                        if (tally.withLock { stopped }) break
+                        val index = next.getAndIncrement()
+                        if (index >= songs.size) break
+                        val video = songs[index]
+
+                        if (DownloadArchive.fileFor(video.id) != null) {
+                            tally.withLock {
+                                already++
+                                finished++
+                                report(null)
+                            }
+                            continue
+                        }
+
+                        gate.withLock {
+                            val hold = tally.withLock { holdUntil }
+                            val wait = maxOf(lastStart + PLAYLIST_GAP_MS, hold) - System.currentTimeMillis()
+                            if (wait > 0) delay(wait)
+                            lastStart = System.currentTimeMillis()
+                        }
+                        if (tally.withLock { stopped }) break
+                        tally.withLock { report(video.title) }
+
+                        val fetched = fetch(video.watchUrl, wholePlaylist = false) { progress ->
+                            if (progress.line.isNotBlank()) downloadLog = (downloadLog + progress.line).takeLast(200)
+                        }
+                        val files = fetched.result.getOrDefault(emptyList())
+
+                        tally.withLock {
+                            if (files.isEmpty()) {
+                                missed += video.title
+                            } else {
+                                saved += files
+                                DownloadArchive.add(video.id, files.first())
+                            }
+                            if (fetched.refusedByYouTube) {
+                                holdUntil = System.currentTimeMillis() + PLAYLIST_HOLD_MS
+                                if (++refusalsRunning >= REFUSALS_BEFORE_GIVING_UP) stopped = true
+                            } else {
+                                refusalsRunning = 0
+                            }
+                            finished++
+                            report(null)
+                        }
+                        // Into the library as each one lands, not when the last one has.
+                        if (files.isNotEmpty()) addToLibrary(files)
+                    }
+                }
+            }
+        }
+
+        val gone = playlist?.gone ?: 0
+        val untried = songs.size - finished
+        update(entry.id) {
+            it.done = true
+            it.percent = 1f
+            it.files = saved.toList()
+            it.failed = saved.isEmpty() && already == 0
+            it.status = buildString {
+                append("Saved ${saved.size} of ${songs.size}")
+                if (already > 0) append(", $already already downloaded")
+                if (missed.size + untried > 0) append(", ${missed.size + untried} not downloaded")
+            }
+            it.note = listOfNotNull(
+                if (stopped) {
+                    "YouTube began refusing this connection" +
+                        (if (untried > 0) ", so $untried ${if (untried == 1) "song wasn't" else "songs weren't"} tried. " else ". ") +
+                        YouTubeTrouble.WHY_REFUSED +
+                        " Then download the playlist again: the songs already saved are skipped."
+                } else {
+                    null
+                },
+                missed.takeIf { list -> list.isNotEmpty() }?.let { list ->
+                    "Not downloaded: " + list.take(MISSED_NAMED).joinToString("; ") +
+                        if (list.size > MISSED_NAMED) "; and ${list.size - MISSED_NAMED} more." else "."
+                },
+                if (gone > 0) "$gone of the playlist's videos ${if (gone == 1) "is" else "are"} private or deleted." else null
+            ).joinToString("\n").takeIf { text -> text.isNotBlank() }
+        }
+    }
+
     private suspend fun runDownload(entry: DownloadEntry, url: String, song: YouTubeLinkFinder.Wanted?) {
         if (isSpotify(url)) {
             downloadWithSpotdl(entry.id, url)
             return
         }
 
-        // The song wanted, when known, in case YouTube refuses this
-        // connection and it has to come from somewhere else.
-        var wanted: YouTubeLinkFinder.Wanted? = null
-        foundVideos.remove(entry.id)
-
         // A song name rather than a link: found on YouTube first, and the
         // link that was found is what yt-dlp is given.
         val target = if (song != null) {
             update(entry.id) { it.status = "Finding it on YouTube…" }
-            wanted = song
             findYouTubeLink(entry.id, song)
                 ?: return
         } else if (!url.startsWith("http", ignoreCase = true)) {
             val text = url.replace(searchPrefix, "").trim()
             update(entry.id) { it.status = "Finding it on YouTube…" }
-            wanted = YouTubeLinkFinder.Wanted(title = text)
-            findYouTubeLink(entry.id, wanted)
+            findYouTubeLink(entry.id, YouTubeLinkFinder.Wanted(title = text))
                 ?: return
         } else when (val resolved = io { LinkResolver.resolve(url) }) {
             is ResolvedLink.Direct -> {
@@ -3130,8 +3356,7 @@ class DesktopController(parent: CoroutineScope) {
                     it.display = resolved.display
                     it.note = resolved.note
                 }
-                wanted = YouTubeLinkFinder.Wanted(title = resolved.query)
-                findYouTubeLink(entry.id, wanted)
+                findYouTubeLink(entry.id, YouTubeLinkFinder.Wanted(title = resolved.query))
                     ?: return
             }
             is ResolvedLink.Unsupported -> {
@@ -3144,47 +3369,17 @@ class DesktopController(parent: CoroutineScope) {
             }
         }
 
-        update(entry.id) { it.status = "Starting…" }
-        val destination = File(settings.downloadDir)
-        var refused = false
-        var youTubeSaid: String? = null
-        suspend fun fetch(link: String) = YtDlp.download(
-            target = link,
-            destination = destination,
-            toMp3 = downloadToMp3 && tools.ffmpeg,
-            embedThumbnail = downloadEmbedArt,
-            wholePlaylist = downloadPlaylist && song == null,
-            quality = downloadQuality,
-            onProgress = { progress ->
-                if (SoundCloudFallback.refusedByYouTube(progress.line)) refused = true
-                if (progress.line.startsWith("ERROR")) youTubeSaid = progress.line
-                onDownloadProgress(entry.id, progress)
-            }
-        )
-        var result = fetch(target)
-
-        // Whatever stopped YouTube - a refused VPN address ("confirm you're
-        // not a bot"), a removed or region-blocked video - the same song
-        // may be on SoundCloud.
-        if (result.isFailure && LinkResolver.isYouTube(target)) {
-            update(entry.id) { it.status = SoundCloudFallback.searching(refused) }
-            val song = wanted?.let { SoundCloudFallback.Lookup(it, foundVideos[entry.id]?.durationSeconds) }
-                ?: SoundCloudFallback.lookUp(target, youtube)
-            val upload = song?.let {
-                SoundCloudFallback.pick(it, youtubeBackend.searchSoundCloud(SoundCloudFallback.searchQuery(it.wanted)))
-            }
-            result = if (upload == null) {
-                Result.failure(IllegalStateException(SoundCloudFallback.notFound(refused, youTubeSaid)))
-            } else {
-                update(entry.id) {
-                    it.display = "SoundCloud · ${upload.title}"
-                    it.note = listOfNotNull(it.note, SoundCloudFallback.note(upload, refused)).joinToString("\n")
-                    it.percent = 0f
-                    it.status = "Starting…"
-                }
-                fetch(upload.watchUrl)
-            }
+        // A playlist is a list of songs, not one long download: each is
+        // fetched, and can fail, on its own.
+        if (song == null && LinkResolver.isYouTubePlaylist(target, downloadPlaylist)) {
+            downloadSongsOf(entry, target)
+            return
         }
+
+        update(entry.id) { it.status = "Starting…" }
+        val result = fetch(target, wholePlaylist = downloadPlaylist && song == null) { progress ->
+            onDownloadProgress(entry.id, progress)
+        }.result
 
         result.fold(
             onSuccess = { files ->
@@ -3225,14 +3420,10 @@ class DesktopController(parent: CoroutineScope) {
      * When nothing suitable turns up the entry fails with the reason, rather
      * than saving an edit or a cover that would look like success.
      */
-    /** The video each download entry found, for its length if YouTube then refuses it. */
-    private val foundVideos = HashMap<Long, YouTubeVideo>()
-
     private suspend fun findYouTubeLink(id: Long, wanted: YouTubeLinkFinder.Wanted): String? =
         when (val outcome = linkFinder.find(wanted)) {
             is YouTubeLinkFinder.Outcome.Found -> {
                 val video = outcome.pick.video
-                foundVideos[id] = video
                 update(id) { entry ->
                     entry.display = "YouTube · ${video.title}"
                     entry.note = listOfNotNull(
@@ -3282,7 +3473,7 @@ class DesktopController(parent: CoroutineScope) {
             note = "${match.provider} has no downloadable file, so the same track is " +
                 "found on YouTube first and that link is downloaded."
         )
-        downloads = downloads + entry
+        synchronized(queueLock) { downloads = downloads + entry }
         scope.launch {
             update(entry.id) { it.status = "Finding it on YouTube…" }
             // The match's own title, artist and length, so the finder can refuse
@@ -3388,13 +3579,21 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
-    private fun update(id: Long, change: (DownloadEntry) -> Unit) {
+    /**
+     * Guards the queue. Downloads report from their own threads, several at
+     * once, and each report reads the list and writes it back: without this,
+     * two landing together lose one, and a song could finish without the row
+     * ever saying so.
+     */
+    private val queueLock = Any()
+
+    private fun update(id: Long, change: (DownloadEntry) -> Unit) = synchronized(queueLock) {
         downloads = downloads.map { entry ->
             if (entry.id != id) entry else entry.copy().also(change)
         }
     }
 
-    fun clearFinishedDownloads() {
+    fun clearFinishedDownloads() = synchronized(queueLock) {
         downloads = downloads.filterNot { it.done }
     }
 
@@ -4280,6 +4479,7 @@ class DesktopController(parent: CoroutineScope) {
         refreshPlaylists()
         refreshSmartPlaylists()
         refreshTools()
+        updateYtDlpIfStale()
         refreshWeather()
         loadWallpaper()
     }

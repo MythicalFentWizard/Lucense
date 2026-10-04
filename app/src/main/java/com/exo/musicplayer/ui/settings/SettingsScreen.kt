@@ -171,8 +171,7 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
             "Proxy for downloads",
             "YouTube refuses many cheap VPN servers. If your VPN app also offers a local proxy " +
                 "(v2rayNG and Hiddify use 127.0.0.1:10808), point it at a cleaner server and put " +
-                "it here: only downloads go through it. When YouTube refuses anyway, the song is " +
-                "looked for on SoundCloud."
+                "it here: only downloads go through it."
         ) {
             // Seeded once: following the saved, trimmed value would fight the typing.
             var proxy by remember { mutableStateOf(values.downloadProxy) }

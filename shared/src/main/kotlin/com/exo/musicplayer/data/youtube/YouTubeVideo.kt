@@ -29,11 +29,9 @@ data class YouTubeVideo(
     /** Shorts are usually not what someone searching for a song wants. */
     val isShort: Boolean = false,
     /** Which backend answered, for the "via" note under the results. */
-    val source: String = "",
-    /** Where the result lives when it isn't a YouTube video, such as a SoundCloud track. */
-    val pageUrl: String? = null
+    val source: String = ""
 ) {
-    val watchUrl: String get() = pageUrl ?: "https://www.youtube.com/watch?v=$id"
+    val watchUrl: String get() = "https://www.youtube.com/watch?v=$id"
 
     /**
      * Thumbnail URL, built from the video id rather than taken from whichever

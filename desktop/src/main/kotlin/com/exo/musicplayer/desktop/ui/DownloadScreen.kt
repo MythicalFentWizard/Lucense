@@ -204,7 +204,7 @@ private fun ToolsPanel(controller: DesktopController) {
         }
         Spacer(Modifier.height(4.dp))
         Hint(
-            "All three ship with Lucense — nothing to install. yt-dlp is the only " +
+            "All four ship with Lucense — nothing to install. yt-dlp is the only " +
                 "one worth updating by hand: extractors break whenever a site changes " +
                 "its player, usually faster than Lucense ships."
         )
@@ -214,9 +214,10 @@ private fun ToolsPanel(controller: DesktopController) {
             ToolChip("yt-dlp", tools.ytDlp, tools.ytDlpVersion ?: "YouTube, SoundCloud, 1000+")
             ToolChip("ffmpeg", tools.ffmpeg, "MP3 conversion, video audio")
             ToolChip("spotdl", tools.spotdl, "Spotify links")
+            ToolChip("QuickJS", tools.jsEngine, "YouTube's challenges")
         }
 
-        if (!tools.ytDlp || !tools.ffmpeg || !tools.spotdl) {
+        if (!tools.ytDlp || !tools.ffmpeg || !tools.spotdl || !tools.jsEngine) {
             Spacer(Modifier.height(10.dp))
             Text(
                 "Something is missing from this installation — reinstalling will " +
@@ -299,10 +300,13 @@ private fun DownloadRow(entry: DownloadEntry) {
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                if (!entry.done && entry.percent > 0f) {
-                    "${(entry.percent * 100).toInt()}%"
-                } else {
-                    entry.status
+                when {
+                    // The reason is spelled out underneath; here it would squeeze the name out.
+                    entry.failed -> "Failed"
+                    // A playlist counts songs, which says more than a percentage.
+                    !entry.done && entry.percent > 0f && !entry.status.contains(" of ") ->
+                        "${(entry.percent * 100).toInt()}%"
+                    else -> entry.status
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (entry.failed) Palette.TextDim else Palette.Accent
@@ -319,15 +323,23 @@ private fun DownloadRow(entry: DownloadEntry) {
             Text(it, style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
         }
 
-        if (entry.done && entry.files.isNotEmpty()) {
+        if (entry.files.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            entry.files.forEach { file ->
+            // A playlist saves a hundred; the last few show it is moving.
+            entry.files.takeLast(FILES_SHOWN).forEach { file ->
                 Text(
                     file.name,
                     style = MaterialTheme.typography.labelSmall,
                     color = Palette.TextFaint,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (entry.files.size > FILES_SHOWN) {
+                Text(
+                    "and ${entry.files.size - FILES_SHOWN} more",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Palette.TextFaint
                 )
             }
         }
@@ -338,6 +350,9 @@ private fun DownloadRow(entry: DownloadEntry) {
         }
     }
 }
+
+/** How many saved files a queue row names. */
+private const val FILES_SHOWN = 4
 
 /** Raw yt-dlp output, for when a download fails and the reason matters. */
 @Composable

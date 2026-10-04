@@ -33,6 +33,9 @@ object ToolPaths {
     val ffmpeg: File get() = resolve("ffmpeg.exe")
     val spotdl: File get() = resolve("spotdl.exe")
 
+    /** QuickJS, the JavaScript engine yt-dlp runs YouTube's challenges in. */
+    val qjs: File get() = resolve("qjs.exe")
+
     /** True once a writable copy exists, i.e. the tool can update itself. */
     fun isUpdatable(name: String): Boolean = File(AppDirs.tools, name).isFile
 
