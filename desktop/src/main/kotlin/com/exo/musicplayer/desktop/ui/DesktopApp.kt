@@ -73,6 +73,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Fingerprint
@@ -131,6 +132,7 @@ enum class Destination(val label: String, val icon: ImageVector) {
     ALBUMS("Albums", Icons.Default.Album),
     ARTISTS("Artists", Icons.Default.Person),
     PLAYLISTS("Playlists", Icons.AutoMirrored.Filled.QueueMusic),
+    DISCOVER("Discover", Icons.Default.Explore),
     IDENTIFY("Identify", Icons.Default.Fingerprint),
     MOODS("Moods", Icons.Default.Cloud),
     STATS("Stats", Icons.Default.BarChart),
@@ -283,6 +285,8 @@ fun DesktopApp(
                                 )
                             destination == Destination.PLAYLISTS ->
                                 PlaylistsScreen(controller, onPickPlaylistFile)
+                            destination == Destination.DISCOVER ->
+                                DiscoverScreen(controller) { destination = Destination.IDENTIFY }
                             destination == Destination.IDENTIFY ->
                                 IdentifyScreen(controller, onChooseMedia)
                             destination == Destination.MOODS -> MoodsScreen(controller)
@@ -646,6 +650,7 @@ private fun ContentHeader(
             "$shownCount of ${controller.tracks.size} tracks"
         destination == Destination.LIBRARY ->
             "${controller.tracks.size} tracks · ${controller.folders.size} folders"
+        destination == Destination.DISCOVER -> "Genres to wander, artists to follow, and what's new"
         destination == Destination.IDENTIFY -> "Seven catalogues, plus fingerprinting"
         destination == Destination.DOWNLOAD -> "YouTube, SoundCloud, Bandcamp, Spotify"
         destination == Destination.MOODS -> "Songs that match the weather"

@@ -46,6 +46,9 @@ data class DownloadUiState(
     val queueSize: Int = 0
 )
 
+/** Where a song in the download queue has got to, for the button that queued it. */
+enum class QueuedDownload { WAITING, DOWNLOADING, DONE, ALREADY_SAVED, FAILED }
+
 /** One song to download: a real link, or a name to find on YouTube first. */
 data class DownloadRequest(
     val downloadUrl: String?,
@@ -221,6 +224,90 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // ---- A queue, for Discover ----------------------------------------------------
+    //
+    // Browsing is tapping download on one song and moving on to the next, so
+    // those wait in line and run one after another instead of each cancelling
+    // the last. Starting a download by hand from the Download page takes over,
+    // as it always has, and whatever was still waiting is let go.
+
+    private val waiting = ArrayDeque<Pair<String, DownloadRequest>>()
+
+    private val _queued = MutableStateFlow<Map<String, QueuedDownload>>(emptyMap())
+
+    /** Each queued song by the key it was queued under. */
+    val queued: StateFlow<Map<String, QueuedDownload>> = _queued.asStateFlow()
+
+    /** Why the last queued song that failed did, for a toast. */
+    private val _queueFailure = MutableStateFlow<String?>(null)
+    val queueFailure: StateFlow<String?> = _queueFailure.asStateFlow()
+    fun queueFailureShown() { _queueFailure.value = null }
+
+    /** Whether the queue's own job is the one running. */
+    private var draining = false
+
+    fun enqueue(key: String, request: DownloadRequest) {
+        val state = _queued.value[key]
+        if (state == QueuedDownload.WAITING || state == QueuedDownload.DOWNLOADING) return
+        waiting.addLast(key to request)
+        _queued.value = _queued.value + (key to QueuedDownload.WAITING)
+        if (draining) return
+        draining = true
+        // A download already running from the Download page finishes first.
+        val before = job?.takeIf { it.isActive }
+        job = viewModelScope.launch {
+            var done = 0
+            try {
+                before?.join()
+                while (true) {
+                    val (next, wanted) = waiting.removeFirstOrNull() ?: break
+                    _queued.value = _queued.value + (next to QueuedDownload.DOWNLOADING)
+                    _state.value = DownloadUiState(
+                        busy = true,
+                        stage = "Starting…",
+                        title = wanted.title,
+                        queuePosition = done + 1,
+                        queueSize = done + 1 + waiting.size
+                    )
+                    val outcome = if (!ensureReady()) {
+                        ItemOutcome.Failed(downloader.lastInitError ?: "yt-dlp is not available.")
+                    } else {
+                        val (input, song) = wanted.toInput()
+                        _url.value = input
+                        downloadOne(input, song)
+                    }
+                    _queued.value = _queued.value + (
+                        next to when (outcome) {
+                            is ItemOutcome.Added -> QueuedDownload.DONE
+                            ItemOutcome.Duplicate -> QueuedDownload.ALREADY_SAVED
+                            is ItemOutcome.Failed -> QueuedDownload.FAILED
+                        }
+                    )
+                    _state.value = when (outcome) {
+                        is ItemOutcome.Added -> DownloadUiState(message = "Added \"${outcome.title}\"")
+                        ItemOutcome.Duplicate -> DownloadUiState(message = "Already in your library")
+                        is ItemOutcome.Failed -> {
+                            _queueFailure.value = "${wanted.title}: ${outcome.message}"
+                            DownloadUiState(message = outcome.message, isError = true, offerUpdate = outcome.offerUpdate)
+                        }
+                    }
+                    done++
+                }
+                finishInput()
+            } finally {
+                // Taken over or cancelled: the download this one was waiting
+                // behind goes too, and nothing is left looking as if it were
+                // still coming.
+                before?.cancel()
+                draining = false
+                waiting.clear()
+                _queued.value = _queued.value.filterValues {
+                    it != QueuedDownload.WAITING && it != QueuedDownload.DOWNLOADING
+                }
+            }
+        }
+    }
+
     private suspend fun ensureReady(): Boolean {
         // First run unpacks the Python runtime, which takes a few seconds.
         if (downloader.ensureReady()) return true
@@ -324,7 +411,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 // Same pipeline as a Telegram share: hashed, deduplicated, tagged.
                 val result = importer.import(Uri.fromFile(outcome.file), sourceApp = "Download")
                 // The cache copy is redundant once the importer has its own.
-                runCatching { outcome.file.parentFile?.deleteRecursively() }
+                withContext(Dispatchers.IO) { runCatching { outcome.file.parentFile?.deleteRecursively() } }
                 when (result) {
                     is ImportResult.Imported -> ItemOutcome.Added(result.track.title)
                     is ImportResult.Duplicate -> ItemOutcome.Duplicate

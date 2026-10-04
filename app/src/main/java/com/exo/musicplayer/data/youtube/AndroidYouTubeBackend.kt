@@ -38,7 +38,8 @@ class AndroidYouTubeBackend(
                 YtDlpFlatSearch.ARGUMENTS.forEach { request.addOption(it) }
                 val response = YoutubeDL.getInstance().execute(request)
                 YtDlpFlatSearch.parse(response.out, label)
-            }.getOrDefault(emptyList())
+            }.onFailure { android.util.Log.w("YouTubeSearch", "Search failed: $query", it) }
+                .getOrDefault(emptyList())
         }
 
     /**

@@ -62,6 +62,12 @@ import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import androidx.compose.runtime.mutableStateMapOf
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Semaphore
+import com.exo.musicplayer.data.discover.Discovery
+import com.exo.musicplayer.data.discover.DiscoverTrack
+import com.exo.musicplayer.data.discover.DiscoverBrowser
 import com.exo.musicplayer.desktop.audio.SongGraph
 import com.exo.musicplayer.desktop.download.DesktopYouTubeBackend
 import com.exo.musicplayer.desktop.audio.PlaybackEngine
@@ -1874,6 +1880,44 @@ class DesktopController(parent: CoroutineScope) {
         preview.stop()
     }
 
+    // ---- Discover ------------------------------------------------------------
+    //
+    // The browsing is shared with the phone (DiscoverBrowser). What is here is
+    // what the desktop adds: its preview player, its downloader, and which
+    // download each song turned into, so a row can show how its own is going.
+
+    val discover = DiscoverBrowser(scope, Discovery(File(AppDirs.root, "discover")))
+
+    /** The download each Discover song was sent to, by the song's Deezer id. */
+    private val discoverDownloads = mutableStateMapOf<Long, Long>()
+
+    fun downloadDiscovered(track: DiscoverTrack) {
+        downloadSong(track.artist, track.title, track.durationMs)?.let { discoverDownloads[track.id] = it }
+    }
+
+    /** How a Discover song's download is going, or null if it was never asked for. */
+    fun discoveredDownload(track: DiscoverTrack): DownloadEntry? {
+        val id = discoverDownloads[track.id] ?: return null
+        return downloads.firstOrNull { it.id == id }
+    }
+
+    /**
+     * Plays a half-minute clip from Discover: a song's own, or the one an
+     * artist or a genre is heard by. Asking for the clip already playing stops it.
+     */
+    fun hear(key: String, address: suspend (String) -> String?) {
+        if (preview.state.value.videoId != key && engine.status.value.playing) engine.togglePlay()
+        preview.toggle(key, address)
+    }
+
+    /** Opens YouTube search in Identify with [text] already searched for. */
+    fun searchYouTubeFor(text: String) {
+        preview.stop()
+        identifyMode = IdentifyMode.YOUTUBE
+        youtubeQuery = text
+        searchYouTube(text)
+    }
+
     /** Set when the last attempt failed only because ffmpeg is missing. */
     var identifyNeedsFfmpeg by mutableStateOf(false)
         private set
@@ -3003,11 +3047,35 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Queues [rawUrl], resolving Spotify links to a searchable name first. */
     fun startDownload(rawUrl: String = downloadUrl) {
-        val url = rawUrl.trim()
-        if (url.isBlank()) return
+        if (queueDownload(rawUrl.trim(), song = null) != null) downloadUrl = ""
+    }
+
+    /**
+     * A song known by its artist, title and length rather than by a link,
+     * which is what Discover has. Found on YouTube first and checked against
+     * all three, then downloaded like anything else. Returns the entry's id,
+     * for following it in [downloads], or null when nothing was queued.
+     */
+    fun downloadSong(artist: String, title: String, durationMs: Long?): Long? = queueDownload(
+        listOf(artist, title).filter { it.isNotBlank() }.joinToString(" - "),
+        YouTubeLinkFinder.Wanted(
+            title = title,
+            artist = artist.takeIf { it.isNotBlank() },
+            durationMs = durationMs?.takeIf { it > 0 }
+        )
+    )
+
+    /**
+     * Songs downloading by name at once. A whole album asked for together
+     * would otherwise be a dozen searches and a dozen yt-dlps side by side.
+     */
+    private val songSlots = Semaphore(2)
+
+    private fun queueDownload(url: String, song: YouTubeLinkFinder.Wanted?): Long? {
+        if (url.isBlank()) return null
         if (!tools.ready) {
             toolNote = "Install yt-dlp first — one click, about 12 MB."
-            return
+            return null
         }
 
         val entry = DownloadEntry(
@@ -3016,117 +3084,131 @@ class DesktopController(parent: CoroutineScope) {
             display = url
         )
         downloads = downloads + entry
-        downloadUrl = ""
 
         scope.launch {
-            if (isSpotify(url)) {
-                downloadWithSpotdl(entry.id, url)
-                return@launch
+            if (song != null) {
+                update(entry.id) { it.status = "Waiting…" }
+                songSlots.withPermit { runDownload(entry, url, song) }
+            } else {
+                runDownload(entry, url, null)
             }
-
-            // The song wanted, when known, in case YouTube refuses this
-            // connection and it has to come from somewhere else.
-            var wanted: YouTubeLinkFinder.Wanted? = null
-            foundVideos.remove(entry.id)
-
-            // A song name rather than a link: found on YouTube first, and the
-            // link that was found is what yt-dlp is given.
-            val target = if (!url.startsWith("http", ignoreCase = true)) {
-                val text = url.replace(searchPrefix, "").trim()
-                update(entry.id) { it.status = "Finding it on YouTube…" }
-                wanted = YouTubeLinkFinder.Wanted(title = text)
-                findYouTubeLink(entry.id, wanted)
-                    ?: return@launch
-            } else when (val resolved = io { LinkResolver.resolve(url) }) {
-                is ResolvedLink.Direct -> {
-                    update(entry.id) { it.display = "${resolved.service} · $url" }
-                    resolved.url
-                }
-                is ResolvedLink.Search -> {
-                    update(entry.id) {
-                        it.display = resolved.display
-                        it.note = resolved.note
-                    }
-                    wanted = YouTubeLinkFinder.Wanted(title = resolved.query)
-                    findYouTubeLink(entry.id, wanted)
-                        ?: return@launch
-                }
-                is ResolvedLink.Unsupported -> {
-                    update(entry.id) {
-                        it.failed = true
-                        it.done = true
-                        it.status = resolved.reason
-                    }
-                    return@launch
-                }
-            }
-
-            update(entry.id) { it.status = "Starting…" }
-            val destination = File(settings.downloadDir)
-            var refused = false
-            var youTubeSaid: String? = null
-            suspend fun fetch(link: String) = YtDlp.download(
-                target = link,
-                destination = destination,
-                toMp3 = downloadToMp3 && tools.ffmpeg,
-                embedThumbnail = downloadEmbedArt,
-                wholePlaylist = downloadPlaylist,
-                quality = downloadQuality,
-                onProgress = { progress ->
-                    if (SoundCloudFallback.refusedByYouTube(progress.line)) refused = true
-                    if (progress.line.startsWith("ERROR")) youTubeSaid = progress.line
-                    onDownloadProgress(entry.id, progress)
-                }
-            )
-            var result = fetch(target)
-
-            // Whatever stopped YouTube - a refused VPN address ("confirm you're
-            // not a bot"), a removed or region-blocked video - the same song
-            // may be on SoundCloud.
-            if (result.isFailure && LinkResolver.isYouTube(target)) {
-                update(entry.id) { it.status = SoundCloudFallback.searching(refused) }
-                val song = wanted?.let { SoundCloudFallback.Lookup(it, foundVideos[entry.id]?.durationSeconds) }
-                    ?: SoundCloudFallback.lookUp(target, youtube)
-                val upload = song?.let {
-                    SoundCloudFallback.pick(it, youtubeBackend.searchSoundCloud(SoundCloudFallback.searchQuery(it.wanted)))
-                }
-                result = if (upload == null) {
-                    Result.failure(IllegalStateException(SoundCloudFallback.notFound(refused, youTubeSaid)))
-                } else {
-                    update(entry.id) {
-                        it.display = "SoundCloud · ${upload.title}"
-                        it.note = listOfNotNull(it.note, SoundCloudFallback.note(upload, refused)).joinToString("\n")
-                        it.percent = 0f
-                        it.status = "Starting…"
-                    }
-                    fetch(upload.watchUrl)
-                }
-            }
-
-            result.fold(
-                onSuccess = { files ->
-                    update(entry.id) {
-                        it.done = true
-                        it.percent = 1f
-                        it.files = files
-                        it.status = if (files.isEmpty()) {
-                            "Finished, but nothing was produced."
-                        } else {
-                            "Saved ${files.size} file${if (files.size == 1) "" else "s"}"
-                        }
-                    }
-                    // Straight into the library, wherever the download folder is.
-                    addToLibrary(files)
-                },
-                onFailure = { error ->
-                    update(entry.id) {
-                        it.done = true
-                        it.failed = true
-                        it.status = error.message ?: "Download failed."
-                    }
-                }
-            )
         }
+        return entry.id
+    }
+
+    private suspend fun runDownload(entry: DownloadEntry, url: String, song: YouTubeLinkFinder.Wanted?) {
+        if (isSpotify(url)) {
+            downloadWithSpotdl(entry.id, url)
+            return
+        }
+
+        // The song wanted, when known, in case YouTube refuses this
+        // connection and it has to come from somewhere else.
+        var wanted: YouTubeLinkFinder.Wanted? = null
+        foundVideos.remove(entry.id)
+
+        // A song name rather than a link: found on YouTube first, and the
+        // link that was found is what yt-dlp is given.
+        val target = if (song != null) {
+            update(entry.id) { it.status = "Finding it on YouTube…" }
+            wanted = song
+            findYouTubeLink(entry.id, song)
+                ?: return
+        } else if (!url.startsWith("http", ignoreCase = true)) {
+            val text = url.replace(searchPrefix, "").trim()
+            update(entry.id) { it.status = "Finding it on YouTube…" }
+            wanted = YouTubeLinkFinder.Wanted(title = text)
+            findYouTubeLink(entry.id, wanted)
+                ?: return
+        } else when (val resolved = io { LinkResolver.resolve(url) }) {
+            is ResolvedLink.Direct -> {
+                update(entry.id) { it.display = "${resolved.service} · $url" }
+                resolved.url
+            }
+            is ResolvedLink.Search -> {
+                update(entry.id) {
+                    it.display = resolved.display
+                    it.note = resolved.note
+                }
+                wanted = YouTubeLinkFinder.Wanted(title = resolved.query)
+                findYouTubeLink(entry.id, wanted)
+                    ?: return
+            }
+            is ResolvedLink.Unsupported -> {
+                update(entry.id) {
+                    it.failed = true
+                    it.done = true
+                    it.status = resolved.reason
+                }
+                return
+            }
+        }
+
+        update(entry.id) { it.status = "Starting…" }
+        val destination = File(settings.downloadDir)
+        var refused = false
+        var youTubeSaid: String? = null
+        suspend fun fetch(link: String) = YtDlp.download(
+            target = link,
+            destination = destination,
+            toMp3 = downloadToMp3 && tools.ffmpeg,
+            embedThumbnail = downloadEmbedArt,
+            wholePlaylist = downloadPlaylist && song == null,
+            quality = downloadQuality,
+            onProgress = { progress ->
+                if (SoundCloudFallback.refusedByYouTube(progress.line)) refused = true
+                if (progress.line.startsWith("ERROR")) youTubeSaid = progress.line
+                onDownloadProgress(entry.id, progress)
+            }
+        )
+        var result = fetch(target)
+
+        // Whatever stopped YouTube - a refused VPN address ("confirm you're
+        // not a bot"), a removed or region-blocked video - the same song
+        // may be on SoundCloud.
+        if (result.isFailure && LinkResolver.isYouTube(target)) {
+            update(entry.id) { it.status = SoundCloudFallback.searching(refused) }
+            val song = wanted?.let { SoundCloudFallback.Lookup(it, foundVideos[entry.id]?.durationSeconds) }
+                ?: SoundCloudFallback.lookUp(target, youtube)
+            val upload = song?.let {
+                SoundCloudFallback.pick(it, youtubeBackend.searchSoundCloud(SoundCloudFallback.searchQuery(it.wanted)))
+            }
+            result = if (upload == null) {
+                Result.failure(IllegalStateException(SoundCloudFallback.notFound(refused, youTubeSaid)))
+            } else {
+                update(entry.id) {
+                    it.display = "SoundCloud · ${upload.title}"
+                    it.note = listOfNotNull(it.note, SoundCloudFallback.note(upload, refused)).joinToString("\n")
+                    it.percent = 0f
+                    it.status = "Starting…"
+                }
+                fetch(upload.watchUrl)
+            }
+        }
+
+        result.fold(
+            onSuccess = { files ->
+                update(entry.id) {
+                    it.done = true
+                    it.percent = 1f
+                    it.files = files
+                    it.status = if (files.isEmpty()) {
+                        "Finished, but nothing was produced."
+                    } else {
+                        "Saved ${files.size} file${if (files.size == 1) "" else "s"}"
+                    }
+                }
+                // Straight into the library, wherever the download folder is.
+                addToLibrary(files)
+            },
+            onFailure = { error ->
+                update(entry.id) {
+                    it.done = true
+                    it.failed = true
+                    it.status = error.message ?: "Download failed."
+                }
+            }
+        )
     }
 
     /**

@@ -224,7 +224,11 @@ object YtDlp {
         staging.mkdirs()
         try {
             val (code, failure) = block(staging)
-            val produced = staging.walkTopDown().filter { it.isFile }.toList()
+            // Only what can be played counts. A download the site cuts off
+            // part-way leaves the cover picture it had already fetched, and
+            // that alone used to pass for a finished song: "Saved 1 file", a
+            // .webp in the music folder, and no second try anywhere else.
+            val produced = staging.walkTopDown().filter { it.isFile && it.extension.lowercase() !in LEFTOVERS }.toList()
             if (code != 0 && produced.isEmpty()) error(failure)
 
             return produced.map { file ->
@@ -241,6 +245,9 @@ object YtDlp {
     }
 
     private val PERCENT = Regex("""(\d{1,3}(?:\.\d+)?)%""")
+
+    /** What a download leaves in its folder besides the song: cover pictures and unfinished parts. */
+    private val LEFTOVERS = setOf("webp", "jpg", "jpeg", "png", "part", "ytdl", "temp", "tmp", "json", "description")
 
     private fun percentOf(line: String): Float? {
         if (!line.startsWith("[download]")) return null
