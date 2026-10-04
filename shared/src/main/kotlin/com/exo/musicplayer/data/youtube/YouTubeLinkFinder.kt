@@ -47,6 +47,13 @@ class YouTubeLinkFinder(private val search: YouTubeSearch) {
         val query: String
             get() = listOfNotNull(artist?.trim()?.takeIf { it.isNotEmpty() }, title.trim())
                 .joinToString(" ")
+
+        /** The same words asked another way, for when [query] comes back empty. */
+        val otherQueries: List<String>
+            get() {
+                val who = artist?.trim()?.takeIf { it.isNotEmpty() }
+                return if (who != null) listOf("${title.trim()} $who", "$query audio") else listOf("$query audio")
+            }
     }
 
     /** One candidate and the verdict on it. */
@@ -66,7 +73,17 @@ class YouTubeLinkFinder(private val search: YouTubeSearch) {
         val query = wanted.query
         if (query.isBlank()) return Outcome.NothingSuitable("Nothing to search for.", null)
 
-        val result = search.search(query, limit)
+        // YouTube now and then answers an ordinary query with an empty page:
+        // "Bonga Kambua" found nothing, time after time, while "Kambua Bonga"
+        // found the song at once. So an empty answer is asked for again in
+        // other words before it is believed.
+        var result = search.search(query, limit)
+        if (result.videos.isEmpty()) {
+            for (other in wanted.otherQueries) {
+                result = search.search(other, limit)
+                if (result.videos.isNotEmpty()) break
+            }
+        }
         if (result.videos.isEmpty()) {
             return Outcome.NothingSuitable(
                 "YouTube returned nothing for \"$query\". yt-dlp may need updating.",

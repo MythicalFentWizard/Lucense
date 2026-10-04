@@ -43,6 +43,31 @@ library keeps up with new, renamed and deleted files on its own.
 | **A file** | audio *or video* — fingerprinted locally, only frequency peaks leave the machine |
 | **A link** | TikTok, Instagram, YouTube and a thousand more — the audio is fetched, fingerprinted, and thrown away |
 
+**Discover** is for finding music you don't have yet: a map of genres to
+wander, in the manner of Every Noise at Once. It's a tab on Android and a page
+on Windows.
+
+| | what you can do |
+|---|---|
+| **Browse genres** | about 2,200 of them, down to digicore and pirate metal. Filter by a word, or by family: *core* finds hardcore, metalcore and digicore alike. |
+| **Hear a genre** | press play beside any genre for half a minute of one of its artists. Press again for a different one. |
+| **Open a genre** | see who plays it, the artists it's most of first, the genres next to it, and what those artists released this year. |
+| **Type an artist** | see which genres they are, their most played songs, their releases with dates, and who is similar. |
+| **New from your artists** | what the artists already in your library put out in the last four months. |
+| **You might like** | artists similar to yours that you don't have. |
+| **Charts** | what is played most right now, overall or by broad genre. |
+| **Surprise me** | a random genre with someone in it. |
+
+Any song can be heard for half a minute, and downloaded with one press:
+Lucense finds the real upload on YouTube by artist, title and length, as it
+does everywhere else. Downloads queue, so you can keep browsing. *Search on
+YouTube* is there for picking an upload by hand.
+
+The genres and who is tagged with them come from MusicBrainz; the songs,
+releases, pictures and previews from Deezer. Neither needs an account or a key.
+Deezer is blocked in some countries: without it genres still work, and the
+page says what it couldn't reach. See [why not Every Noise itself](#why-discover-doesnt-use-every-noise-at-once).
+
 **Lyrics** come from four services in turn (LRCLIB, NetEase, lyrics.ovh, Genius),
 keeping timed LRC where it exists so they scroll in sync. If all four come up
 empty, you can paste them in yourself. You choose what gets searched for: the tags
@@ -278,6 +303,29 @@ minutes. Lucense reads the bytes while the grant is live and writes its own
 copy, which is why
 [`ShareReceiverActivity`](app/src/main/java/com/exo/musicplayer/share/ShareReceiverActivity.kt)
 shows a progress card and doesn't finish until the copy completes.
+
+<a id="why-discover-doesnt-use-every-noise-at-once"></a>
+**Why Discover doesn't use Every Noise at Once.** It was the obvious source,
+and it can't be used. The site has no API, and its `robots.txt` forbids
+automated access outright, naming AI agents in particular. Its data also
+stopped being updated at the end of 2023, when its author lost access to
+Spotify's internals. So
+[`Discovery`](shared/src/main/kotlin/com/exo/musicplayer/data/discover/Discovery.kt)
+builds the same kind of map from two services that are open and still live.
+MusicBrainz says which artists carry a genre tag, but returns the best known
+first, so "shoegaze" opened with bands that are mostly something else; the
+artists are re-ordered by how much of each one the genre is, and the genres
+"next to" one are those the same artists are also filed under. Both services
+ask clients to keep their pace down (MusicBrainz one request a second, Deezer
+fifty in five), so requests queue behind a small delay and answers are kept on
+disk for as long as each kind stays true.
+
+**A YouTube search that finds nothing is asked again in other words.** YouTube
+sometimes answers an ordinary query with an empty page: "Bonga Kambua" found
+nothing, time after time, while "Kambua Bonga" found the song at once. Before
+giving up,
+[`YouTubeLinkFinder`](shared/src/main/kotlin/com/exo/musicplayer/data/youtube/YouTubeLinkFinder.kt)
+tries the title before the artist, then with "audio" added.
 
 **Search results are ranked, not merged.** Seven services answer independently
 and none can see the others, so merging them untouched put *"Hello Darkness My

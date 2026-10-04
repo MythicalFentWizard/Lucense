@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.AlertDialog
@@ -50,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,9 +62,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exo.musicplayer.data.db.Track
+import com.exo.musicplayer.data.discover.DiscoverBrowser
 import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.prefs.LibraryView
 import com.exo.musicplayer.share.ShareTracks
@@ -81,6 +86,9 @@ import com.exo.musicplayer.ui.common.LocalTrackActions
 import com.exo.musicplayer.ui.common.RateDialog
 import com.exo.musicplayer.ui.common.TrackActions
 import com.exo.musicplayer.ui.common.launchOrExplain
+import com.exo.musicplayer.ui.discover.DiscoverActions
+import com.exo.musicplayer.ui.discover.DiscoverScreen
+import com.exo.musicplayer.ui.discover.DiscoverViewModel
 import com.exo.musicplayer.ui.download.DownloadRequest
 import com.exo.musicplayer.ui.download.DownloadScreen
 import com.exo.musicplayer.ui.download.DownloadViewModel
@@ -96,6 +104,7 @@ import com.exo.musicplayer.ui.playlists.PlaylistDetailScreen
 import com.exo.musicplayer.ui.playlists.PlaylistsScreen
 import com.exo.musicplayer.ui.recognition.RecognitionScreen
 import com.exo.musicplayer.ui.recognition.RecognitionViewModel
+import com.exo.musicplayer.ui.recognition.SearchMode
 import com.exo.musicplayer.ui.settings.AppearanceScreen
 import com.exo.musicplayer.ui.settings.SettingsActions
 import com.exo.musicplayer.ui.settings.SettingsScreen
@@ -123,6 +132,7 @@ private fun openUrl(context: Context, url: String) {
 private enum class Tab(val label: String, val icon: ImageVector) {
     LIBRARY("Library", Icons.Default.LibraryMusic),
     PLAYLISTS("Playlists", Icons.AutoMirrored.Filled.QueueMusic),
+    DISCOVER("Discover", Icons.Default.Explore),
     IDENTIFY("Identify", Icons.Default.Sensors),
     MOODS("Moods", Icons.Default.Cloud),
     STATS("Stats", Icons.Default.BarChart)
@@ -133,6 +143,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val recognitionViewModel: RecognitionViewModel by viewModels()
     private val downloadViewModel: DownloadViewModel by viewModels()
+    private val discoverViewModel: DiscoverViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -161,6 +172,7 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     recognition = recognitionViewModel,
                     download = downloadViewModel,
+                    discover = discoverViewModel,
                     theme = theme,
                     themeSettings = themeSettings,
                     openPlayerOnLaunch = openPlayerOnLaunch
@@ -192,6 +204,7 @@ private fun AppScaffold(
     viewModel: MainViewModel,
     recognition: RecognitionViewModel,
     download: DownloadViewModel,
+    discover: DiscoverViewModel,
     theme: ThemeState,
     themeSettings: ThemeSettings,
     openPlayerOnLaunch: Boolean
@@ -212,6 +225,10 @@ private fun AppScaffold(
     val savedTab by viewModel.savedTab.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.entries.firstOrNull { it.name == savedTab } ?: Tab.LIBRARY) }
     LaunchedEffect(tab) { viewModel.rememberTab(tab.name) }
+
+    // Set when Discover's "Search on YouTube" opened Identify, so Back goes
+    // back to the page it was pressed on rather than to the library.
+    var returnToDiscover by rememberSaveable { mutableStateOf(false) }
 
     var playerOpen by rememberSaveable { mutableStateOf(openPlayerOnLaunch) }
     var addingToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -284,6 +301,8 @@ private fun AppScaffold(
     val coverProvider by viewModel.coverProvider.collectAsStateWithLifecycle()
     val downloadProxy by viewModel.downloadProxy.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
+    val discoverStack by discover.browser.stack.collectAsStateWithLifecycle()
+    val queueFailure by download.queueFailure.collectAsStateWithLifecycle()
 
     // Selection actions work on what is on screen: an open album's songs, the
     // search results while a query is active, or the whole library.
@@ -352,6 +371,17 @@ private fun AppScaffold(
         }
     }
 
+    // A song queued from Discover fails out of sight of the Download page.
+    LaunchedEffect(queueFailure) {
+        queueFailure?.let {
+            Toast.makeText(context, it.take(220), Toast.LENGTH_LONG).show()
+            download.queueFailureShown()
+        }
+    }
+
+    // Starting the library's own music stops a preview, rather than playing over it.
+    LaunchedEffect(isPlaying) { if (isPlaying) recognition.stopPreview() }
+
     fun share(songs: List<Track>) {
         val intent = ShareTracks.intentFor(context, songs)
         if (intent == null) {
@@ -408,11 +438,26 @@ private fun AppScaffold(
                                             openAuto = null
                                         }
                                         if (entry == Tab.LIBRARY) viewModel.openGroup(null)
+                                        if (entry == Tab.DISCOVER) discover.browser.home()
                                     }
+                                    returnToDiscover = false
                                     tab = entry
                                 },
                                 icon = { Icon(entry.icon, contentDescription = entry.label) },
-                                label = { Text(entry.label) }
+                                // Six tabs on a narrow phone leave each about 60dp:
+                                // at the usual size "Playlists" wrapped onto two lines.
+                                label = {
+                                    Text(
+                                        entry.label,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontSize = 11.sp,
+                                            letterSpacing = 0.sp
+                                        ),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             )
                         }
                     }
@@ -545,6 +590,50 @@ private fun AppScaffold(
                                 )
                             )
                         }
+                    }
+
+                    Tab.DISCOVER -> {
+                        val preview by recognition.preview.state.collectAsStateWithLifecycle()
+                        val queued by download.queued.collectAsStateWithLifecycle()
+                        val dlState by download.state.collectAsStateWithLifecycle()
+                        // A clip left playing would carry on over whichever page came next.
+                        DisposableEffect(Unit) { onDispose { recognition.stopPreview() } }
+
+                        // The clip is the thing to hear, so the library's music makes way for it.
+                        fun hear(key: String, address: suspend (String) -> String?) {
+                            if (recognition.preview.state.value.videoId != key && isPlaying) viewModel.togglePlayPause()
+                            recognition.preview.toggle(key, address)
+                        }
+
+                        DiscoverScreen(
+                            viewModel = discover.browser,
+                            preview = preview,
+                            queued = queued,
+                            download = dlState,
+                            actions = DiscoverActions(
+                                onPreview = { track -> hear(DiscoverBrowser.previewKey(track)) { track.previewUrl } },
+                                onSample = { artist -> hear(DiscoverBrowser.sampleKey(artist)) { discover.browser.sample(artist) } },
+                                onSampleGenre = { genre ->
+                                    hear(DiscoverBrowser.genreSampleKey(genre)) { discover.browser.sampleGenre(genre) }
+                                },
+                                onDownload = { track ->
+                                    // By name, so the finder picks the real upload
+                                    // and checks it against the song's length.
+                                    download.enqueue(
+                                        DiscoverBrowser.previewKey(track),
+                                        DownloadRequest(null, track.artist, track.title, track.durationMs)
+                                    )
+                                },
+                                onYouTube = { text ->
+                                    recognition.setMode(SearchMode.YOUTUBE)
+                                    recognition.setQuery(text)
+                                    recognition.searchYouTube()
+                                    returnToDiscover = true
+                                    tab = Tab.IDENTIFY
+                                },
+                                onOpenDownloads = { showDownload = true }
+                            )
+                        )
                     }
 
                     Tab.IDENTIFY -> {
@@ -1064,22 +1153,23 @@ private fun AppScaffold(
         }
     }
 
-    BackHandler(enabled = showDownload) { showDownload = false }
-    BackHandler(enabled = !showDownload && settingsRoute != null) {
-        settingsRoute = if (settingsRoute == SettingsRoute.HOME) null else SettingsRoute.HOME
+    // Of the handlers that are enabled, the one declared last gets the press.
+    // So these run from the bottom of what is on screen to the top: the tab,
+    // then a page open inside it, then whatever is drawn over the tabs.
+    BackHandler(enabled = tab != Tab.LIBRARY) {
+        tab = if (returnToDiscover && tab == Tab.IDENTIFY) Tab.DISCOVER else Tab.LIBRARY
+        returnToDiscover = false
     }
-    BackHandler(enabled = settingsRoute == null && playerOpen) { playerOpen = false }
-    BackHandler(
-        enabled = settingsRoute == null && !playerOpen && tab == Tab.PLAYLISTS &&
-            (openPlaylist != null || openAuto != null)
-    ) {
+    BackHandler(enabled = tab == Tab.PLAYLISTS && (openPlaylist != null || openAuto != null)) {
         viewModel.showPlaylist(null)
         openAuto = null
     }
-    BackHandler(
-        enabled = settingsRoute == null && !playerOpen && tab != Tab.LIBRARY &&
-            !(tab == Tab.PLAYLISTS && (openPlaylist != null || openAuto != null))
-    ) { tab = Tab.LIBRARY }
+    BackHandler(enabled = tab == Tab.DISCOVER && discoverStack.size > 1) { discover.browser.back() }
+    BackHandler(enabled = playerOpen) { playerOpen = false }
+    BackHandler(enabled = settingsRoute != null) {
+        settingsRoute = if (settingsRoute == SettingsRoute.HOME) null else SettingsRoute.HOME
+    }
+    BackHandler(enabled = showDownload) { showDownload = false }
 }
 
 private fun copyToClipboard(context: Context, text: String) {
