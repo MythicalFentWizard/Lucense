@@ -27,6 +27,7 @@ SPOTDL_VERSION="4.5.2"
 
 YTDLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
 FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip"
+QJS_URL="https://github.com/quickjs-ng/quickjs/releases/latest/download/qjs-windows-x86_64.exe"
 SPOTDL_URL="https://github.com/spotDL/spotify-downloader/releases/download/v${SPOTDL_VERSION}/spotdl-${SPOTDL_VERSION}-win32.exe"
 
 # curl honours http_proxy/https_proxy from the environment, which is how this
@@ -46,6 +47,10 @@ fetch() {
 echo "Fetching bundled tools into desktop/resources/windows-x64/"
 
 fetch "$YTDLP_URL" "$DEST/yt-dlp.exe" "yt-dlp"
+# yt-dlp solves YouTube's JavaScript challenges in an engine beside it, and calls
+# running without one deprecated. It looks for Deno by default (100 MB);
+# QuickJS-NG is supported too and is 2 MB.
+fetch "$QJS_URL" "$DEST/qjs.exe" "quickjs"
 fetch "$SPOTDL_URL" "$DEST/spotdl.exe" "spotdl"
 
 if [ -s "$DEST/ffmpeg.exe" ]; then
@@ -77,3 +82,4 @@ echo "Done. Licences of the fetched binaries:"
 echo "  yt-dlp   Unlicense          https://github.com/yt-dlp/yt-dlp"
 echo "  ffmpeg   GPL-3.0 (gpl build) https://github.com/yt-dlp/FFmpeg-Builds"
 echo "  spotdl   MIT                https://github.com/spotDL/spotify-downloader"
+echo "  quickjs  MIT                https://github.com/quickjs-ng/quickjs"

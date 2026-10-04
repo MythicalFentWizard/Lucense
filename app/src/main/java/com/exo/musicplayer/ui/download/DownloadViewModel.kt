@@ -12,7 +12,7 @@ import com.exo.musicplayer.data.download.YtDlpDownloader
 import com.exo.musicplayer.data.ingest.ImportResult
 import com.exo.musicplayer.data.youtube.AndroidYouTubeBackend
 import com.exo.musicplayer.data.youtube.PipedYouTubeBackend
-import com.exo.musicplayer.data.youtube.SoundCloudFallback
+import com.exo.musicplayer.data.download.YouTubeTrouble
 import com.exo.musicplayer.data.youtube.YouTubeFormat
 import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
@@ -148,6 +148,25 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
             _state.value = DownloadUiState(busy = true, stage = "Starting yt-dlp…")
             if (!ensureReady()) return@launch
 
+            // A playlist link is a list of songs: each is fetched, and can
+            // fail, on its own.
+            if (LinkResolver.isYouTubePlaylist(input, wholeList = false)) {
+                _state.value = _state.value.copy(stage = "Reading the playlist…")
+                val (playlist, problem) = downloader.playlist(input)
+                val songs = playlist?.songs.orEmpty()
+                if (songs.isEmpty()) {
+                    _state.value = DownloadUiState(
+                        message = problem?.let { "The playlist couldn't be read: $it" }
+                            ?: "The playlist couldn't be read. A private playlist has to be made public or unlisted first.",
+                        isError = true,
+                        offerUpdate = false
+                    )
+                } else {
+                    runAll(songs.map { DownloadRequest(it.watchUrl, null, it.title, null) }, gone = playlist?.gone ?: 0)
+                }
+                return@launch
+            }
+
             _state.value = when (val outcome = downloadOne(input, wanted)) {
                 is ItemOutcome.Added -> {
                     finishInput()
@@ -190,38 +209,72 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 queueSize = requests.size
             )
             if (!ensureReady()) return@launch
+            runAll(requests)
+        }
+    }
 
-            var added = 0
-            var duplicates = 0
-            val failed = mutableListOf<String>()
+    /**
+     * Songs one after another, each added to the library as it lands. Used
+     * for a multi-select and for a playlist link.
+     */
+    private suspend fun runAll(requests: List<DownloadRequest>, gone: Int = 0) {
+        var added = 0
+        var duplicates = 0
+        val failed = mutableListOf<String>()
+        // YouTube refusing several songs running is refusing the connection.
+        // Asking for the rest would only prolong that, so it stops there.
+        var refusedRunning = 0
+        var tried = 0
 
-            requests.forEachIndexed { index, request ->
-                val (input, wanted) = request.toInput()
-                _url.value = input
-                _state.value = DownloadUiState(
-                    busy = true,
-                    stage = "Starting…",
-                    queuePosition = index + 1,
-                    queueSize = requests.size
-                )
-                when (val outcome = downloadOne(input, wanted)) {
-                    is ItemOutcome.Added -> added++
-                    ItemOutcome.Duplicate -> duplicates++
-                    is ItemOutcome.Failed -> failed += "${request.title} (${outcome.message.take(80)})"
+        for ((index, request) in requests.withIndex()) {
+            val (input, wanted) = request.toInput()
+            _url.value = input
+            _state.value = DownloadUiState(
+                busy = true,
+                stage = "Starting…",
+                queuePosition = index + 1,
+                queueSize = requests.size
+            )
+            tried++
+            when (val outcome = downloadOne(input, wanted)) {
+                is ItemOutcome.Added -> {
+                    added++
+                    refusedRunning = 0
+                }
+                ItemOutcome.Duplicate -> {
+                    duplicates++
+                    refusedRunning = 0
+                }
+                is ItemOutcome.Failed -> {
+                    failed += request.title
+                    refusedRunning = if (outcome.refused) refusedRunning + 1 else 0
                 }
             }
-
-            finishInput()
-            _state.value = DownloadUiState(
-                message = buildString {
-                    append("Added $added of ${requests.size}")
-                    if (duplicates > 0) append(", $duplicates already in your library")
-                    if (failed.isNotEmpty()) append(". Not downloaded: ${failed.joinToString("; ")}")
-                },
-                isError = added + duplicates == 0,
-                offerUpdate = false
-            )
+            if (refusedRunning >= REFUSALS_BEFORE_STOPPING) break
         }
+
+        finishInput()
+        val untried = requests.size - tried
+        _state.value = DownloadUiState(
+            message = buildString {
+                append("Added $added of ${requests.size}")
+                if (duplicates > 0) append(", $duplicates already in your library")
+                append(".")
+                if (failed.isNotEmpty()) {
+                    append(" Not downloaded: ${failed.take(MISSED_NAMED).joinToString("; ")}")
+                    append(if (failed.size > MISSED_NAMED) "; and ${failed.size - MISSED_NAMED} more." else ".")
+                }
+                if (untried > 0) {
+                    append(" YouTube began refusing this connection, so the last $untried weren't tried. ")
+                    append(YouTubeTrouble.WHY_REFUSED)
+                }
+                if (gone > 0) {
+                    append(" $gone of the playlist's videos ${if (gone == 1) "is" else "are"} private or deleted.")
+                }
+            },
+            isError = added + duplicates == 0,
+            offerUpdate = false
+        )
     }
 
     // ---- A queue, for Discover ----------------------------------------------------
@@ -310,7 +363,14 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun ensureReady(): Boolean {
         // First run unpacks the Python runtime, which takes a few seconds.
-        if (downloader.ensureReady()) return true
+        if (downloader.ensureReady()) {
+            // The yt-dlp inside the app is a year old; see updateIfStale.
+            if (downloader.stale) {
+                _state.value = _state.value.copy(busy = true, stage = "Checking for a newer yt-dlp…")
+                downloader.updateIfStale()
+            }
+            return true
+        }
         _state.value = DownloadUiState(
             message = downloader.lastInitError
                 ?: "yt-dlp couldn't start. This build ships arm64 libraries only.",
@@ -327,32 +387,28 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
     private sealed interface ItemOutcome {
         data class Added(val title: String) : ItemOutcome
         data object Duplicate : ItemOutcome
-        data class Failed(val message: String, val offerUpdate: Boolean = true) : ItemOutcome
+        data class Failed(
+            val message: String,
+            val offerUpdate: Boolean = true,
+            /** YouTube refused the connection, rather than this one song. */
+            val refused: Boolean = false
+        ) : ItemOutcome
     }
 
     /** Finds, downloads and imports one song, keeping the queue position in the state. */
     private suspend fun downloadOne(input: String, wanted: YouTubeLinkFinder.Wanted?): ItemOutcome {
-        // The song being fetched, in case YouTube refuses this connection and
-        // it has to be looked for elsewhere. Worked out only if that happens.
-        var song: suspend () -> SoundCloudFallback.Lookup? = { null }
         val picked: Picked = if (downloader.looksLikeUrl(input)) {
             _state.value = _state.value.copy(stage = "Reading the link…")
             when (val resolved = downloader.resolve(input)) {
-                is ResolvedLink.Direct -> {
-                    song = { SoundCloudFallback.lookUp(resolved.url, search, downloader.lookupProxy) }
-                    Picked(resolved.url, downloader.peekTitle(resolved.url), null)
-                }
+                is ResolvedLink.Direct -> Picked(resolved.url, downloader.peekTitle(resolved.url), null)
 
                 is ResolvedLink.Search ->
                     // Spotify: its audio can't be fetched, so the same track is
                     // found on YouTube and that link is what downloads.
                     when (val found = findLink(YouTubeLinkFinder.Wanted(title = resolved.query))) {
-                        is LinkResult.Ok -> {
-                            song = { found.picked.lookup }
-                            found.picked.copy(
-                                note = listOfNotNull(resolved.note, found.picked.note).joinToString("\n")
-                            )
-                        }
+                        is LinkResult.Ok -> found.picked.copy(
+                            note = listOfNotNull(resolved.note, found.picked.note).joinToString("\n")
+                        )
                         is LinkResult.None -> return ItemOutcome.Failed(found.message, found.offerUpdate)
                     }
 
@@ -364,7 +420,6 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
             val text = input.replace(SEARCH_PREFIX, "").trim()
             when (val found = findLink(wanted ?: YouTubeLinkFinder.Wanted(title = text))) {
                 is LinkResult.Ok -> {
-                    song = { found.picked.lookup }
                     // The box shows the link yt-dlp is actually fetching.
                     _url.value = found.picked.link
                     found.picked
@@ -392,20 +447,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 }
             )
         }
-        var outcome = downloader.downloadAudio(picked.link, _quality.value, progress)
-        // Whatever stopped YouTube - a refused VPN address, a removed or
-        // region-blocked video - the same song may be on SoundCloud.
-        val failed = outcome as? DownloadOutcome.Failed
-        if (failed != null && LinkResolver.isYouTube(picked.link)) {
-            val refused = failed.refusedByYouTube
-            outcome = fromSoundCloud(song(), refused, progress)
-                ?: return ItemOutcome.Failed(
-                    SoundCloudFallback.notFound(refused, failed.message),
-                    offerUpdate = !refused
-                )
-        }
-
-        return when (outcome) {
+        return when (val outcome = downloader.downloadAudio(picked.link, _quality.value, progress)) {
             is DownloadOutcome.Done -> {
                 _state.value = _state.value.copy(stage = "Adding to library…", percent = 100f)
                 // Same pipeline as a Telegram share: hashed, deduplicated, tagged.
@@ -418,47 +460,13 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                     else -> ItemOutcome.Failed("Downloaded, but the file couldn't be imported.", offerUpdate = false)
                 }
             }
-            is DownloadOutcome.Failed -> ItemOutcome.Failed(outcome.message)
+            is DownloadOutcome.Failed -> ItemOutcome.Failed(outcome.message, refused = outcome.refusedByYouTube)
             DownloadOutcome.NotReady -> ItemOutcome.Failed(downloader.lastInitError ?: "yt-dlp is not available.")
         }
     }
 
-    /**
-     * The same song from SoundCloud, when YouTube has refused this connection -
-     * usually a VPN address it has flagged. Null when SoundCloud has no upload
-     * that is the song, so nothing wrong is saved.
-     */
-    private suspend fun fromSoundCloud(
-        lookup: SoundCloudFallback.Lookup?,
-        refused: Boolean,
-        progress: (Float, Long, String) -> Unit
-    ): DownloadOutcome? {
-        if (lookup == null || lookup.wanted.query.isBlank()) return null
-        _state.value = _state.value.copy(
-            stage = SoundCloudFallback.searching(refused),
-            percent = 0f,
-            etaSeconds = 0L
-        )
-        val found = downloader.searchSoundCloud(SoundCloudFallback.searchQuery(lookup.wanted))
-        val upload = SoundCloudFallback.pick(lookup, found) ?: return null
-        _state.value = _state.value.copy(
-            stage = "Downloading…",
-            title = upload.title,
-            note = SoundCloudFallback.note(upload, refused)
-        )
-        return downloader.downloadAudio(upload.watchUrl, _quality.value, progress)
-    }
-
-    /**
-     * The link yt-dlp will be given, and what to show about it. [lookup] is the
-     * song it stands for, kept for looking elsewhere if YouTube refuses.
-     */
-    private data class Picked(
-        val link: String,
-        val title: String?,
-        val note: String?,
-        val lookup: SoundCloudFallback.Lookup? = null
-    )
+    /** The link yt-dlp will be given, and what to show about it. */
+    private data class Picked(val link: String, val title: String?, val note: String?)
 
     private sealed interface LinkResult {
         data class Ok(val picked: Picked) : LinkResult
@@ -484,10 +492,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                             append("Found on YouTube: ${video.channel}")
                             video.durationSeconds?.let { append(" · ${YouTubeFormat.duration(it)}") }
                             video.viewCount?.let { append(" · ${YouTubeFormat.views(it)}") }
-                        },
-                        // What was asked for, not the video's title; the video's
-                        // length only as a loose bound, as it includes intros.
-                        lookup = SoundCloudFallback.Lookup(wanted, video.durationSeconds)
+                        }
                     )
                 )
             }
@@ -507,5 +512,11 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
 
     private companion object {
         val SEARCH_PREFIX = Regex("""^ytsearch\d*:""", RegexOption.IGNORE_CASE)
+
+        /** YouTube refusals in a row before a list of songs stops asking it. */
+        const val REFUSALS_BEFORE_STOPPING = 3
+
+        /** How many missed songs a summary names before "and N more". */
+        const val MISSED_NAMED = 8
     }
 }

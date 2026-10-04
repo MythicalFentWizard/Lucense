@@ -41,6 +41,19 @@ object LinkResolver {
 
     private fun isYouTubeHost(host: String): Boolean = host.contains("youtube.com") || host.contains("youtu.be")
 
+    /**
+     * Whether a YouTube link is to be taken as a list of songs. A link to a
+     * playlist itself always is; a link to one video inside a playlist only
+     * when the whole list was asked for.
+     */
+    fun isYouTubePlaylist(url: String, wholeList: Boolean): Boolean {
+        val link = url.trim()
+        if (!isYouTube(link) || !PLAYLIST_ID.containsMatchIn(link)) return false
+        return wholeList || link.contains("/playlist", ignoreCase = true)
+    }
+
+    private val PLAYLIST_ID = Regex("""[?&]list=[\w-]+""")
+
     fun resolve(rawUrl: String): ResolvedLink {
         val url = rawUrl.trim()
         if (!url.startsWith("http", ignoreCase = true)) {

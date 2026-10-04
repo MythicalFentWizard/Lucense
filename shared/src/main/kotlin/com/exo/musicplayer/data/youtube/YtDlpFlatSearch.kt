@@ -31,6 +31,43 @@ object YtDlpFlatSearch {
     )
 
     /**
+     * Arguments for listing what a playlist link holds: the same flat document
+     * as a search, but following the list rather than the one video.
+     */
+    val PLAYLIST_ARGUMENTS: List<String> = listOf(
+        "--flat-playlist",
+        "-J",
+        "--no-warnings",
+        "--yes-playlist",
+        "--ignore-config"
+    )
+
+    /** What a playlist link turned out to hold. */
+    data class Playlist(
+        val title: String?,
+        val songs: List<YouTubeVideo>,
+        /** How many entries are private or deleted, and so can't be had at all. */
+        val gone: Int
+    )
+
+    /** Parses a playlist's `-J` document. Null when it isn't one. */
+    fun parsePlaylist(json: String, source: String = "yt-dlp"): Playlist? = runCatching {
+        val document = JSONObject(json)
+        val entries = document.optJSONArray("entries") ?: return null
+        val all = (0 until entries.length()).mapNotNull { entries.optJSONObject(it) }
+        // A removed video stays in its playlist as a placeholder: named
+        // "[Private video]" by one yt-dlp, left without a title by another.
+        val (gone, there) = all.partition { it.isNull("title") || it.optString("title") in PLACEHOLDERS }
+        Playlist(
+            title = document.optString("title").takeIf { it.isNotBlank() },
+            songs = there.mapNotNull { toVideo(it, source) },
+            gone = gone.size
+        )
+    }.getOrNull()
+
+    private val PLACEHOLDERS = setOf("[Private video]", "[Deleted video]", "")
+
+    /**
      * The search target. `ytsearchN:` is yt-dlp's own search scheme, so this
      * takes the same code path as any other URL it is handed.
      */
@@ -46,7 +83,8 @@ object YtDlpFlatSearch {
 
     private fun toVideo(entry: JSONObject, source: String): YouTubeVideo? {
         val id = entry.optString("id").takeIf { it.isNotBlank() } ?: return null
-        val title = entry.optString("title").takeIf { it.isNotBlank() } ?: return null
+        // A null title reads back as the word "null" on Android, which is not a title.
+        val title = entry.optString("title").takeIf { it.isNotBlank() && !entry.isNull("title") } ?: return null
 
         // Live and upcoming entries are not songs, and a download of one either
         // never finishes or produces a fragment.
@@ -71,11 +109,7 @@ object YtDlpFlatSearch {
             // Flat search does not say, and the duration is a better signal
             // anyway: a Short is at most three minutes.
             isShort = false,
-            source = source,
-            // Other sites' results are addressed by their own URL, not a video id.
-            pageUrl = entry.optString("url").takeIf {
-                it.startsWith("http") && !entry.optString("ie_key").equals("Youtube", ignoreCase = true)
-            }
+            source = source
         )
     }
 }

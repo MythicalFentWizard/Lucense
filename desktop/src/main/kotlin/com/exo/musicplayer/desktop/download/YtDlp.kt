@@ -28,11 +28,28 @@ internal val YT_DLP_RETRIES = listOf(
     "--retry-sleep", "extractor:exp=1:10"
 )
 
+/**
+ * The JavaScript engine yt-dlp is to use, for any call that reads a video.
+ *
+ * YouTube hands out most of its streams behind a JavaScript challenge, and
+ * yt-dlp solves it by running an engine that sits beside it. With none it is
+ * left with the one kind of request that needs no solving, which yt-dlp calls
+ * deprecated. Measured on 2026-10-04 that one request was still enough: eight
+ * videos of eight downloaded with and without an engine, the same 44 formats
+ * offered either way. So this changes nothing today. It is here for the day
+ * that request stops being answered, so that an installed copy keeps working
+ * through it. yt-dlp looks for Deno by default; QuickJS does the same job at
+ * two megabytes instead of a hundred, and has to be named.
+ */
+internal fun ytDlpJsEngine(): List<String> =
+    ToolPaths.qjs.takeIf { it.isFile }?.let { listOf("--js-runtimes", "quickjs:${it.absolutePath}") }.orEmpty()
+
 /** What the downloader can do right now. */
 data class ToolStatus(
     val ytDlp: Boolean = false,
     val ffmpeg: Boolean = false,
     val spotdl: Boolean = false,
+    val jsEngine: Boolean = false,
     val ytDlpVersion: String? = null
 ) {
     val ready: Boolean get() = ytDlp
@@ -62,6 +79,7 @@ object YtDlp {
         ytDlp = ToolPaths.ytDlp.isFile,
         ffmpeg = ToolPaths.ffmpeg.isFile,
         spotdl = ToolPaths.spotdl.isFile,
+        jsEngine = ToolPaths.qjs.isFile,
         ytDlpVersion = null
     )
 
@@ -145,6 +163,7 @@ object YtDlp {
                     command += "--embed-metadata"
                     if (embedThumbnail) command += "--embed-thumbnail"
                 }
+                command += ytDlpJsEngine()
                 command += NetworkProxy.ytDlpArgs()
                 command += YT_DLP_NETWORK
                 command += YT_DLP_RETRIES

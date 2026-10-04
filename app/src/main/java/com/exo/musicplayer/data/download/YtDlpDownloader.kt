@@ -5,7 +5,6 @@ import android.net.Uri
 import android.util.Log
 import com.exo.musicplayer.data.download.LinkResolver
 import com.exo.musicplayer.data.download.ResolvedLink
-import com.exo.musicplayer.data.youtube.SoundCloudFallback
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
 import com.exo.musicplayer.musicApp
@@ -68,9 +67,47 @@ class YtDlpDownloader(private val context: Context) {
         runCatching {
             YoutubeDL.getInstance()
                 .updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
+            checked()
             "yt-dlp updated"
         }.getOrElse { "Update failed: ${it.message}" }
     }
+
+    private val marks by lazy { context.getSharedPreferences("ytdlp", Context.MODE_PRIVATE) }
+
+    private fun checked() = marks.edit().putLong(KEY_CHECKED, System.currentTimeMillis()).apply()
+
+    /** Whether yt-dlp hasn't been looked at for a couple of days, or ever. */
+    val stale: Boolean
+        get() = System.currentTimeMillis() - marks.getLong(KEY_CHECKED, 0L) > STALE_AFTER_MS
+
+    /**
+     * Brings yt-dlp up to date if it hasn't been checked lately.
+     *
+     * The copy inside the app is whatever was current when the library it
+     * comes in was built: 2025.11.12, a year behind YouTube, which answers it
+     * with "HTTP Error 403" on song after song. Nobody should have to find the
+     * update button to make a fresh install work, so the first download does
+     * it, and it is looked at again every couple of days. A check that fails -
+     * no network, GitHub out of reach - is simply tried again next time.
+     */
+    suspend fun updateIfStale(): Boolean = withContext(Dispatchers.IO) {
+        if (!stale || !ensureReady()) return@withContext false
+        updateNow()
+    }
+
+    /** True when a newer yt-dlp was installed. */
+    private fun updateNow(): Boolean = runCatching {
+        val status = YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
+        checked()
+        status == YoutubeDL.UpdateStatus.DONE
+    }.getOrElse {
+        Log.w(TAG, "yt-dlp update failed", it)
+        false
+    }
+
+    /** Set once a failed download has made this run look for a newer yt-dlp. */
+    @Volatile
+    private var updatedAfterFailure = false
 
     /** Works out whether a link is downloadable directly or needs a lookup. */
     suspend fun resolve(url: String): ResolvedLink = withContext(Dispatchers.IO) {
@@ -87,9 +124,7 @@ class YtDlpDownloader(private val context: Context) {
      */
     suspend fun peekTitle(url: String): String? = withContext(Dispatchers.IO) {
         if (LinkResolver.isYouTube(url)) {
-            return@withContext SoundCloudFallback.describe(url, lookupProxy)?.let { wanted ->
-                listOfNotNull(wanted.artist, wanted.title).joinToString(" - ")
-            }
+            return@withContext YouTubeTrouble.title(url, lookupProxy)
         }
         if (!ensureReady()) return@withContext null
         runCatching {
@@ -150,7 +185,15 @@ class YtDlpDownloader(private val context: Context) {
         } catch (t: Throwable) {
             Log.w(TAG, "download failed", t)
             workDir.deleteRecursively()
-            DownloadOutcome.Failed(friendly(t.message), SoundCloudFallback.refusedByYouTube(t.message))
+            // A 403 on the audio is what an out-of-date yt-dlp gets. Once a
+            // run, that is answered by looking for a newer one and trying the
+            // song again, rather than by reporting a failure an update fixes.
+            val message = t.message.orEmpty()
+            if (!updatedAfterFailure && OUTDATED_SIGNS.any { message.contains(it, ignoreCase = true) }) {
+                updatedAfterFailure = true
+                if (updateNow()) return@withContext downloadAudio(url, quality, onProgress)
+            }
+            DownloadOutcome.Failed(friendly(t.message), YouTubeTrouble.refused(t.message))
         }
     }
 
@@ -167,26 +210,27 @@ class YtDlpDownloader(private val context: Context) {
         YoutubeDLRequest(target).apply { proxy?.let { addOption("--proxy", it) } }
 
     /**
-     * The same song on SoundCloud, searched through yt-dlp as YouTube is, for
-     * when YouTube refuses this connection.
+     * What a playlist link holds, without downloading any of it; with why
+     * not, when it can't be read (a private playlist, a dead link).
      */
-    suspend fun searchSoundCloud(query: String): List<YouTubeVideo> = withContext(Dispatchers.IO) {
-        if (!ensureReady()) return@withContext emptyList()
+    suspend fun playlist(url: String): Pair<YtDlpFlatSearch.Playlist?, String?> = withContext(Dispatchers.IO) {
+        if (!ensureReady()) return@withContext null to lastInitError
         runCatching {
-            val request = newRequest(SoundCloudFallback.target(query))
-            YtDlpFlatSearch.ARGUMENTS.forEach { request.addOption(it) }
-            SoundCloudFallback.parse(YoutubeDL.getInstance().execute(request).out)
-        }.getOrDefault(emptyList())
+            val request = newRequest(url)
+            YtDlpFlatSearch.PLAYLIST_ARGUMENTS.forEach { request.addOption(it) }
+            YtDlpFlatSearch.parsePlaylist(YoutubeDL.getInstance().execute(request).out) to null as String?
+        }.getOrElse { null to friendly(it.message) }
     }
 
     private fun friendly(raw: String?): String {
         val message = raw.orEmpty()
         return when {
-            message.contains("Sign in to confirm", true) ||
-                message.contains("not a bot", true) ->
-                "YouTube refused this connection (\"confirm you're not a bot\"). It does that " +
-                    "to VPN addresses it has flagged: try another server, or download without " +
-                    "the VPN if YouTube isn't blocked where you are."
+            message.contains("not a bot", true) ||
+                message.contains("HTTP Error 429", true) ||
+                message.contains("Too Many Requests", true) ->
+                "YouTube refused this connection. ${YouTubeTrouble.WHY_REFUSED}"
+            message.contains("confirm your age", true) ->
+                "YouTube only plays this video for signed-in adults."
             message.contains("Video unavailable", true) ->
                 "That video is unavailable, private, or region blocked."
             message.contains("Unsupported URL", true) ->
@@ -224,5 +268,13 @@ class YtDlpDownloader(private val context: Context) {
             "getaddrinfo failed", "Connection reset", "No route to host"
         )
         const val TAG = "YtDlpDownloader"
+
+        const val KEY_CHECKED = "checked_at"
+
+        /** How long a yt-dlp is trusted before it is checked for a newer one. */
+        const val STALE_AFTER_MS = 2L * 24 * 60 * 60 * 1000
+
+        /** What yt-dlp says when the trouble is its own age. */
+        val OUTDATED_SIGNS = listOf("HTTP Error 403", "older than 90 days")
     }
 }

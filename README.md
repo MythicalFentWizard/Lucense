@@ -81,25 +81,24 @@ when it rains. See [`WeatherAffinity`](shared/src/main/kotlin/com/exo/musicplaye
 **Downloads** from YouTube, SoundCloud, Bandcamp, Spotify and anywhere else
 yt-dlp reaches, at your choice of quality.
 
-**When YouTube refuses your VPN.** YouTube decides by the address a request
-comes from. On many cheap VPN servers it answers nearly every video with
-*"Sign in to confirm you're not a bot"*, whichever app or YouTube client asks.
-Tested through one such server, every one of yt-dlp's YouTube clients was
-refused, and the public relays (Piped, Invidious) were down or blocked too.
-Search still works there; only the download is refused. So Lucense does two
-things, on both apps:
+**Playlists download song by song.** Paste a YouTube playlist link (on Windows,
+tick *Download the whole playlist* for a link to one video inside a list) and
+each song is its own download: several at a time on Windows, one after another
+on a phone, each added to the library as it lands. On Windows the songs already
+saved are remembered, so asking for the same playlist again fetches only what
+is missing.
 
-- **It finds the song on SoundCloud instead.** It works out which song was
-  meant: the name you typed, or the link's title and length. Then it picks the
-  real upload from SoundCloud's results with the same rules as a YouTube
-  search: edits refused, snippets and loops refused by length. If there's no
-  right upload, nothing is saved. Many SoundCloud-native artists are covered,
-  but major-label songs are often locked there.
-- **Downloads can use their own proxy.** It's in Settings → Downloads on
-  both apps. If your VPN app also runs a local proxy (v2rayNG and Hiddify
-  listen on `127.0.0.1:10808`), point that at a cleaner server. On Android only
-  downloads go through it; on Windows the setting covers everything the app
-  does online.
+**When YouTube says no.** YouTube refuses connections for three reasons: a lot
+of downloads in a row, a VPN address it has flagged, or a yt-dlp that has fallen
+behind. A playlist paces itself, backs off when a song is refused, and stops
+asking after several refusals running rather than making it worse. The message
+says so, and what helps: wait an hour, update yt-dlp, or try
+another server. Nothing is fetched from anywhere else instead.
+
+**Downloads can use their own proxy.** It's in Settings → Downloads on both
+apps. If your VPN app also runs a local proxy (v2rayNG and Hiddify listen on
+`127.0.0.1:10808`), point that at a cleaner server. On Android only downloads
+go through it; on Windows the setting covers everything the app does online.
 
 ### Playing
 
@@ -420,16 +419,17 @@ MSI replaces an older install only when its version is higher.
 
 ### Bundled tools
 
-The Windows build ships three binaries so downloading works the moment it's
+The Windows build ships four binaries so downloading works the moment it's
 installed, rather than after a first-run setup step. They are fetched, not
-committed — ffmpeg alone is 139 MB, past GitHub's file limit, and all three move
-faster than this project does.
+committed — ffmpeg alone is 139 MB, past GitHub's file limit, and all of them
+move faster than this project does.
 
 | tool | licence | used for |
 |---|---|---|
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Unlicense | downloading |
 | [ffmpeg](https://github.com/yt-dlp/FFmpeg-Builds) | GPL-3.0 | MP3 conversion, audio out of video, repairing files |
 | [spotdl](https://github.com/spotDL/spotify-downloader) | MIT | Spotify links |
+| [QuickJS-NG](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript engine yt-dlp asks for with YouTube |
 
 The Windows installer redistributes an unmodified upstream **GPL** ffmpeg build.
 If you redistribute the installer, that binary carries GPL-3.0 terms with it —

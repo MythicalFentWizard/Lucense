@@ -1,7 +1,6 @@
 package com.exo.musicplayer.desktop.download
 
 import com.exo.musicplayer.data.download.DownloadQuality
-import com.exo.musicplayer.data.youtube.SoundCloudFallback
 import com.exo.musicplayer.data.youtube.YouTubeBackend
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
@@ -30,9 +29,37 @@ class DesktopYouTubeBackend : YouTubeBackend {
     override suspend fun search(query: String, limit: Int): List<YouTubeVideo> =
         flatSearch(YtDlpFlatSearch.target(query, limit), label)
 
-    /** The same song on SoundCloud, for when YouTube refuses this connection. */
-    suspend fun searchSoundCloud(query: String): List<YouTubeVideo> =
-        flatSearch(SoundCloudFallback.target(query), SoundCloudFallback.LABEL)
+    /**
+     * What a playlist link holds, without downloading any of it; with yt-dlp's
+     * own error when it can't be read (a private playlist, a dead link).
+     */
+    suspend fun playlist(url: String): Pair<YtDlpFlatSearch.Playlist?, String?> = withContext(Dispatchers.IO) {
+        val exe = ToolPaths.ytDlp
+        if (!exe.isFile) return@withContext null to "yt-dlp is missing from this installation."
+
+        runCatching {
+            val process = ProcessBuilder(
+                buildList {
+                    add(exe.absolutePath)
+                    add(url)
+                    addAll(YtDlpFlatSearch.PLAYLIST_ARGUMENTS)
+                    addAll(NetworkProxy.ytDlpArgs())
+                    addAll(YT_DLP_NETWORK)
+                }
+            ).redirectErrorStream(false).also(NetworkProxy::configure).start()
+
+            // Read alongside stdout: a long playlist's warnings would otherwise
+            // fill the pipe and stall the process before the document is out.
+            var errors = ""
+            val drain = Thread { errors = runCatching { process.errorStream.bufferedReader().readText() }.getOrDefault("") }
+                .apply { isDaemon = true; start() }
+            val json = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+            drain.join(2_000)
+            YtDlpFlatSearch.parsePlaylist(json, label) to
+                errors.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("ERROR") }
+        }.getOrElse { null to it.message }
+    }
 
     private suspend fun flatSearch(target: String, label: String): List<YouTubeVideo> =
         withContext(Dispatchers.IO) {
@@ -88,7 +115,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                 "--no-warnings",
                 "--no-playlist",
                 "--ignore-config",
-                *(NetworkProxy.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
+                *(ytDlpJsEngine() + NetworkProxy.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
 
             val out = process.inputStream.bufferedReader().use { it.readText() }
