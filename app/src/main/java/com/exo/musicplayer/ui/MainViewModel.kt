@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
 import android.content.Context
 import android.app.Application
 import android.media.MediaMetadataRetriever
@@ -1588,19 +1589,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun confirmImport(result: com.exo.musicplayer.data.playlist.ImportResult<Track>) {
+    /**
+     * Creates the playlist from a reviewed import. [downloadMissing] is handed
+     * the new playlist's id, to download the songs that aren't here into it.
+     */
+    fun confirmImport(
+        result: com.exo.musicplayer.data.playlist.ImportResult<Track>,
+        downloadMissing: ((Long) -> Unit)? = null
+    ) {
         viewModelScope.launch {
             val id = runCatching { library.createPlaylist(result.name) }.getOrNull()
                 ?: return@launch
-            library.addToPlaylist(id, result.matched.map { it.second.id })
+            if (result.matched.isNotEmpty()) library.addToPlaylist(id, result.matched.map { it.second.id })
             _importResult.value = null
+            val downloading = downloadMissing != null && result.missing.isNotEmpty()
+            if (downloading) downloadMissing?.invoke(id)
             _notice.value = buildString {
                 append("Added ${counted(result.matched.size, "track")} as \"${result.name}\"")
-                if (result.missing.isNotEmpty()) {
-                    append("; ${result.missing.size} not on this device")
+                when {
+                    downloading -> append("; downloading the other ${result.missing.size}, which join it as they arrive")
+                    result.missing.isNotEmpty() -> append("; ${result.missing.size} not on this device")
                 }
                 append(".")
             }
+        }
+    }
+
+    // ---- Playlists from other services, after Riff (github.com/rootscripts/riff, MIT)
+
+    private val _readingLink = MutableStateFlow(false)
+
+    /** True while a playlist link is being read. */
+    val readingLink: StateFlow<Boolean> = _readingLink.asStateFlow()
+
+    /** Reads a playlist link with [read] and matches it against the library, for review. */
+    fun importPlaylistLink(link: String, read: suspend (String) -> PlaylistLinks.Outcome) {
+        if (_readingLink.value) return
+        _readingLink.value = true
+        viewModelScope.launch {
+            val outcome = runCatching { read(link) }
+                .getOrElse { PlaylistLinks.Outcome.Problem("Couldn't read that link: ${it.message}") }
+            when (outcome) {
+                is PlaylistLinks.Outcome.Problem -> _notice.value = outcome.message
+                is PlaylistLinks.Outcome.Read -> {
+                    _importResult.value = PlaylistFile.matchAgainst(
+                        playlist = outcome.playlist,
+                        library = library.allTracks(),
+                        artistOf = { it.artist },
+                        titleOf = { it.title },
+                        durationOf = { it.durationMs }
+                    )
+                    outcome.note?.let { _notice.value = it }
+                }
+            }
+            _readingLink.value = false
         }
     }
 

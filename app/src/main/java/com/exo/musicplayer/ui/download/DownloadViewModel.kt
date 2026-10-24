@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.download
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -172,7 +173,7 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                     finishInput()
                     DownloadUiState(message = "Added \"${outcome.title}\"")
                 }
-                ItemOutcome.Duplicate -> {
+                is ItemOutcome.Duplicate -> {
                     finishInput()
                     DownloadUiState(message = "Already in your library")
                 }
@@ -193,9 +194,9 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
      * slower overall and hotter than the same work queued. One song that cannot
      * be found or fails does not stop the rest; the summary says which.
      */
-    fun downloadAll(requests: List<DownloadRequest>) {
+    fun downloadAll(requests: List<DownloadRequest>, intoPlaylist: Long? = null) {
         if (requests.isEmpty()) return
-        if (requests.size == 1) {
+        if (requests.size == 1 && intoPlaylist == null) {
             requests.first().let { downloadMatch(it.downloadUrl, it.artist, it.title, it.durationMs) }
             return
         }
@@ -209,7 +210,41 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 queueSize = requests.size
             )
             if (!ensureReady()) return@launch
-            runAll(requests)
+            runAll(requests, intoPlaylist = intoPlaylist)
+        }
+    }
+
+    // ---- Playlists from other services, after Riff (github.com/rootscripts/riff, MIT)
+
+    /**
+     * Reads a Spotify, Apple Music, YouTube or SoundCloud playlist (or album)
+     * by its link: Spotify and Apple Music from their pages, the rest through
+     * yt-dlp. Only the list is read.
+     */
+    suspend fun readPlaylistLink(link: String): PlaylistLinks.Outcome {
+        val url = link.trim()
+        val service = PlaylistLinks.serviceOf(url)
+            ?: return PlaylistLinks.Outcome.Problem("That isn't a link. Copy the playlist's share link and paste it here.")
+        if (PlaylistLinks.readsDirectly(service)) return PlaylistLinks.read(url, downloader.lookupProxy)
+        if (PlaylistLinks.needsFullListing(service)) {
+            val (printed, problem) = downloader.printedSongs(url)
+            val parsed = printed?.let { PlaylistLinks.fromPrinted(it, "${service.label} playlist") }
+            return if (parsed != null && parsed.entries.isNotEmpty()) {
+                PlaylistLinks.Outcome.Read(parsed)
+            } else {
+                PlaylistLinks.Outcome.Problem(problem ?: "That list couldn't be read.")
+            }
+        }
+        val (playlist, problem) = downloader.playlist(url)
+        return if (playlist != null && playlist.songs.isNotEmpty()) {
+            PlaylistLinks.Outcome.Read(
+                PlaylistLinks.fromVideos(playlist.title, playlist.songs),
+                if (playlist.gone > 0) "${playlist.gone} of its videos are private or deleted." else null
+            )
+        } else {
+            PlaylistLinks.Outcome.Problem(
+                problem ?: "That playlist couldn't be read. A private one has to be made public or unlisted first."
+            )
         }
     }
 
@@ -217,13 +252,15 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
      * Songs one after another, each added to the library as it lands. Used
      * for a multi-select and for a playlist link.
      */
-    private suspend fun runAll(requests: List<DownloadRequest>, gone: Int = 0) {
+    /** [intoPlaylist]: each song that arrives, or was already here, joins that playlist. */
+    private suspend fun runAll(requests: List<DownloadRequest>, gone: Int = 0, intoPlaylist: Long? = null) {
         var added = 0
         var duplicates = 0
         val failed = mutableListOf<String>()
         // YouTube refusing several songs running is refusing the connection.
         // Asking for the rest would only prolong that, so it stops there.
         var refusedRunning = 0
+        var refusedAll = 0
         var tried = 0
 
         for ((index, request) in requests.withIndex()) {
@@ -236,18 +273,24 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 queueSize = requests.size
             )
             tried++
-            when (val outcome = downloadOne(input, wanted)) {
+            val outcome = downloadOne(input, wanted)
+            val arrived = (outcome as? ItemOutcome.Added)?.trackId ?: (outcome as? ItemOutcome.Duplicate)?.trackId
+            if (intoPlaylist != null && arrived != null) {
+                runCatching { getApplication<Application>().musicApp.library.addToPlaylist(intoPlaylist, listOf(arrived)) }
+            }
+            when (outcome) {
                 is ItemOutcome.Added -> {
                     added++
                     refusedRunning = 0
                 }
-                ItemOutcome.Duplicate -> {
+                is ItemOutcome.Duplicate -> {
                     duplicates++
                     refusedRunning = 0
                 }
                 is ItemOutcome.Failed -> {
                     failed += request.title
                     refusedRunning = if (outcome.refused) refusedRunning + 1 else 0
+                    if (outcome.refused) refusedAll++
                 }
             }
             if (refusedRunning >= REFUSALS_BEFORE_STOPPING) break
@@ -266,6 +309,10 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 }
                 if (untried > 0) {
                     append(" YouTube began refusing this connection, so the last $untried weren't tried. ")
+                    append(YouTubeTrouble.WHY_REFUSED)
+                } else if (refusedAll > 0) {
+                    // Said, rather than left at "not downloaded": it's the connection, not the songs.
+                    append(if (refusedAll == failed.size) " YouTube refused this connection for them. " else " YouTube refused this connection for $refusedAll of them. ")
                     append(YouTubeTrouble.WHY_REFUSED)
                 }
                 if (gone > 0) {
@@ -332,13 +379,13 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                     _queued.value = _queued.value + (
                         next to when (outcome) {
                             is ItemOutcome.Added -> QueuedDownload.DONE
-                            ItemOutcome.Duplicate -> QueuedDownload.ALREADY_SAVED
+                            is ItemOutcome.Duplicate -> QueuedDownload.ALREADY_SAVED
                             is ItemOutcome.Failed -> QueuedDownload.FAILED
                         }
                     )
                     _state.value = when (outcome) {
                         is ItemOutcome.Added -> DownloadUiState(message = "Added \"${outcome.title}\"")
-                        ItemOutcome.Duplicate -> DownloadUiState(message = "Already in your library")
+                        is ItemOutcome.Duplicate -> DownloadUiState(message = "Already in your library")
                         is ItemOutcome.Failed -> {
                             _queueFailure.value = "${wanted.title}: ${outcome.message}"
                             DownloadUiState(message = outcome.message, isError = true, offerUpdate = outcome.offerUpdate)
@@ -385,8 +432,8 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
     }
 
     private sealed interface ItemOutcome {
-        data class Added(val title: String) : ItemOutcome
-        data object Duplicate : ItemOutcome
+        data class Added(val title: String, val trackId: Long? = null) : ItemOutcome
+        data class Duplicate(val trackId: Long? = null) : ItemOutcome
         data class Failed(
             val message: String,
             val offerUpdate: Boolean = true,
@@ -455,8 +502,8 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
                 // The cache copy is redundant once the importer has its own.
                 withContext(Dispatchers.IO) { runCatching { outcome.file.parentFile?.deleteRecursively() } }
                 when (result) {
-                    is ImportResult.Imported -> ItemOutcome.Added(result.track.title)
-                    is ImportResult.Duplicate -> ItemOutcome.Duplicate
+                    is ImportResult.Imported -> ItemOutcome.Added(result.track.title, result.track.id)
+                    is ImportResult.Duplicate -> ItemOutcome.Duplicate(result.existing.id)
                     else -> ItemOutcome.Failed("Downloaded, but the file couldn't be imported.", offerUpdate = false)
                 }
             }

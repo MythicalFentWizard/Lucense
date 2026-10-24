@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
 import com.exo.musicplayer.data.audio.Trim
 import androidx.compose.ui.graphics.toArgb
 import com.exo.musicplayer.data.art.CoverColour
@@ -3025,25 +3026,138 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
-    /** Creates the playlist from a reviewed import. */
-    fun confirmImport(result: ImportResult<DesktopTrack>) {
+    // ---- Playlists from other services, after Riff (github.com/rootscripts/riff, MIT)
+
+    /** Set while a playlist link is being read: what the note says meanwhile. */
+    var readingLink by mutableStateOf(false)
+        private set
+
+    /**
+     * Reads a Spotify, Apple Music, YouTube or SoundCloud playlist (or album)
+     * by its link and matches it against this library, for the same review a
+     * playlist file gets.
+     */
+    fun importPlaylistLink(link: String) {
+        val url = link.trim()
+        val service = PlaylistLinks.serviceOf(url)
+        if (service == null) {
+            playlistNote = "That isn't a link. Copy the playlist's share link and paste it here."
+            return
+        }
+        if (readingLink) return
+        readingLink = true
+        importResult = null
+        playlistNote = "Reading the ${service.label} list" + if (PlaylistLinks.needsFullListing(service)) {
+            " - a second or so a song…"
+        } else {
+            "…"
+        }
+        scope.launch {
+            val outcome: PlaylistLinks.Outcome = when {
+                PlaylistLinks.readsDirectly(service) -> PlaylistLinks.read(url)
+                !tools.ready -> PlaylistLinks.Outcome.Problem("Install yt-dlp first; it reads ${service.label} lists.")
+                PlaylistLinks.needsFullListing(service) -> {
+                    val (printed, problem) = youtubeBackend.printedSongs(url)
+                    val parsed = printed?.let { PlaylistLinks.fromPrinted(it, "${service.label} playlist") }
+                    if (parsed != null && parsed.entries.isNotEmpty()) {
+                        PlaylistLinks.Outcome.Read(parsed)
+                    } else {
+                        PlaylistLinks.Outcome.Problem(problem?.let(YouTubeTrouble::reason) ?: "That list couldn't be read.")
+                    }
+                }
+                else -> {
+                    val (playlist, problem) = youtubeBackend.playlist(url)
+                    if (playlist != null && playlist.songs.isNotEmpty()) {
+                        PlaylistLinks.Outcome.Read(
+                            PlaylistLinks.fromVideos(playlist.title, playlist.songs),
+                            if (playlist.gone > 0) "${playlist.gone} of its videos are private or deleted." else null
+                        )
+                    } else {
+                        PlaylistLinks.Outcome.Problem(
+                            problem?.let(YouTubeTrouble::reason)?.takeIf { it.isNotBlank() }
+                                ?: "That playlist couldn't be read. A private one has to be made public or unlisted first."
+                        )
+                    }
+                }
+            }
+            readingLink = false
+            when (outcome) {
+                is PlaylistLinks.Outcome.Problem -> playlistNote = outcome.message
+                is PlaylistLinks.Outcome.Read -> {
+                    importResult = PlaylistFile.matchAgainst(
+                        playlist = outcome.playlist,
+                        library = tracks,
+                        artistOf = { it.artist },
+                        titleOf = { it.title },
+                        durationOf = { it.durationMs }
+                    )
+                    importFromLink = true
+                    playlistNote = outcome.note
+                }
+            }
+        }
+    }
+
+    /** Whether the import under review came from a link rather than a file. */
+    var importFromLink by mutableStateOf(false)
+        private set
+
+    /**
+     * Creates the playlist from a reviewed import. With [downloadMissing], the
+     * songs that aren't here are downloaded too, and each joins the playlist
+     * as it arrives.
+     */
+    fun confirmImport(result: ImportResult<DesktopTrack>, downloadMissing: Boolean = false) {
         scope.launch {
             val id = io { store.createPlaylist(result.name) }
             io { store.addToPlaylist(id, result.matched.map { it.second.file.absolutePath }) }
             playlists = io { store.playlists() }
             importResult = null
+            val queued = if (downloadMissing) {
+                result.missing.mapNotNull { downloadSong(it.artist.orEmpty(), it.title, it.durationMs) }
+            } else {
+                emptyList()
+            }
             playlistNote = buildString {
                 append("Added ${result.matched.size} tracks as \"${result.name}\"")
-                if (result.missing.isNotEmpty()) {
-                    append("; ${result.missing.size} not in your library")
+                when {
+                    queued.isNotEmpty() ->
+                        append("; downloading the other ${queued.size}, which join it as they arrive (the Download page shows how it's going)")
+                    result.missing.isNotEmpty() -> append("; ${result.missing.size} not in your library")
                 }
                 append(".")
+            }
+            if (queued.isNotEmpty()) followIntoPlaylist(id, queued)
+        }
+    }
+
+    /** Adds each of [downloadIds]' songs to the playlist as its download finishes. */
+    private fun followIntoPlaylist(playlistId: Long, downloadIds: List<Long>) {
+        scope.launch {
+            val pending = downloadIds.toMutableSet()
+            while (pending.isNotEmpty()) {
+                delay(2_000)
+                val finished = downloads.filter { it.id in pending && it.done }
+                for (entry in finished) {
+                    pending -= entry.id
+                    if (!entry.failed && entry.files.isNotEmpty()) {
+                        io { store.addToPlaylist(playlistId, entry.files.map { it.absolutePath }) }
+                    }
+                }
+                if (finished.any { !it.failed }) {
+                    playlists = io { store.playlists() }
+                    openPlaylist?.takeIf { it.id == playlistId }?.let { show(it) }
+                }
+                // A download cleared from the list is one there's nothing more to wait for.
+                val listed = downloads.map { it.id }.toSet()
+                pending.retainAll(listed)
             }
         }
     }
 
     fun dismissImport() {
         importResult = null
+        importFromLink = false
         playlistNote = null
     }
 

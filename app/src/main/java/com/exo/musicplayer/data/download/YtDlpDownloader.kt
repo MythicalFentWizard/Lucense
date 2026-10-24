@@ -1,5 +1,6 @@
 package com.exo.musicplayer.data.download
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -221,6 +222,20 @@ class YtDlpDownloader(private val context: Context) {
     /** Every yt-dlp call starts here, so a download proxy applies to all of them. */
     fun newRequest(target: String): YoutubeDLRequest =
         YoutubeDLRequest(target).apply { proxy?.let { addOption("--proxy", it) } }
+
+    /**
+     * Every song of a list read in full, for a SoundCloud set whose flat
+     * listing names none of them: yt-dlp's printed lines, or why not.
+     */
+    suspend fun printedSongs(url: String): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        if (!ensureReady()) return@withContext null to lastInitError
+        runCatching {
+            val request = newRequest(url)
+            // In order: each --print goes with the template after it.
+            request.addCommands(PlaylistLinks.PRINT_ARGUMENTS)
+            YoutubeDL.getInstance().execute(request).out.takeIf { it.isNotBlank() } to null as String?
+        }.getOrElse { null to friendly(it.message) }
+    }
 
     /**
      * What a playlist link holds, without downloading any of it; with why

@@ -37,4 +37,35 @@ object Http {
         Log.warn(TAG, "GET failed: $url", t)
         null
     }
+
+    /** POSTs [body] and returns the answer, or null on anything but success. */
+    fun post(
+        url: String,
+        body: String,
+        headers: Map<String, String> = emptyMap(),
+        proxy: Proxy? = null
+    ): String? = try {
+        val opened = if (proxy != null) URL(url).openConnection(proxy) else URL(url).openConnection()
+        val connection = (opened as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 12_000
+            readTimeout = 18_000
+            setRequestProperty("User-Agent", USER_AGENT)
+            headers.forEach { (k, v) -> setRequestProperty(k, v) }
+        }
+        try {
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            if (connection.responseCode in 200..299) {
+                connection.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                null
+            }
+        } finally {
+            connection.disconnect()
+        }
+    } catch (t: Throwable) {
+        Log.warn(TAG, "POST failed: $url", t)
+        null
+    }
 }

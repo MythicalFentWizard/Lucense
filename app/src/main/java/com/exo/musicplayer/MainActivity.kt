@@ -1,5 +1,6 @@
 package com.exo.musicplayer
 
+import androidx.compose.material3.OutlinedTextField
 import com.exo.musicplayer.ui.trim.TrimScreen
 import com.exo.musicplayer.data.trim.TrackTrimmer
 import android.Manifest
@@ -238,6 +239,7 @@ private fun AppScaffold(
     var playerOpen by rememberSaveable { mutableStateOf(openPlayerOnLaunch) }
     var addingToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
     var trimming by remember { mutableStateOf<Track?>(null) }
+    var linkingPlaylist by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<List<Track>>(emptyList()) }
     var deleteSelection by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
@@ -599,6 +601,7 @@ private fun AppScaffold(
                                     },
                                     zip = { viewModel.zipPlaylist(it) },
                                     import = { playlistImportLauncher.launchOrExplain(arrayOf("text/*"), context) },
+                                    importLink = { linkingPlaylist = true },
                                     setPrompt = viewModel::setGenrePrompt,
                                     playPrompt = viewModel::playPrompt,
                                     savePrompt = viewModel::savePromptAsPlaylist,
@@ -994,6 +997,54 @@ private fun AppScaffold(
 
         // ---- Dialogs ----------------------------------------------------------
 
+        // Riff's playlist migration: a list from another service, by its link.
+        if (linkingPlaylist) {
+            val reading by viewModel.readingLink.collectAsStateWithLifecycle()
+            var link by remember { mutableStateOf("") }
+            var asked by remember { mutableStateOf(false) }
+            // Once it has been read, the review (or the reason it couldn't be) takes over.
+            LaunchedEffect(reading) { if (asked && !reading) linkingPlaylist = false }
+            AlertDialog(
+                onDismissRequest = { if (!reading) linkingPlaylist = false },
+                title = { Text("Playlist from a link") },
+                text = {
+                    Column {
+                        Text(
+                            "A Spotify, Apple Music, YouTube or SoundCloud playlist or album. Only the list " +
+                                "is read; songs you have are linked up and the rest can be downloaded.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = link,
+                            onValueChange = { link = it },
+                            placeholder = { Text("Paste the share link") },
+                            singleLine = true,
+                            enabled = !reading,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (reading) {
+                            Spacer(Modifier.height(12.dp))
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Reading the list…", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            asked = true
+                            viewModel.importPlaylistLink(link) { download.readPlaylistLink(it) }
+                        },
+                        enabled = link.isNotBlank() && !reading
+                    ) { Text("Read it") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { linkingPlaylist = false }, enabled = !reading) { Text("Cancel") }
+                }
+            )
+        }
+
         playlistImport?.let { pending ->
             AlertDialog(
                 onDismissRequest = { viewModel.dismissImport() },
@@ -1002,8 +1053,9 @@ private fun AppScaffold(
                     Column {
                         Text(
                             "${pending.matched.size} of ${counted(pending.total, "track")} are already " +
-                                "on this device. Nothing is downloaded — the playlist just " +
-                                "links up what you have."
+                                "on this device, and are linked up. The missing ones can be downloaded: " +
+                                "each is found on YouTube by its name, artist and length, and joins the " +
+                                "playlist as it arrives."
                         )
                         if (pending.missing.isNotEmpty()) {
                             Spacer(Modifier.height(12.dp))
@@ -1018,10 +1070,24 @@ private fun AppScaffold(
                     }
                 },
                 confirmButton = {
-                    TextButton(
-                        onClick = { viewModel.confirmImport(pending) },
-                        enabled = pending.matched.isNotEmpty()
-                    ) { Text("Add ${pending.matched.size} ${if (pending.matched.size == 1) "track" else "tracks"}") }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                        if (pending.missing.isNotEmpty()) {
+                            TextButton(onClick = {
+                                viewModel.confirmImport(pending) { playlistId ->
+                                    download.downloadAll(
+                                        pending.missing.map {
+                                            DownloadRequest(null, it.artist, it.title, it.durationMs.takeIf { ms -> ms > 0 })
+                                        },
+                                        intoPlaylist = playlistId
+                                    )
+                                }
+                            }) { Text("Add, and download the ${pending.missing.size} missing") }
+                        }
+                        TextButton(
+                            onClick = { viewModel.confirmImport(pending) },
+                            enabled = pending.matched.isNotEmpty()
+                        ) { Text("Add ${pending.matched.size} ${if (pending.matched.size == 1) "track" else "tracks"}") }
+                    }
                 },
                 dismissButton = { TextButton(onClick = { viewModel.dismissImport() }) { Text("Cancel") } }
             )
