@@ -58,6 +58,7 @@ on Windows.
 | **Type an artist** | see which genres they are, their most played songs, their releases with dates, and who is similar. |
 | **New from your artists** | what the artists already in your library put out in the last four months. |
 | **You might like** | artists similar to yours that you don't have. |
+| **Your YouTube** (Windows) | the songs among what YouTube suggests to the account you signed in with: its home page read, the songs kept and the rest left out. Each can be heard, streamed with the rest or downloaded, and YouTube's Mixes open to their songs. |
 | **Charts** | what is played most right now, overall or by broad genre. |
 | **Surprise me** | a random genre with someone in it. |
 
@@ -125,9 +126,12 @@ another server. Nothing is fetched from anywhere else instead.
 
 **Or sign in to YouTube.** When YouTube refuses your VPN's address with
 "confirm you're not a bot", downloads can go as your YouTube account instead.
-On Windows it uses the sign-in of a browser you're signed in to YouTube with
-(Firefox works best; Chrome and Edge lock theirs away), or a cookies.txt file;
-on Android, YouTube's own sign-in page inside the app, or a cookies.txt file.
+On Windows, *Sign in here* opens a browser window of Lucense's own: sign in
+once and Lucense keeps that sign-in. No browser you use touches it, so YouTube
+doesn't cycle it out the way it does a browser's in daily use. It can also copy
+the sign-in of a browser you're signed in with, and renew the copy every few
+days and whenever YouTube stops taking it, or use a cookies.txt file. On
+Android it's YouTube's own sign-in page inside the app, or a cookies.txt file.
 It's optional and stays on your device. YouTube can flag accounts that download
 a lot, so a spare account is safer.
 
