@@ -1022,9 +1022,19 @@ private fun Chip(text: String, selected: Boolean = false, onClick: () -> Unit) {
     val hovered by interaction.collectIsHoveredAsState()
     Box(
         Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) Palette.Selected else if (hovered) Palette.Hover else Palette.Content)
-            .border(1.dp, if (selected) Palette.Accent else Palette.Line, RoundedCornerShape(14.dp))
+            .then(
+                if (Glass.on) {
+                    // A bead of glass, brighter for the one chosen.
+                    Modifier
+                        .glassChip(RoundedCornerShape(50), fill = if (selected) 0.16f else if (hovered) 0.12f else 0.05f)
+                        .then(if (selected) Modifier.border(1.dp, Palette.Accent, RoundedCornerShape(50)) else Modifier)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (selected) Palette.Selected else if (hovered) Palette.Hover else Palette.Content)
+                        .border(1.dp, if (selected) Palette.Accent else Palette.Line, RoundedCornerShape(14.dp))
+                }
+            )
             .hoverable(interaction)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 5.dp)

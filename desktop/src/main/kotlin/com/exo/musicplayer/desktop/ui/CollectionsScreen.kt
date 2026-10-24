@@ -420,7 +420,7 @@ private fun MergeSetRow(plan: MergePlan, included: Boolean, onToggle: () -> Unit
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .padding(13.dp)
     ) {
         CheckRow(
@@ -456,7 +456,7 @@ private fun ChoiceRow(label: String, note: String, chosen: Boolean, onClick: () 
             .fillMaxWidth()
             .padding(vertical = 3.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (chosen) Palette.Selected else Palette.Content)
+            .background(if (chosen) Palette.Selected else Palette.Well)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically

@@ -1,5 +1,10 @@
 package com.exo.musicplayer.desktop
 
+import androidx.compose.runtime.CompositionLocalProvider
+import com.exo.musicplayer.desktop.ui.ResizeEdges
+import com.exo.musicplayer.desktop.ui.LocalWindowFrame
+import com.exo.musicplayer.desktop.ui.WindowCorners
+import com.exo.musicplayer.desktop.ui.WindowFrame
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -104,6 +109,9 @@ fun main(args: Array<String>) = application {
         title = "Lucense",
         icon = painterResource(FALLBACK_ICON),
         state = rememberWindowState(width = 1280.dp, height = 820.dp),
+        // Lucense draws its own title strip and edges (WindowFrame), and
+        // Windows 11 rounds the corners.
+        undecorated = true,
         // Window level, not view level: Ctrl+A has to work whether or not the
         // track table happens to hold focus, and a text field that owns the
         // keystroke still gets first refusal because it is a preview handler
@@ -184,9 +192,16 @@ fun main(args: Array<String>) = application {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
         // Anything Windows handed over: a double-clicked file, or "Open with".
         LaunchedEffect(Unit) { controller.openExternal(args.toList()) }
-        LucenseDesktopTheme {
-            ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
-                AppHost(controller)
+        val frame = remember { WindowFrame(window, ::exitApplication) }
+        LaunchedEffect(Unit) { WindowCorners.round(window) }
+        CompositionLocalProvider(LocalWindowFrame provides frame) {
+            LucenseDesktopTheme {
+                Box(Modifier.fillMaxSize()) {
+                    ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
+                        AppHost(controller)
+                    }
+                    ResizeEdges()
+                }
             }
         }
     }

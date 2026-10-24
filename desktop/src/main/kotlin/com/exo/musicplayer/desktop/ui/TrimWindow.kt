@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.ui
 
+import dev.chrisbanes.haze.hazeSource
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -79,7 +81,21 @@ fun TrimWindow(controller: DesktopController, track: DesktopTrack, onClose: () -
         state = rememberDialogState(size = DpSize(780.dp, 500.dp))
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(600, 460) }
-        LucenseDesktopTheme { Trimmer(controller, track, onClose) }
+        LucenseDesktopTheme {
+            if (Glass.on) {
+                // The same glass as the main window: a pane over the colour field.
+                val state = remember { dev.chrisbanes.haze.HazeState() }
+                Box(Modifier.fillMaxSize()) {
+                    GlassBackground(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize().hazeSource(state))
+                    Box(
+                        Modifier.fillMaxSize().padding(Glass.GAP)
+                            .glassPane(state, RoundedCornerShape(Glass.PANE), Palette.Content, 0.45f)
+                    ) { Trimmer(controller, track, onClose) }
+                }
+            } else {
+                Trimmer(controller, track, onClose)
+            }
+        }
     }
 }
 
@@ -128,7 +144,7 @@ internal fun Trimmer(controller: DesktopController, track: DesktopTrack, onClose
         onDispose { if (controller.preview.state.value.videoId?.startsWith("$key#") == true) controller.stopPreview() }
     }
 
-    Column(Modifier.fillMaxSize().background(Palette.Content).padding(22.dp)) {
+    Column(Modifier.fillMaxSize().background(if (Glass.on) Color.Transparent else Palette.Content).padding(22.dp)) {
         Text(
             track.title,
             style = MaterialTheme.typography.titleLarge,
@@ -280,8 +296,7 @@ private fun Waveform(
 
     Canvas(
         modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.Raised)
+            .card(10.dp)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown()

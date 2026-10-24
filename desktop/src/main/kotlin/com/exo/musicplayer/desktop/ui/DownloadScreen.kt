@@ -263,7 +263,7 @@ private fun ToolChip(name: String, installed: Boolean, note: String) {
     Row(
         Modifier
             .clip(RoundedCornerShape(7.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .border(1.dp, if (installed) Palette.AccentSoft else Palette.Line,
                 RoundedCornerShape(7.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -288,9 +288,7 @@ private fun DownloadRow(entry: DownloadEntry) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Palette.Raised)
-            .border(1.dp, Palette.Line, RoundedCornerShape(8.dp))
+            .card(8.dp)
             .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

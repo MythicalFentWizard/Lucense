@@ -90,7 +90,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                             .fillMaxWidth()
                             .padding(vertical = 3.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Palette.Content)
+                            .background(Palette.Well)
                             .padding(horizontal = 11.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -189,6 +189,13 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             Spacer(Modifier.height(8.dp))
             Hint(controller.accent.credit)
             Spacer(Modifier.height(10.dp))
+            CheckRow(
+                "Liquid glass",
+                controller.glass,
+                note = "The window as panes of frosted glass over a soft field of the theme's colours, " +
+                    "or over your wallpaper. Rounder controls, lit edges. Uses a little more of the graphics card."
+            ) { controller.glass = it }
+            Spacer(Modifier.height(6.dp))
             CheckRow(
                 "Take the accent from the song's cover",
                 controller.coverColours,
@@ -644,7 +651,7 @@ private fun WeatherSettings(controller: DesktopController) {
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(7.dp))
-                    .background(Palette.Content)
+                    .background(Palette.Well)
                     .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
@@ -684,7 +691,7 @@ private fun WeatherSettings(controller: DesktopController) {
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Palette.Content)
+                            .background(Palette.Well)
                             .clickable {
                                 controller.usePlace(place)
                                 search = ""

@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -95,11 +96,22 @@ fun AccentButton(
         hovered -> Palette.Accent
         else -> Palette.Button
     }
+    val shape = if (Glass.on) RoundedCornerShape(50) else RoundedCornerShape(7.dp)
     Row(
         Modifier
             .heightIn(min = CONTROL_HEIGHT)
-            .clip(RoundedCornerShape(7.dp))
+            .clip(shape)
             .background(background)
+            .then(
+                if (Glass.on) {
+                    // Coloured glass: lit from above, with the same bright edge as the panes.
+                    Modifier
+                        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.Transparent)))
+                        .border(1.dp, glassEdge(1.2f), shape)
+                } else {
+                    Modifier
+                }
+            )
             .hoverable(interaction)
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 16.dp, vertical = 7.dp),
@@ -135,9 +147,16 @@ fun GhostButton(
     Row(
         Modifier
             .heightIn(min = CONTROL_HEIGHT)
-            .clip(RoundedCornerShape(7.dp))
-            .background(if (hovered && enabled) Palette.Hover else Color.Transparent)
-            .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassChip(RoundedCornerShape(50), fill = if (hovered && enabled) 0.13f else 0.05f)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (hovered && enabled) Palette.Hover else Color.Transparent)
+                        .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+                }
+            )
             .hoverable(interaction)
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 14.dp, vertical = 6.dp),
@@ -167,9 +186,16 @@ fun Panel(
 ) {
     Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.Raised)
-            .border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassChip(RoundedCornerShape(16.dp), fill = 0.045f)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Palette.Raised)
+                        .border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+                }
+            )
             .padding(18.dp),
         content = content
     )
@@ -225,9 +251,16 @@ fun TextInput(
     Row(
         modifier
             .heightIn(min = CONTROL_HEIGHT)
-            .clip(RoundedCornerShape(7.dp))
-            .background(Palette.Content)
-            .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassChip(RoundedCornerShape(12.dp), fill = 0.06f)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Palette.Content)
+                        .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+                }
+            )
             .padding(horizontal = 11.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -334,9 +367,16 @@ fun <T> SegmentedRow(
 ) {
     Row(
         Modifier
-            .clip(RoundedCornerShape(7.dp))
-            .background(Palette.Content)
-            .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassChip(RoundedCornerShape(50), fill = 0.04f)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Palette.Content)
+                        .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+                }
+            )
             .padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
@@ -344,8 +384,15 @@ fun <T> SegmentedRow(
             val isSelected = option == selected
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(if (isSelected) Palette.Selected else Color.Transparent)
+                    .then(
+                        if (Glass.on && isSelected) {
+                            Modifier.glassChip(RoundedCornerShape(50), fill = 0.12f, edge = 1.1f)
+                                .background(Palette.Selected.copy(alpha = 0.55f))
+                        } else {
+                            Modifier.clip(if (Glass.on) RoundedCornerShape(50) else RoundedCornerShape(5.dp))
+                        }
+                    )
+                    .background(if (isSelected && !Glass.on) Palette.Selected else Color.Transparent)
                     .clickable { onSelect(option) }
                     .padding(horizontal = 11.dp, vertical = 6.dp)
             ) {

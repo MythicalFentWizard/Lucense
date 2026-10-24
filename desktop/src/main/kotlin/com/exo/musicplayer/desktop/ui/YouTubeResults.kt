@@ -90,13 +90,7 @@ private fun YouTubeRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered || isPreviewing) Palette.Hover else Palette.Raised)
-            .border(
-                1.dp,
-                if (isPreviewing) Palette.Accent else Palette.Line,
-                RoundedCornerShape(10.dp)
-            )
+            .card(10.dp, hovered || isPreviewing, edge = if (isPreviewing) Palette.Accent else Palette.Line)
             .hoverable(interaction)
             .padding(12.dp)
     ) {

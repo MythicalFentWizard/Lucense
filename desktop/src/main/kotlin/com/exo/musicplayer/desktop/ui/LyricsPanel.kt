@@ -264,7 +264,7 @@ private fun LyricsEditor(initial: String, onSave: (String) -> Unit) {
                 .heightIn(min = 200.dp)
                 .weight(1f, fill = false)
                 .clip(RoundedCornerShape(7.dp))
-                .background(Palette.Content)
+                .background(Palette.Well)
                 .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
                 .padding(10.dp)
         ) {

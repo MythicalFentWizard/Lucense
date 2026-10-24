@@ -402,9 +402,7 @@ private fun MatchRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (hovered) Palette.Hover else Palette.Raised)
-            .border(1.dp, Palette.Line, RoundedCornerShape(8.dp))
+            .card(8.dp, hovered)
             .hoverable(interaction)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically

@@ -390,9 +390,7 @@ private fun PlaylistCard(
 
     Column(
         Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered) Palette.Hover else Palette.Raised)
-            .border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+            .card(10.dp, hovered)
             .hoverable(interaction)
             .clickable(onClick = onOpen)
             .padding(14.dp)
@@ -402,7 +400,7 @@ private fun PlaylistCard(
                 .fillMaxWidth()
                 .height(112.dp)
                 .clip(RoundedCornerShape(7.dp))
-                .background(Palette.Content),
+                .background(Palette.Well),
             contentAlignment = Alignment.Center
         ) {
             Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(30.dp), tint = Palette.TextFaint)
@@ -692,7 +690,7 @@ private fun AutoCard(kind: AutoPlaylist, songs: Int, onPlay: () -> Unit) {
         Modifier
             .width(196.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Well)
             .hoverable(interaction)
             .clickable(enabled = songs > 0, onClick = onPlay)
             .padding(14.dp)
@@ -735,7 +733,7 @@ private fun SmartCard(
         Modifier
             .width(196.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Well)
             .hoverable(interaction)
             .clickable(enabled = songs > 0, onClick = onPlay)
             .padding(14.dp)

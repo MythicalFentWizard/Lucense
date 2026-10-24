@@ -93,9 +93,7 @@ fun ScrimDialog(
                 .widthIn(max = 720.dp)
                 .heightIn(max = 620.dp)
                 .padding(32.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Palette.Raised)
-                .border(1.dp, Palette.Line, RoundedCornerShape(12.dp))
+                .floating(12.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -262,7 +260,7 @@ private fun JobProgress(controller: DesktopController, job: BulkJob) {
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .padding(14.dp)
     ) {
         Column {
@@ -411,7 +409,7 @@ private fun BulkOption(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -591,7 +589,7 @@ private fun DuplicateRow(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .padding(13.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -687,7 +685,7 @@ fun AddToPlaylistDialog(
                             .fillMaxWidth()
                             .padding(vertical = 3.dp)
                             .clip(RoundedCornerShape(7.dp))
-                            .background(Palette.Content)
+                            .background(Palette.Well)
                             .clickable {
                                 controller.addToPlaylist(playlist, tracks)
                                 onDismiss()

@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.desktop.ui.Glass
 import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import com.exo.musicplayer.data.playlist.ParsedPlaylist
 import com.exo.musicplayer.data.youtube.StreamResolver
@@ -1013,6 +1014,18 @@ class DesktopController(parent: CoroutineScope) {
             // Taken again against the new theme's background, which may be light.
             if (coverColours) followCover(engine.status.value.track)
         }
+
+    /** The liquid glass look. */
+    var glass: Boolean
+        get() = Glass.on
+        set(value) {
+            Glass.on = value
+            settings.glass = value
+        }
+
+    init {
+        Glass.on = settings.glass
+    }
 
     // Colours from the cover, after Riff (github.com/rootscripts/riff, MIT).
 

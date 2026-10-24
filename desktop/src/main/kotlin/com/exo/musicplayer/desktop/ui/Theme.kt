@@ -67,16 +67,28 @@ object Palette {
     val Sidebar: Color get() = shown.value.sidebar    // navigation rail
     val Content: Color get() = shown.value.content    // main surface
     val Raised: Color get() = shown.value.raised      // transport bar, headers
-    val Hover: Color get() = shown.value.hover
+    val Hover: Color get() = shown.value.hover.let { if (Glass.on) it.copy(alpha = 0.55f) else it }
     val Line: Color get() = shown.value.line
 
     val Text: Color get() = shown.value.text
     val TextDim: Color get() = shown.value.textDim
     val TextFaint: Color get() = shown.value.textFaint
 
+    /**
+     * An inset surface on a page - a field, a log, a meter, a card. The page
+     * colour when solid; with glass, a darker (or on a light theme, paler)
+     * tint that the pane still shows through.
+     */
+    val Well: Color
+        get() = when {
+            !Glass.on -> shown.value.content
+            shown.value.content.luminance() > 0.5f -> Color.White.copy(alpha = 0.42f)
+            else -> Color.Black.copy(alpha = 0.2f)
+        }
+
     val Accent: Color get() = shown.value.accent
     val AccentSoft: Color get() = shown.value.soft
-    val Selected: Color get() = shown.value.selected
+    val Selected: Color get() = shown.value.selected.let { if (Glass.on) it.copy(alpha = 0.62f) else it }
 
     /** Foreground for anything sitting on [Accent]. */
     val OnAccent: Color get() = shown.value.onAccent

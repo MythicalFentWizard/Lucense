@@ -1,5 +1,9 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.CompositionLocalProvider
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -198,12 +202,24 @@ fun DesktopApp(
             .fillMaxSize()
             .dragAndDropTarget(shouldStartDragAndDrop = { true }, target = dropTarget)
     ) {
-        Wallpaper(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
+        // Liquid glass: panes that blur what is behind them, over a field of
+        // the theme's colours or the wallpaper. Otherwise the solid layers.
+        val glass = Glass.on
+        val glassState = remember { HazeState() }
+        if (glass) {
+            GlassBackground(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize().hazeSource(glassState))
+        } else {
+            Wallpaper(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
+        }
+        CompositionLocalProvider(LocalGlass provides glassState.takeIf { glass }) {
         Column(
             Modifier
                 .fillMaxSize()
-                .background(if (controller.wallpaper != null) Color.Transparent else Palette.Base)
+                .background(if (glass || controller.wallpaper != null) Color.Transparent else Palette.Base)
+                .padding(if (glass) PaddingValues(start = Glass.GAP, end = Glass.GAP, bottom = Glass.GAP) else PaddingValues())
         ) {
+            // In place of Windows' own title bar: drag here, double-click to maximise.
+            WindowTitleBar(background = if (glass) Color.Transparent else Palette.Base)
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 NavigationRail(
                     controller = controller,
@@ -213,11 +229,18 @@ fun DesktopApp(
                     onSettings = { showSettings = !showSettings }
                 )
 
+                if (glass) Spacer(Modifier.width(Glass.GAP))
                 Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .background(Palette.Content.copy(alpha = if (controller.wallpaper != null) 0.3f else 1f))
+                        .then(
+                            if (glass) {
+                                Modifier.glassPane(LocalGlass.current, RoundedCornerShape(Glass.PANE), Palette.Content, 0.34f)
+                            } else {
+                                Modifier.background(Palette.Content.copy(alpha = if (controller.wallpaper != null) 0.3f else 1f))
+                            }
+                        )
                 ) {
                     Backdrop(
                         style = controller.backdrop,
@@ -305,7 +328,11 @@ fun DesktopApp(
 
                 val panel = controller.sidePanel
                 if (panel != null) {
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Line))
+                    if (glass) {
+                        Spacer(Modifier.width(Glass.GAP))
+                    } else {
+                        Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Line))
+                    }
                     SidePanel(
                         kind = panel,
                         controller = controller,
@@ -316,6 +343,7 @@ fun DesktopApp(
                 }
             }
 
+            if (glass) Spacer(Modifier.height(Glass.GAP))
             TransportBar(
                 controller = controller,
                 track = status.track,
@@ -323,6 +351,7 @@ fun DesktopApp(
                 positionMs = status.positionMs,
                 durationMs = status.durationMs
             )
+        }
         }
 
         // Editing is driven off the controller rather than the local dialog
@@ -388,9 +417,7 @@ fun DesktopApp(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 96.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Palette.Raised)
-                    .border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+                    .floating(10.dp)
                     .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
                 Text(note, style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
@@ -411,7 +438,13 @@ private fun NavigationRail(
         Modifier
             .width(212.dp)
             .fillMaxHeight()
-            .background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.6f else 1f))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassPane(LocalGlass.current, RoundedCornerShape(Glass.PANE), Palette.Sidebar, 0.4f)
+                } else {
+                    Modifier.background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.6f else 1f))
+                }
+            )
     ) {
         Backdrop(
             style = controller.backdrop,
@@ -1185,12 +1218,19 @@ private fun TransportBar(
 ) {
     val panel = controller.sidePanel
     Column {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
+        if (!Glass.on) Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(76.dp)
-                .background(Palette.Raised)
+                .then(
+                    // A floating capsule of glass, as the controls are on Apple's.
+                    if (Glass.on) {
+                        Modifier.glassPane(LocalGlass.current, RoundedCornerShape(28.dp), Palette.Raised, 0.42f)
+                    } else {
+                        Modifier.background(Palette.Raised)
+                    }
+                )
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1506,8 +1546,7 @@ private fun ArchiveStrip(controller: DesktopController) {
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
             .padding(bottom = 10.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Palette.Raised)
+            .card(8.dp)
             .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

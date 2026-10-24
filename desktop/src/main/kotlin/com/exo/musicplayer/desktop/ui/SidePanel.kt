@@ -136,7 +136,13 @@ fun SidePanel(
         Modifier
             .width(if (kind == SidePanelKind.OUTPUT) 288.dp else 348.dp)
             .fillMaxHeight()
-            .background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.75f else 1f))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassPane(LocalGlass.current, RoundedCornerShape(Glass.PANE), Palette.Sidebar, 0.4f)
+                } else {
+                    Modifier.background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.75f else 1f))
+                }
+            )
     ) {
     if (kind == SidePanelKind.LYRICS) {
         Backdrop(
@@ -459,7 +465,7 @@ private fun Spectrum(spectrum: SpectrumAnalyser, playing: Boolean) {
                 .fillMaxWidth()
                 .height(84.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Palette.Content)
+                .background(Palette.Well)
                 .padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(3.dp)
@@ -525,7 +531,7 @@ private fun DecayCurve(decay: Float, mix: Float) {
             .fillMaxWidth()
             .height(34.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .padding(horizontal = 6.dp, vertical = 5.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(2.dp)

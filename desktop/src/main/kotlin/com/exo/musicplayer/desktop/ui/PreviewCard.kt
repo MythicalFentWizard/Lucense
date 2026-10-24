@@ -58,17 +58,17 @@ fun PreviewCard(controller: DesktopController, modifier: Modifier = Modifier) {
     val state by controller.preview.state.collectAsState()
     if (!state.active) return
     val label = state.label
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(if (Glass.on) 20.dp else 12.dp)
     // A list being streamed gets a previous, a next and a download.
     val stream = controller.streamQueue?.takeIf { it.owns(state.videoId) }
 
     Box(
         modifier
             .width(if (stream != null) 400.dp else 330.dp)
-            .shadow(10.dp, shape)
+            .shadow(if (Glass.on) 22.dp else 10.dp, shape)
             .clip(shape)
-            .background(Palette.Raised)
-            .border(1.dp, Palette.AccentSoft, shape)
+            .background(if (Glass.on) Palette.Raised.copy(alpha = 0.86f) else Palette.Raised)
+            .border(1.dp, if (Glass.on) glassEdge(1.2f) else androidx.compose.ui.graphics.SolidColor(Palette.AccentSoft), shape)
     ) {
         Row(
             // Room on the right for the X, so a long title never runs under it.

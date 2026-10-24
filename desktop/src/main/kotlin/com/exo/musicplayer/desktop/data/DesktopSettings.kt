@@ -136,6 +136,11 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_DOWNLOAD_PLAYLIST, false)
         set(value) = prefs.putBoolean(KEY_DOWNLOAD_PLAYLIST, value)
 
+    /** Whether the window is drawn as liquid glass. */
+    var glass: Boolean
+        get() = prefs.getBoolean(KEY_GLASS, false)
+        set(value) = prefs.putBoolean(KEY_GLASS, value)
+
     /** Whether the accent follows the cover of the song playing. */
     var coverColours: Boolean
         get() = prefs.getBoolean(KEY_COVER_COLOURS, false)
@@ -334,6 +339,7 @@ class DesktopSettings {
         const val KEY_YOUTUBE_COOKIE_FILE = "youtube_cookie_file"
         const val KEY_DOWNLOAD_PLAYLIST = "download_whole_playlist"
         const val KEY_COVER_COLOURS = "cover_colours"
+        const val KEY_GLASS = "glass_ui"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"
