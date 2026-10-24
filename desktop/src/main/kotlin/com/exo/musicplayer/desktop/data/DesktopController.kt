@@ -168,7 +168,11 @@ data class DownloadEntry(
     var done: Boolean = false,
     var failed: Boolean = false,
     var files: List<File> = emptyList(),
-    var note: String? = null
+    var note: String? = null,
+    /** The song it was asked for by name, when it was: kept so a retry asks the same way. */
+    val song: YouTubeLinkFinder.Wanted? = null,
+    /** A playlist's songs that weren't downloaded, for "Retry the missed". */
+    var missed: Int = 0
 )
 
 /** A duplicate set as the desktop sees it. */
@@ -3283,10 +3287,11 @@ class DesktopController(parent: CoroutineScope) {
             val pending = downloadIds.toMutableSet()
             while (pending.isNotEmpty()) {
                 delay(2_000)
-                val finished = downloads.filter { it.id in pending && it.done }
+                // A failed one stays watched, since its Retry may yet bring it in.
+                val finished = downloads.filter { it.id in pending && it.done && !it.failed }
                 for (entry in finished) {
                     pending -= entry.id
-                    if (!entry.failed && entry.files.isNotEmpty()) {
+                    if (entry.files.isNotEmpty()) {
                         io { store.addToPlaylist(playlistId, entry.files.map { it.absolutePath }) }
                     }
                 }
@@ -3685,7 +3690,8 @@ class DesktopController(parent: CoroutineScope) {
         val entry = DownloadEntry(
             id = System.nanoTime(),
             target = url,
-            display = url
+            display = url,
+            song = song
         )
         synchronized(queueLock) { downloads = downloads + entry }
 
@@ -3866,6 +3872,7 @@ class DesktopController(parent: CoroutineScope) {
             it.percent = 1f
             it.files = saved.toList()
             it.failed = saved.isEmpty() && already == 0
+            it.missed = missed.size + untried
             it.status = buildString {
                 append("Saved ${saved.size} of ${songs.size}")
                 if (already > 0) append(", $already already downloaded")
@@ -4150,6 +4157,37 @@ class DesktopController(parent: CoroutineScope) {
     private fun update(id: Long, change: (DownloadEntry) -> Unit) = synchronized(queueLock) {
         downloads = downloads.map { entry ->
             if (entry.id != id) entry else entry.copy().also(change)
+        }
+    }
+
+    /**
+     * Tries one item of the queue again, in place: a song or a link that
+     * failed, or the songs a playlist missed (those it saved are skipped, so
+     * only the missed ones are fetched).
+     */
+    fun retryDownload(id: Long) {
+        val entry = synchronized(queueLock) { downloads.firstOrNull { it.id == id } } ?: return
+        if (!entry.done || !(entry.failed || entry.missed > 0)) return
+        if (!tools.ready) {
+            toolNote = "Install yt-dlp first — one click, about 12 MB."
+            return
+        }
+        update(id) {
+            it.done = false
+            it.failed = false
+            it.percent = 0f
+            it.status = "Waiting…"
+            it.note = null
+            it.missed = 0
+        }
+        scope.launch {
+            val fresh = synchronized(queueLock) { downloads.firstOrNull { it.id == id } } ?: return@launch
+            val song = entry.song
+            if (song != null) {
+                songSlots.withPermit { runDownload(fresh, entry.target, song) }
+            } else {
+                runDownload(fresh, entry.target, null)
+            }
         }
     }
 
