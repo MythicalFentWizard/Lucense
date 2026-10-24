@@ -1,11 +1,11 @@
 package com.exo.musicplayer.playback
 
+import com.exo.musicplayer.data.audio.CharacterFx
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.AudioProcessor.UnhandledAudioFormatException
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
-import com.exo.musicplayer.data.audio.Overdrive
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicReference
@@ -36,13 +36,24 @@ import kotlin.math.tanh
 @UnstableApi
 class ToneProcessor : BaseAudioProcessor() {
 
-    private class Settings(val enabled: Boolean, val gains: FloatArray, val level: Float, val drive: Float)
+    private class Settings(
+        val enabled: Boolean,
+        val gains: FloatArray,
+        val level: Float,
+        val drive: Float,
+        val lofi: Float,
+        val tremolo: Float,
+        val rotate: Float,
+        val echo: Float
+    )
 
-    private val incoming = AtomicReference<Settings?>(Settings(false, FloatArray(BANDS.size), 1f, 0f))
+    private val incoming = AtomicReference<Settings?>(Settings(false, FloatArray(BANDS.size), 1f, 0f, 0f, 0f, 0f, 0f))
     private var enabled = false
     private var gains = FloatArray(BANDS.size)
     private var level = 1f
-    private var drive = 0f
+
+    /** Distortion, lo-fi, tremolo, 8D and echo, with what each remembers between buffers. */
+    private val character = CharacterFx()
 
     private var sampleRate = 44_100
     private var channels = 2
@@ -57,13 +68,26 @@ class ToneProcessor : BaseAudioProcessor() {
     private var z2 = DoubleArray(BANDS.size * 2)
 
     /** Called from any thread; heard from the next buffer on. */
-    fun set(eqEnabled: Boolean, eqGains: List<Float>, levelGain: Float, distortion: Float = 0f) {
+    fun set(
+        eqEnabled: Boolean,
+        eqGains: List<Float>,
+        levelGain: Float,
+        distortion: Float = 0f,
+        lofi: Float = 0f,
+        tremolo: Float = 0f,
+        rotate: Float = 0f,
+        echo: Float = 0f
+    ) {
         incoming.set(
             Settings(
                 eqEnabled,
                 FloatArray(BANDS.size) { eqGains.getOrElse(it) { 0f }.coerceIn(-12f, 12f) },
                 levelGain.coerceIn(0.05f, 4f),
-                distortion.coerceIn(0f, 1f)
+                distortion.coerceIn(0f, 1f),
+                lofi.coerceIn(0f, 1f),
+                tremolo.coerceIn(0f, 1f),
+                rotate.coerceIn(0f, 1f),
+                echo.coerceIn(0f, 1f)
             )
         )
     }
@@ -83,6 +107,7 @@ class ToneProcessor : BaseAudioProcessor() {
         encoding = inputAudioFormat.encoding
         z1 = DoubleArray(BANDS.size * channels)
         z2 = DoubleArray(BANDS.size * channels)
+        character.reset()
         design()
     }
 
@@ -91,13 +116,17 @@ class ToneProcessor : BaseAudioProcessor() {
             enabled = it.enabled
             gains = it.gains
             level = it.level
-            drive = it.drive
+            character.drive = it.drive
+            character.lofi = it.lofi
+            character.tremolo = it.tremolo
+            character.rotate = it.rotate
+            character.echo = it.echo
             design()
         }
         val bytes = inputBuffer.remaining()
         if (bytes == 0) return
         val output = replaceOutputBuffer(bytes)
-        val untouched = !enabled && abs(level - 1f) < 0.001f && !Overdrive.active(drive)
+        val untouched = !enabled && abs(level - 1f) < 0.001f && !character.active
         if (untouched) {
             output.put(inputBuffer)
             output.flip()
@@ -123,7 +152,7 @@ class ToneProcessor : BaseAudioProcessor() {
 
     private fun process(buffer: FloatArray) {
         shape(buffer)
-        Overdrive.process(buffer, drive)
+        character.process(buffer, channels, sampleRate)
     }
 
     private fun shape(buffer: FloatArray) {

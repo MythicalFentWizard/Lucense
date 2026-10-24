@@ -1,5 +1,11 @@
 package com.exo.musicplayer.ui.player
 
+import com.exo.musicplayer.ui.theme.ScreenBackdrop
+import com.exo.musicplayer.musicApp
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Brush
@@ -76,17 +82,26 @@ fun FullscreenLyrics(
 ) {
     BackHandler(onBack = onClose)
     ImmersiveWhileShown()
+    val prefs = LocalContext.current.musicApp.prefs
+    val ownBackground by prefs.lyricsOwnBackground.collectAsState()
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        track?.artPath?.let {
-            AsyncImage(
-                model = it,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(48.dp)
-            )
+        if (ownBackground) {
+            // Your own background: the wallpaper and the moving background, as behind the library.
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            ScreenBackdrop()
+            Box(Modifier.fillMaxSize().background(Color(0x80000000)))
+        } else {
+            track?.artPath?.let {
+                AsyncImage(
+                    model = it,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().blur(48.dp)
+                )
+            }
+            Box(Modifier.fillMaxSize().background(Color(0xB3000000)))
         }
-        Box(Modifier.fillMaxSize().background(Color(0xB3000000)))
 
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -106,6 +121,16 @@ fun FullscreenLyrics(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+                // Behind the words: the song's cover, or your own background.
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .padding(3.dp)
+                ) {
+                    BackgroundChoice("Cover", !ownBackground) { prefs.setLyricsOwnBackground(false) }
+                    BackgroundChoice("Mine", ownBackground) { prefs.setLyricsOwnBackground(true) }
                 }
                 IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close fullscreen lyrics", tint = Color.White) }
             }
@@ -206,3 +231,17 @@ private fun Modifier.fadeEdges(): Modifier = this
             blendMode = BlendMode.DstIn
         )
     }
+
+@Composable
+private fun BackgroundChoice(label: String, chosen: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (chosen) Color.Black else Color.White.copy(alpha = 0.85f),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (chosen) Color.White.copy(alpha = 0.9f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    )
+}

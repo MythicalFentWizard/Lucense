@@ -882,6 +882,7 @@ private fun AppScaffold(
                     onReverbRoom = viewModel::setReverbRoom,
                     onReverbAmount = viewModel::setReverbAmount,
                     onDrive = viewModel::setFxDrive,
+                    onCharacter = viewModel::setFxCharacter,
                     onEqEnabled = viewModel::setEqEnabled,
                     onEqBand = viewModel::setEqBand,
                     onEqFlat = viewModel::flattenEq,

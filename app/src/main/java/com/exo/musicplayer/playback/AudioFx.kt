@@ -1,7 +1,8 @@
 package com.exo.musicplayer.playback
 
+import com.exo.musicplayer.data.audio.CharacterEffect
+import com.exo.musicplayer.data.audio.CharacterFx
 import com.exo.musicplayer.data.audio.EffectPreset
-import com.exo.musicplayer.data.audio.Overdrive
 
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -46,19 +47,39 @@ data class AudioFxState(
     val eqEnabled: Boolean = false,
     /** Ten bands, 31 Hz to 16 kHz, in dB; see ToneProcessor. */
     val eqGains: List<Float> = List(10) { 0f },
-    /** Distortion, 0 (off) to 1; see Overdrive. */
-    val drive: Float = 0f
+    /** Distortion, 0 (off) to 1; see CharacterFx. */
+    val drive: Float = 0f,
+    val lofi: Float = 0f,
+    val tremolo: Float = 0f,
+    val rotate: Float = 0f,
+    val echo: Float = 0f
 ) {
+    fun amount(effect: CharacterEffect): Float = when (effect) {
+        CharacterEffect.LOFI -> lofi
+        CharacterEffect.TREMOLO -> tremolo
+        CharacterEffect.ROTATE -> rotate
+        CharacterEffect.ECHO -> echo
+    }
+
+    fun with(effect: CharacterEffect, value: Float): AudioFxState = when (effect) {
+        CharacterEffect.LOFI -> copy(lofi = value)
+        CharacterEffect.TREMOLO -> copy(tremolo = value)
+        CharacterEffect.ROTATE -> copy(rotate = value)
+        CharacterEffect.ECHO -> copy(echo = value)
+    }
+
     /** Media3 wants a frequency ratio, not semitones. */
     val pitchRatio: Float get() = 2f.pow(pitchSemitones / 12f)
 
     val isDefault: Boolean
-        get() = speed == 1f && pitchSemitones == 0f && !reverbEnabled && !eqEnabled && !Overdrive.active(drive)
+        get() = speed == 1f && pitchSemitones == 0f && !reverbEnabled && !eqEnabled &&
+            listOf(drive, lofi, tremolo, rotate, echo).none { CharacterFx.on(it) }
 
     /** Compact text for saving against one song: seven numbers, a bar, ten bands. */
     fun encode(): String = listOf(
         speed, pitchSemitones, if (reverbEnabled) 1f else 0f,
-        reverbRoom.ordinal.toFloat(), reverbAmount, if (eqEnabled) 1f else 0f, drive
+        reverbRoom.ordinal.toFloat(), reverbAmount, if (eqEnabled) 1f else 0f, drive,
+        lofi, tremolo, rotate, echo
     ).joinToString(",") + "|" + eqGains.joinToString(",")
 
     val speedLabel: String get() = "${(speed * 100).roundToInt() / 100f}×"
@@ -80,8 +101,8 @@ data class AudioFxState(
             if (halves.size != 2) return null
             val head = halves[0].split(',').mapNotNull { it.toFloatOrNull() }
             val gains = halves[1].split(',').mapNotNull { it.toFloatOrNull() }
-            // Six numbers before distortion was added, seven since.
-            if (head.size !in 6..7 || gains.size != 10) return null
+            // Six numbers before distortion, seven with it, eleven with lo-fi, tremolo, 8D and echo.
+            if (head.size !in 6..11 || gains.size != 10) return null
             return AudioFxState(
                 speed = head[0].coerceIn(MIN_SPEED, MAX_SPEED),
                 pitchSemitones = head[1].coerceIn(MIN_SEMITONES, MAX_SEMITONES),
@@ -90,7 +111,11 @@ data class AudioFxState(
                 reverbAmount = head[4].coerceIn(0f, 1f),
                 eqEnabled = head[5] > 0.5f,
                 eqGains = gains.map { it.coerceIn(-12f, 12f) },
-                drive = head.getOrElse(6) { 0f }.coerceIn(0f, 1f)
+                drive = head.getOrElse(6) { 0f }.coerceIn(0f, 1f),
+                lofi = head.getOrElse(7) { 0f }.coerceIn(0f, 1f),
+                tremolo = head.getOrElse(8) { 0f }.coerceIn(0f, 1f),
+                rotate = head.getOrElse(9) { 0f }.coerceIn(0f, 1f),
+                echo = head.getOrElse(10) { 0f }.coerceIn(0f, 1f)
             )
         }
 

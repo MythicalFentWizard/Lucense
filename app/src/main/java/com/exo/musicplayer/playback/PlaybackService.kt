@@ -304,7 +304,7 @@ class PlaybackService : MediaSessionService(), PlayerHost {
         val state = app.audioFx.state.value
         val id = deck.player.currentMediaItem?.trackId()
         val gain = if (app.prefs.levelling.value) levelGain(library[id]) else 1f
-        deck.tone.set(state.eqEnabled, state.eqGains, gain, state.drive)
+        deck.tone.set(state.eqEnabled, state.eqGains, gain, state.drive, state.lofi, state.tremolo, state.rotate, state.echo)
     }
 
     /**

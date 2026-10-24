@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.ui
 
+import com.exo.musicplayer.data.audio.CharacterEffect
+import com.exo.musicplayer.data.audio.CharacterFx
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -62,7 +64,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.audio.EffectPreset
-import com.exo.musicplayer.data.audio.Overdrive
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.RepeatMode
@@ -84,11 +85,29 @@ data class DesktopFxState(
     val eqEnabled: Boolean = false,
     val eqGains: List<Float> = List(10) { 0f },
     /** Distortion, 0 (off) to 1. */
-    val drive: Float = 0f
+    val drive: Float = 0f,
+    val lofi: Float = 0f,
+    val tremolo: Float = 0f,
+    val rotate: Float = 0f,
+    val echo: Float = 0f
 ) {
     val isDefault: Boolean
         get() = abs(speed - 1f) < 0.005f && abs(pitchSemitones) < 0.05f && !reverbEnabled && !eqEnabled &&
-            !Overdrive.active(drive)
+            listOf(drive, lofi, tremolo, rotate, echo).none { CharacterFx.on(it) }
+
+    fun amount(effect: CharacterEffect): Float = when (effect) {
+        CharacterEffect.LOFI -> lofi
+        CharacterEffect.TREMOLO -> tremolo
+        CharacterEffect.ROTATE -> rotate
+        CharacterEffect.ECHO -> echo
+    }
+
+    fun with(effect: CharacterEffect, value: Float): DesktopFxState = when (effect) {
+        CharacterEffect.LOFI -> copy(lofi = value)
+        CharacterEffect.TREMOLO -> copy(tremolo = value)
+        CharacterEffect.ROTATE -> copy(rotate = value)
+        CharacterEffect.ECHO -> copy(echo = value)
+    }
 
     /**
      * Maps a shared preset onto this platform's reverb model.
@@ -127,6 +146,8 @@ data class DesktopFxState(
 @Composable
 fun SidePanel(
     kind: SidePanelKind,
+    /** A narrow window's panel, so the page beside it keeps some room. */
+    narrow: Boolean = false,
     controller: DesktopController,
     track: DesktopTrack?,
     positionMs: Long,
@@ -134,7 +155,13 @@ fun SidePanel(
 ) {
     Box(
         Modifier
-            .width(if (kind == SidePanelKind.OUTPUT) 288.dp else 348.dp)
+            .width(
+                when {
+                    kind == SidePanelKind.OUTPUT -> if (narrow) 260.dp else 288.dp
+                    narrow -> 296.dp
+                    else -> 348.dp
+                }
+            )
             .fillMaxHeight()
             .then(
                 if (Glass.on) {
@@ -308,9 +335,9 @@ private fun EffectsControls(
     Text("Distortion", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
     Readout(
         "Drive",
-        if (Overdrive.active(fx.drive)) "${(fx.drive * 100).roundToInt()}%" else "off",
+        if (CharacterFx.on(fx.drive)) "${(fx.drive * 100).roundToInt()}%" else "off",
         when {
-            !Overdrive.active(fx.drive) -> "clean"
+            !CharacterFx.on(fx.drive) -> "clean"
             fx.drive < 0.3f -> "warm"
             fx.drive < 0.7f -> "crunchy"
             else -> "fuzz"
@@ -322,6 +349,23 @@ private fun EffectsControls(
         valueRange = 0f..1f,
         colors = sliderColours()
     )
+    Text(
+        "Grit without getting louder: the level is evened out to what went in.",
+        style = MaterialTheme.typography.labelSmall,
+        color = Palette.TextFaint
+    )
+
+    // More in the same spirit: each a slider, off at the left.
+    CharacterEffect.entries.forEach { effect ->
+        Spacer(Modifier.height(14.dp))
+        Readout(effect.label, effect.describe(fx.amount(effect)), effect.note)
+        Slider(
+            value = fx.amount(effect),
+            onValueChange = { onFx(fx.with(effect, it)) },
+            valueRange = 0f..1f,
+            colors = sliderColours()
+        )
+    }
 
     Spacer(Modifier.height(20.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {

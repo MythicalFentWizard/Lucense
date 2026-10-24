@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.material.icons.filled.Refresh
 import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -201,7 +202,7 @@ fun DownloadScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             }
             Spacer(Modifier.height(10.dp))
             controller.downloads.reversed().forEach { entry ->
-                DownloadRow(entry)
+                DownloadRow(entry) { controller.retryDownload(entry.id) }
                 Spacer(Modifier.height(8.dp))
             }
         }
@@ -284,7 +285,7 @@ private fun ToolChip(name: String, installed: Boolean, note: String) {
 }
 
 @Composable
-private fun DownloadRow(entry: DownloadEntry) {
+private fun DownloadRow(entry: DownloadEntry, onRetry: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -317,6 +318,15 @@ private fun DownloadRow(entry: DownloadEntry) {
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(10.dp))
+            // Its own retry, for an item that failed or a playlist that missed some.
+            if (entry.done && (entry.failed || entry.missed > 0)) {
+                GhostButton(
+                    if (entry.failed) "Retry" else "Retry the ${entry.missed} missed",
+                    icon = Icons.Default.Refresh,
+                    onClick = onRetry
+                )
+                Spacer(Modifier.width(10.dp))
+            }
             Text(
                 when {
                     // The reason is spelled out underneath; here it would squeeze the name out.

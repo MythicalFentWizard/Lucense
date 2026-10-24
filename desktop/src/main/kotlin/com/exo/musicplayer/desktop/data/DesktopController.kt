@@ -168,7 +168,11 @@ data class DownloadEntry(
     var done: Boolean = false,
     var failed: Boolean = false,
     var files: List<File> = emptyList(),
-    var note: String? = null
+    var note: String? = null,
+    /** The song it was asked for by name, when it was: kept so a retry asks the same way. */
+    val song: YouTubeLinkFinder.Wanted? = null,
+    /** A playlist's songs that weren't downloaded, for "Retry the missed". */
+    var missed: Int = 0
 )
 
 /** A duplicate set as the desktop sees it. */
@@ -705,7 +709,11 @@ class DesktopController(parent: CoroutineScope) {
             engine.effects.reverb.decay = value.reverbDecay
             engine.effects.equalizer.enabled = value.eqEnabled
             engine.effects.equalizer.setGains(value.eqGains)
-            engine.effects.drive = value.drive
+            engine.effects.character.drive = value.drive
+            engine.effects.character.lofi = value.lofi
+            engine.effects.character.tremolo = value.tremolo
+            engine.effects.character.rotate = value.rotate
+            engine.effects.character.echo = value.echo
         }
 
     private val volumeState = mutableStateOf(settings.volume)
@@ -1765,6 +1773,16 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Whether the fullscreen lyrics window is open. */
     var lyricsFullscreen by mutableStateOf(false)
+
+    private val lyricsOwnBackgroundState = mutableStateOf(settings.lyricsOwnBackground)
+
+    /** Fullscreen lyrics over your own background (wallpaper, background effect) instead of the cover. */
+    var lyricsOwnBackground: Boolean
+        get() = lyricsOwnBackgroundState.value
+        set(value) {
+            lyricsOwnBackgroundState.value = value
+            settings.lyricsOwnBackground = value
+        }
 
     fun nudgeLyrics(deltaMs: Long) {
         val track = engine.status.value.track ?: return
@@ -3269,10 +3287,11 @@ class DesktopController(parent: CoroutineScope) {
             val pending = downloadIds.toMutableSet()
             while (pending.isNotEmpty()) {
                 delay(2_000)
-                val finished = downloads.filter { it.id in pending && it.done }
+                // A failed one stays watched, since its Retry may yet bring it in.
+                val finished = downloads.filter { it.id in pending && it.done && !it.failed }
                 for (entry in finished) {
                     pending -= entry.id
-                    if (!entry.failed && entry.files.isNotEmpty()) {
+                    if (entry.files.isNotEmpty()) {
                         io { store.addToPlaylist(playlistId, entry.files.map { it.absolutePath }) }
                     }
                 }
@@ -3671,7 +3690,8 @@ class DesktopController(parent: CoroutineScope) {
         val entry = DownloadEntry(
             id = System.nanoTime(),
             target = url,
-            display = url
+            display = url,
+            song = song
         )
         synchronized(queueLock) { downloads = downloads + entry }
 
@@ -3852,6 +3872,7 @@ class DesktopController(parent: CoroutineScope) {
             it.percent = 1f
             it.files = saved.toList()
             it.failed = saved.isEmpty() && already == 0
+            it.missed = missed.size + untried
             it.status = buildString {
                 append("Saved ${saved.size} of ${songs.size}")
                 if (already > 0) append(", $already already downloaded")
@@ -4136,6 +4157,37 @@ class DesktopController(parent: CoroutineScope) {
     private fun update(id: Long, change: (DownloadEntry) -> Unit) = synchronized(queueLock) {
         downloads = downloads.map { entry ->
             if (entry.id != id) entry else entry.copy().also(change)
+        }
+    }
+
+    /**
+     * Tries one item of the queue again, in place: a song or a link that
+     * failed, or the songs a playlist missed (those it saved are skipped, so
+     * only the missed ones are fetched).
+     */
+    fun retryDownload(id: Long) {
+        val entry = synchronized(queueLock) { downloads.firstOrNull { it.id == id } } ?: return
+        if (!entry.done || !(entry.failed || entry.missed > 0)) return
+        if (!tools.ready) {
+            toolNote = "Install yt-dlp first — one click, about 12 MB."
+            return
+        }
+        update(id) {
+            it.done = false
+            it.failed = false
+            it.percent = 0f
+            it.status = "Waiting…"
+            it.note = null
+            it.missed = 0
+        }
+        scope.launch {
+            val fresh = synchronized(queueLock) { downloads.firstOrNull { it.id == id } } ?: return@launch
+            val song = entry.song
+            if (song != null) {
+                songSlots.withPermit { runDownload(fresh, entry.target, song) }
+            } else {
+                runDownload(fresh, entry.target, null)
+            }
         }
     }
 
@@ -5081,7 +5133,11 @@ private fun encodeFx(fx: DesktopFxState): String =
         fx.reverbMix,
         fx.reverbDecay,
         if (fx.eqEnabled) 1f else 0f,
-        fx.drive
+        fx.drive,
+        fx.lofi,
+        fx.tremolo,
+        fx.rotate,
+        fx.echo
     ).joinToString(",") + "|" + fx.eqGains.joinToString(",")
 
 /**
@@ -5093,7 +5149,8 @@ private fun decodeFx(text: String): DesktopFxState? {
     if (halves.size != 2) return null
     val head = halves[0].split(',').mapNotNull { it.toFloatOrNull() }
     val gains = halves[1].split(',').mapNotNull { it.toFloatOrNull() }
-    if (head.size !in 6..7 || gains.size != 10) return null
+    // Six numbers before distortion, seven with it, eleven with lo-fi, tremolo, 8D and echo.
+    if (head.size !in 6..11 || gains.size != 10) return null
     return DesktopFxState(
         speed = head[0],
         pitchSemitones = head[1],
@@ -5102,7 +5159,11 @@ private fun decodeFx(text: String): DesktopFxState? {
         reverbDecay = head[4],
         eqEnabled = head[5] > 0.5f,
         eqGains = gains,
-        drive = head.getOrElse(6) { 0f }.coerceIn(0f, 1f)
+        drive = head.getOrElse(6) { 0f }.coerceIn(0f, 1f),
+        lofi = head.getOrElse(7) { 0f }.coerceIn(0f, 1f),
+        tremolo = head.getOrElse(8) { 0f }.coerceIn(0f, 1f),
+        rotate = head.getOrElse(9) { 0f }.coerceIn(0f, 1f),
+        echo = head.getOrElse(10) { 0f }.coerceIn(0f, 1f)
     )
 }
 

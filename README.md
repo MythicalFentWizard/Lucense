@@ -82,7 +82,8 @@ empty, you can paste them in yourself. Timed lyrics that run early or late can
 be moved a quarter-second at a time, and each song keeps its own setting.
 *Translate* puts the lyrics in your language under each line, the text can be
 selected and copied, and *Fullscreen* shows just the lyrics, big, over the
-song's blurred cover. You choose what gets searched for: the tags
+song's blurred cover or over your own background (your wallpaper and moving
+background). You choose what gets searched for: the tags
 as they are, a tidied title with `(Official Video)`, `[HD]` and `feat. …`
 stripped, the title alone, the file name, or your own pattern.
 
@@ -130,6 +131,10 @@ on Android, YouTube's own sign-in page inside the app, or a cookies.txt file.
 It's optional and stays on your device. YouTube can flag accounts that download
 a lot, so a spare account is safer.
 
+**A failed download can be retried** (Windows): each item in the queue has its
+own *Retry*, and a playlist that missed some songs has *Retry the missed*, which
+fetches only those.
+
 **Downloads can use their own proxy.** It's in Settings → Downloads on both
 apps. If your VPN app also runs a local proxy (v2rayNG and Hiddify listen on
 `127.0.0.1:10808`), point that at a cleaner server. On Android only downloads
@@ -157,7 +162,9 @@ go through it; on Windows the setting covers everything the app does online.
   killed the app, and headphone or lock-screen *play* picks up from there.
 - **Sleep timer:** 15 to 90 minutes, or *when this song ends*. It fades out over
   the last half minute instead of cutting off mid-bar.
-- **Effects:** speed, pitch, distortion, reverb and EQ, all combinable, with a spectrum meter.
+- **Effects:** speed, pitch, distortion, lo-fi, tremolo, 8D, echo, reverb and EQ,
+  all combinable, with a spectrum meter. Distortion adds grit without getting
+  louder: the level is evened out to what went in.
   *Remember for this song* brings a setting back whenever that song plays.
 - **More than one output at once:** several devices play the same audio, exactly
   in step on Windows. Android has no real way to do this, so there it's marked
@@ -281,7 +288,13 @@ file said before anything touched it.
   with rounder controls and lit edges.
 - **Its own window frame** (Windows): no Windows title bar or border. Drag the
   strip along the top to move it, double-click to maximise; Windows 11 rounds
-  the corners.
+  the corners. Drag it to the left or right edge for half the screen, a corner
+  for a quarter, or the top to maximise, with an outline where it will go.
+- **Any window size** (Windows): on a smaller window the sidebar becomes icons,
+  the side panel narrows and the buttons fold down, rather than everything
+  shrinking.
+- **Long lists scroll like Windows ones** (Windows): the song list has a
+  scrollbar, and middle-click scrolling as in a browser.
 - **Backgrounds and wallpaper:** stars, aurora, fireflies, snow, a scrolling graph
   of the song, or visuals that move with the music, on both apps. You can set
   your own picture behind them.
