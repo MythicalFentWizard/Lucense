@@ -62,7 +62,7 @@ on Windows.
 | **Type an artist** | see which genres they are, their most played songs, their releases with dates, and who is similar. |
 | **New from your artists** | what the artists already in your library put out in the last four months. |
 | **You might like** | artists similar to yours that you don't have. |
-| **Your YouTube** (Windows) | the songs among what YouTube suggests to the account you signed in with: its home page read, the songs kept and the rest left out. They preview, stream and download as Identify's YouTube results do, and YouTube's Mixes open to their songs. |
+| **Your YouTube** (Windows) | the songs among what YouTube suggests to the account you signed in with: its home page read, the songs kept and the rest left out. They preview, stream and download as Identify's YouTube results do, and YouTube's Mixes open to their songs. The first songs are looked up ahead while you read the list, so most start as soon as you press them. |
 | **Charts** | what is played most right now, overall or by broad genre. |
 | **Surprise me** | a random genre with someone in it. |
 
@@ -131,9 +131,11 @@ another server. Nothing is fetched from anywhere else instead.
 **Or sign in to YouTube.** When YouTube refuses your VPN's address with
 "confirm you're not a bot", downloads can go as your YouTube account instead.
 On Windows, *Sign in here* opens your default browser in a window of its own,
-apart from your usual one: sign in once and Lucense keeps that sign-in. Nothing
-you browse with touches it, so YouTube doesn't cycle it out the way it does a
-browser's in daily use. It can also copy
+apart from your usual one: sign in to YouTube there, close the window (or press
+*Done*), and Lucense keeps that sign-in. The window is the browser as you'd start
+it yourself, so Google's sign-in doesn't turn it away. Nothing you browse with
+touches the sign-in, so YouTube doesn't cycle it out the way it does a browser's
+in daily use, and Lucense keeps up with the cookies YouTube renews as it goes. It can also copy
 the sign-in of a browser you're signed in with, and renew the copy every few
 days and whenever YouTube stops taking it, or use a cookies.txt file. On
 Android it's YouTube's own sign-in page inside the app, or a cookies.txt file.
@@ -504,6 +506,13 @@ move faster than this project does.
 | [ffmpeg](https://github.com/yt-dlp/FFmpeg-Builds) | GPL-3.0 | MP3 conversion, audio out of video, repairing files |
 | [spotdl](https://github.com/spotDL/spotify-downloader) | MIT | Spotify links |
 | [QuickJS-NG](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript engine yt-dlp asks for with YouTube |
+
+yt-dlp also gets a small plugin of Lucense's own,
+[`lucense_solver.py`](desktop/src/main/resources/yt-dlp/lucense_solver.py): yt-dlp's
+QuickJS solver with its cache of prepared YouTube players switched on, which
+yt-dlp ships switched off. Preparing the player took QuickJS about five seconds
+of every preview and download; kept, it takes a third of a second. If a yt-dlp
+update ever breaks the plugin, yt-dlp's own solver takes over.
 
 The Windows installer redistributes an unmodified upstream **GPL** ffmpeg build.
 If you redistribute the installer, that binary carries GPL-3.0 terms with it —
