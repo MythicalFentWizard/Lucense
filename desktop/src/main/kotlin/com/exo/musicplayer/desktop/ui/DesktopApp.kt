@@ -327,7 +327,7 @@ fun DesktopApp(
                             destination == Destination.PLAYLISTS ->
                                 PlaylistsScreen(controller, onPickPlaylistFile)
                             destination == Destination.DISCOVER ->
-                                DiscoverScreen(controller) { destination = Destination.IDENTIFY }
+                                DiscoverScreen(controller, onOpenSignIn = { destination = Destination.DOWNLOAD }) { destination = Destination.IDENTIFY }
                             destination == Destination.IDENTIFY ->
                                 IdentifyScreen(controller, onChooseMedia)
                             destination == Destination.MOODS -> MoodsScreen(controller)

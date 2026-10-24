@@ -24,6 +24,14 @@ sealed interface DiscoverPage {
     data object Charts : DiscoverPage
 }
 
+/** The two halves of Discover's first page. */
+enum class DiscoverTab(val label: String) {
+    /** Genres, charts, what's new from the library's artists. */
+    EXPLORE("Explore"),
+    /** The songs among what YouTube suggests to the signed-in account. */
+    YOUTUBE("Your YouTube")
+}
+
 /** A genre's page as far as it has loaded. */
 data class GenreState(
     val page: GenrePage? = null,
@@ -90,9 +98,11 @@ data class LibraryView(
     /** The library's genres that are genres here too, the most songs first. */
     val genres: List<String> = emptyList()
 ) {
-    fun owns(track: DiscoverTrack): Boolean {
-        val artists = titles[Discovery.titleKey(track.title)] ?: return false
-        val wanted = Discovery.plain(track.artist)
+    fun owns(track: DiscoverTrack): Boolean = owns(track.title, track.artist)
+
+    fun owns(title: String, artist: String?): Boolean {
+        val artists = titles[Discovery.titleKey(title)] ?: return false
+        val wanted = Discovery.plain(artist.orEmpty())
         return artists.any { it.isEmpty() || wanted.isEmpty() || it.contains(wanted) || wanted.contains(it) }
     }
 }
@@ -114,6 +124,14 @@ class DiscoverBrowser(private val scope: CoroutineScope, private val discovery: 
 
     private val _stack = MutableStateFlow<List<DiscoverPage>>(listOf(DiscoverPage.Home))
     val stack: StateFlow<List<DiscoverPage>> = _stack.asStateFlow()
+
+    /** Which half of the first page is showing; kept while pages open over it and close again. */
+    private val _tab = MutableStateFlow(DiscoverTab.EXPLORE)
+    val tab: StateFlow<DiscoverTab> = _tab.asStateFlow()
+
+    fun setTab(tab: DiscoverTab) {
+        _tab.value = tab
+    }
 
     private val _genres = MutableStateFlow<List<String>>(emptyList())
     val genres: StateFlow<List<String>> = _genres.asStateFlow()

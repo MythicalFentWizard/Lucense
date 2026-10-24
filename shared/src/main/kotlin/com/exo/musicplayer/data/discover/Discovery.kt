@@ -337,6 +337,35 @@ class Discovery(cacheDir: File?) {
             .take(40)
     }
 
+    // ---- Songs by name ---------------------------------------------------------
+
+    /**
+     * The song by [artist] called [title], if Deezer has it: for telling a
+     * song among other videos, and for its cover. Both have to match - the
+     * title without its brackets, the artist as one of the credited ones -
+     * because a title alone ("Home", "Intro") is everybody's.
+     */
+    suspend fun song(artist: String, title: String): DiscoverTrack? {
+        val wantTitle = titleKey(title)
+        val wantArtist = squash(artist)
+        if (wantTitle.isEmpty() || wantArtist.length < 2) return null
+        return deezerJson("/search/track?limit=15&q=" + encode("$artist $title"), DAY)
+            ?.optJSONArray("data").objects()
+            .map(::trackOf)
+            .firstOrNull { sameSong(it, wantArtist, wantTitle) }
+    }
+
+    private fun sameSong(track: DiscoverTrack, wantArtist: String, wantTitle: String): Boolean {
+        val title = titleKey(track.title)
+        val titled = title == wantTitle ||
+            (minOf(title.length, wantTitle.length) >= 4 && (title.contains(wantTitle) || wantTitle.contains(title)))
+        if (!titled) return false
+        val credited = listOf(track.artist) + split(track.artist)
+        return credited.map(::squash).any { name ->
+            name.length >= 2 && (name == wantArtist || wantArtist.contains(name) || name.contains(wantArtist))
+        }
+    }
+
     // ---- Charts ----------------------------------------------------------------
 
     /** The broad genres Deezer keeps a chart for: id and name, "All" first. */
@@ -454,6 +483,9 @@ class Discovery(cacheDir: File?) {
         fun plain(text: String): String =
             Normalizer.normalize(text, Normalizer.Form.NFD).replace(MARKS, "")
                 .lowercase(Locale.ROOT).replace(NOT_WORD, " ").trim()
+
+        /** [plain] without its spaces, for names written together: "TaylorSwift", "Taylor Swift". */
+        fun squash(text: String): String = plain(text).replace(" ", "")
 
         /** The people named in an artist field that names several. */
         fun split(field: String): List<String> =

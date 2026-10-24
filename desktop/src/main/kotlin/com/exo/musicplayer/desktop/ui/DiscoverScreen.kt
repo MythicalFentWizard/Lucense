@@ -78,9 +78,20 @@ import com.exo.musicplayer.data.discover.LibrarySong
 import com.exo.musicplayer.data.discover.LibraryView
 import com.exo.musicplayer.data.discover.ReleaseState
 import com.exo.musicplayer.data.youtube.PreviewLabel
+import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
+import com.exo.musicplayer.data.youtube.YouTubeVideo
+import com.exo.musicplayer.data.discover.YouTubeForYou
+import com.exo.musicplayer.data.discover.MixState
+import com.exo.musicplayer.data.discover.ForYouStage
+import com.exo.musicplayer.data.discover.ForYouItem
+import com.exo.musicplayer.data.discover.DiscoverTab
+import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.PlayCircle
 import com.exo.musicplayer.data.youtube.PreviewState
 import com.exo.musicplayer.data.youtube.YouTubeFormat
 import com.exo.musicplayer.desktop.data.DesktopController
+import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import kotlinx.coroutines.delay
 
 /** What every row on the page draws itself from. */
@@ -130,9 +141,10 @@ private class Shared(
  * wide window.
  */
 @Composable
-fun DiscoverScreen(controller: DesktopController, onOpenIdentify: () -> Unit) {
+fun DiscoverScreen(controller: DesktopController, onOpenSignIn: () -> Unit = {}, onOpenIdentify: () -> Unit) {
     val browser = controller.discover
     val stack by browser.stack.collectAsState()
+    val tab by browser.tab.collectAsState()
     val genres by browser.genres.collectAsState()
     val library by browser.library.collectAsState()
     val samples by browser.samples.collectAsState()
@@ -163,9 +175,18 @@ fun DiscoverScreen(controller: DesktopController, onOpenIdentify: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
         }
-        holder.SaveableStateProvider("${stack.size}:$page".take(160)) {
+        if (page == DiscoverPage.Home) {
+            SegmentedRow(
+                options = DiscoverTab.entries,
+                selected = tab,
+                label = { it.label },
+                onSelect = browser::setTab
+            )
+            Spacer(Modifier.height(12.dp))
+        }
+        holder.SaveableStateProvider((if (page == DiscoverPage.Home) "home:$tab" else "${stack.size}:$page").take(160)) {
             when (page) {
-                DiscoverPage.Home -> HomePage(genres, shared)
+                DiscoverPage.Home -> if (tab == DiscoverTab.YOUTUBE) ForYouPage(shared, onOpenSignIn) else HomePage(genres, shared)
                 is DiscoverPage.Genres -> GenresPage(page, genres, shared)
                 is DiscoverPage.Genre -> GenrePage(page.name, shared)
                 is DiscoverPage.Artist -> ArtistPage(page.artist, shared)
@@ -344,6 +365,296 @@ private fun HomePage(genres: List<String>, shared: Shared) {
             }
         }
         item(key = "end") { Spacer(Modifier.height(10.dp)) }
+    }
+}
+
+// ---- Your YouTube -----------------------------------------------------------------
+
+/**
+ * The songs among what YouTube suggests to the signed-in account: read from
+ * its home page, sorted from the other videos ([YouTubeForYou]). Each can be
+ * heard, streamed with the rest, or downloaded as the video it is; what was
+ * left out is a click away, with why.
+ */
+@Composable
+private fun ForYouPage(shared: Shared, onOpenSignIn: () -> Unit) {
+    val controller = shared.controller
+    val forYou = controller.forYou
+    val state by forYou.state.collectAsState()
+    val mixes by forYou.mixes.collectAsState()
+    var showOthers by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { forYou.open() }
+    val songs = state.songs
+    val others = state.others
+
+    LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        item(key = "fy-head") {
+            Panel(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        SectionTitle("From your YouTube")
+                        Hint(
+                            "The songs among what YouTube suggests to the account you signed in with. " +
+                                "Each time it is read YouTube suggests something new."
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    if (songs.isNotEmpty()) {
+                        GhostButton("Stream all ${songs.size}", icon = Icons.Default.PlayCircle) { controller.streamForYou(songs) }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    GhostButton(
+                        if (state.busy) "Reading…" else "Look again",
+                        icon = Icons.Default.Refresh,
+                        enabled = !state.busy && !state.signedOut
+                    ) { forYou.refresh() }
+                }
+                when (state.stage) {
+                    ForYouStage.READING -> {
+                        Spacer(Modifier.height(6.dp))
+                        Busy("Reading your YouTube home page…")
+                    }
+                    ForYouStage.CHECKING -> {
+                        Spacer(Modifier.height(8.dp))
+                        val total = state.items.size
+                        Hint("Telling songs from the other videos… ${total - state.checking} of $total")
+                        Spacer(Modifier.height(6.dp))
+                        ThinProgress(if (total > 0) (total - state.checking).toFloat() / total else null)
+                    }
+                    else -> Unit
+                }
+                if (state.signedOut) {
+                    Spacer(Modifier.height(10.dp))
+                    Hint(YouTubeForYou.SIGNED_OUT)
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Straight to a window of its own; the Download page shows how it goes.
+                        AccentButton("Sign in to YouTube", icon = Icons.Default.Login) {
+                            controller.youtubeSignIn = YouTubeSignIn.Source.OWN
+                            controller.signInHere()
+                            onOpenSignIn()
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        GhostButton("Other ways to sign in…") { onOpenSignIn() }
+                    }
+                }
+                state.problem?.let { problem ->
+                    Spacer(Modifier.height(10.dp))
+                    Hint(problem)
+                    Spacer(Modifier.height(8.dp))
+                    Row {
+                        GhostButton("Try again", icon = Icons.Default.Refresh, enabled = !state.busy) { forYou.refresh() }
+                        Spacer(Modifier.width(8.dp))
+                        GhostButton("YouTube sign-in…") { onOpenSignIn() }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
+        if (songs.isNotEmpty()) {
+            item(key = "fy-songs") {
+                Label("Songs", "${songs.size} of the ${state.items.size} videos suggested" + if (state.checking > 0) ", still checking" else "")
+            }
+            itemsIndexed(songs, key = { _, item -> "fy-${item.video.id}" }) { _, item ->
+                ForYouRow(item, shared, leftOut = false)
+            }
+        } else if (state.stage == ForYouStage.DONE && state.items.isNotEmpty()) {
+            item(key = "fy-none") {
+                Hint("None of what YouTube suggested this time is a song. Look again for another set.", Modifier.padding(8.dp))
+            }
+        }
+
+        if (state.mixes.isNotEmpty()) {
+            item(key = "fy-mixes") {
+                Spacer(Modifier.height(10.dp))
+                Label("Mixes YouTube made", "lists it keeps going, around a song or your taste")
+            }
+            state.mixes.forEach { mix ->
+                item(key = "fy-mix-${mix.id}") { MixRow(mix, mixes[mix.id], shared) }
+                mixes[mix.id]?.songs?.let { inMix ->
+                    items(inMix, key = { "fy-mix-${mix.id}-${it.video.id}" }) { item ->
+                        Box(Modifier.padding(start = 28.dp)) { ForYouRow(item, shared, leftOut = false) }
+                    }
+                }
+            }
+        }
+
+        if (others.isNotEmpty()) {
+            item(key = "fy-others") {
+                Spacer(Modifier.height(10.dp))
+                GhostButton(
+                    if (showOthers) "Hide the other ${others.size} videos" else "Show the other ${others.size} videos, and why they were left out"
+                ) { showOthers = !showOthers }
+            }
+            if (showOthers) {
+                items(others, key = { "fy-other-${it.video.id}" }) { item -> ForYouRow(item, shared, leftOut = true) }
+            }
+        }
+        item(key = "fy-end") { Spacer(Modifier.height(20.dp)) }
+    }
+}
+
+/**
+ * A suggested video: its thumbnail plays it in the small player, the arrow
+ * downloads it. One left out says why, quietly, and can be had all the same.
+ */
+@Composable
+private fun ForYouRow(item: ForYouItem, shared: Shared, leftOut: Boolean) {
+    val controller = shared.controller
+    val video = item.video
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val previewing = shared.preview.videoId == video.id
+    val owned = remember(video.id, shared.library) { !leftOut && shared.library.owns(item.title, item.artist) }
+    val entry = controller.forYouDownload(video)
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (hovered || previewing) Palette.Hover else Color.Transparent)
+            .hoverable(interaction)
+            .clickable { controller.previewForYou(item) }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.width(75.dp).height(42.dp).clip(RoundedCornerShape(6.dp))) {
+            RemoteImage(video.thumbnail(YouTubeVideo.ThumbSize.SMALL), Modifier.fillMaxSize(), corner = 6.dp)
+            if (previewing || hovered) {
+                Box(Modifier.fillMaxSize().background(Color(0x88000000)), contentAlignment = Alignment.Center) {
+                    if (previewing && shared.preview.loading) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            if (previewing && shared.preview.playing) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            null,
+                            Modifier.size(22.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (leftOut) video.title else item.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = when {
+                    previewing -> Palette.Accent
+                    leftOut -> Palette.TextDim
+                    else -> Palette.Text
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val failed = previewing && shared.preview.error != null
+            val note = when {
+                failed -> "It couldn't be played"
+                previewing && shared.preview.loading -> "Finding it on YouTube…"
+                entry != null && !entry.done -> entry.status.lineSequence().firstOrNull().orEmpty()
+                entry != null && entry.failed -> entry.status.lineSequence().firstOrNull().orEmpty()
+                leftOut -> "${video.channel} · left out: ${item.why}"
+                else -> listOfNotNull(
+                    item.artist,
+                    when {
+                        entry != null && entry.done -> "downloaded"
+                        owned -> "in your library"
+                        else -> null
+                    }
+                ).joinToString(" · ")
+            }
+            if (note.isNotEmpty()) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (failed || entry?.failed == true) Palette.Accent else if (leftOut) Palette.TextFaint else Palette.TextDim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            video.durationSeconds?.let(YouTubeFormat::duration).orEmpty(),
+            style = MaterialTheme.typography.labelMedium,
+            color = Palette.TextFaint
+        )
+        Spacer(Modifier.width(8.dp))
+        val artist = item.artist
+        if (!leftOut && artist != null && hovered) {
+            IconAction(Icons.Default.Person, "Go to $artist", Palette.TextDim) {
+                shared.browser.openArtist(DiscoverArtist(artist))
+            }
+        }
+        when {
+            entry != null && !entry.done -> Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                if (entry.percent > 0f) {
+                    CircularProgressIndicator(
+                        progress = { entry.percent.coerceIn(0f, 1f) },
+                        modifier = Modifier.size(18.dp),
+                        color = Palette.Accent,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = Palette.Accent, strokeWidth = 2.dp)
+                }
+            }
+            entry != null && entry.failed ->
+                IconAction(Icons.Default.ErrorOutline, "Try the download again", Palette.Accent) { controller.downloadForYou(video) }
+            entry != null || owned -> Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.CheckCircle, "In your library", Modifier.size(18.dp), tint = Palette.Accent)
+            }
+            else -> IconAction(Icons.Default.Download, "Download", if (leftOut) Palette.TextFaint else Palette.Text) {
+                controller.downloadForYou(video)
+            }
+        }
+    }
+}
+
+/** A mix YouTube made: open it to see its songs, or stream them all. */
+@Composable
+private fun MixRow(mix: YtDlpFlatSearch.Mix, opened: MixState?, shared: Shared) {
+    val controller = shared.controller
+    val forYou = controller.forYou
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (hovered) Palette.Hover else Color.Transparent)
+            .hoverable(interaction)
+            .clickable { if (opened == null) forYou.openMix(mix) else forYou.closeMix(mix) }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(6.dp)).background(Palette.Hover), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Radio, null, Modifier.size(20.dp), tint = Palette.Accent)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(mix.title, style = MaterialTheme.typography.bodyMedium, color = Palette.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                when {
+                    opened == null -> "Click to see its songs"
+                    opened.loading -> "Reading the mix…"
+                    opened.problem != null -> opened.problem!!
+                    else -> "${opened.songs.size} songs · click to fold away"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = Palette.TextDim,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        val songs = opened?.songs.orEmpty()
+        if (songs.isNotEmpty()) {
+            GhostButton("Stream it", icon = Icons.Default.PlayCircle) { controller.streamForYou(songs, name = mix.title) }
+        } else if (opened?.loading == true) {
+            CircularProgressIndicator(Modifier.size(16.dp), color = Palette.Accent, strokeWidth = 2.dp)
+        }
     }
 }
 

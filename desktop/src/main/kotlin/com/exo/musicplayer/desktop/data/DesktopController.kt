@@ -1,6 +1,7 @@
 package com.exo.musicplayer.desktop.data
 
 import com.exo.musicplayer.desktop.ui.Glass
+import com.exo.musicplayer.desktop.download.OwnSignIn
 import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import com.exo.musicplayer.data.playlist.ParsedPlaylist
 import com.exo.musicplayer.data.youtube.StreamResolver
@@ -83,6 +84,9 @@ import kotlinx.coroutines.sync.Semaphore
 import com.exo.musicplayer.data.discover.Discovery
 import com.exo.musicplayer.data.discover.DiscoverTrack
 import com.exo.musicplayer.data.discover.DiscoverBrowser
+import com.exo.musicplayer.data.youtube.StreamItem
+import com.exo.musicplayer.data.discover.ForYouItem
+import com.exo.musicplayer.data.discover.YouTubeForYou
 import com.exo.musicplayer.desktop.audio.SongGraph
 import com.exo.musicplayer.desktop.download.DesktopYouTubeBackend
 import com.exo.musicplayer.desktop.audio.PlaybackEngine
@@ -2211,7 +2215,69 @@ class DesktopController(parent: CoroutineScope) {
     // what the desktop adds: its preview player, its downloader, and which
     // download each song turned into, so a row can show how its own is going.
 
-    val discover = DiscoverBrowser(scope, Discovery(File(AppDirs.root, "discover")))
+    private val discovery = Discovery(File(AppDirs.root, "discover"))
+
+    val discover = DiscoverBrowser(scope, discovery)
+
+    /**
+     * Discover's "Your YouTube": the songs among what YouTube suggests to the
+     * account yt-dlp signs in with. Read when the tab is first opened.
+     */
+    val forYou = YouTubeForYou(
+        scope = scope,
+        discovery = discovery,
+        signedIn = { YouTubeSignIn.active },
+        read = read@{
+            if (!tools.ready) return@read null to "Install yt-dlp first; it reads YouTube's home page."
+            val (feed, error) = youtubeBackend.homeFeed(YouTubeForYou.LIMIT)
+            feed to error?.let { line ->
+                if (YouTubeTrouble.refused(line)) YouTubeTrouble.explain(line) else YouTubeSignIn.explain(line, youtubeSignIn)
+            }
+        },
+        readMix = { url ->
+            val (playlist, error) = youtubeBackend.playlist(url)
+            playlist?.songs to error?.let(YouTubeTrouble::explain)
+        }
+    )
+
+    /** A suggested song heard through the small player, named as the tab names it. */
+    fun previewForYou(item: ForYouItem) = hear(
+        item.video.id,
+        PreviewLabel(item.title, item.artist ?: item.video.channel, item.coverUrl ?: item.video.thumbnail(YouTubeVideo.ThumbSize.SMALL))
+    ) { id -> youtubeBackend.audioStreamUrl(id, downloadQuality) }
+
+    /** Suggested songs streamed one after another, from [start]. */
+    fun streamForYou(items: List<ForYouItem>, start: Int = 0, name: String = "Your YouTube") {
+        stream(
+            StreamQueue(
+                name,
+                items.map { item ->
+                    StreamItem(
+                        title = item.title,
+                        artist = item.artist,
+                        link = item.video.watchUrl,
+                        durationMs = (item.video.durationSeconds ?: 0) * 1000L,
+                        artworkUrl = item.coverUrl ?: item.video.thumbnail(YouTubeVideo.ThumbSize.SMALL)
+                    )
+                },
+                index = start.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+            )
+        )
+    }
+
+    /** Which download each suggested video turned into, by video id. */
+    private val forYouDownloads = mutableStateMapOf<String, Long>()
+
+    /** The video itself, as it was suggested, tagged the way any YouTube download is. */
+    fun downloadForYou(video: YouTubeVideo) {
+        queueDownload(video.watchUrl, song = null)?.let { forYouDownloads[video.id] = it }
+    }
+
+    /** How a suggested video's download is going, or null if it was never asked for. */
+    fun forYouDownload(video: YouTubeVideo): DownloadEntry? {
+        val id = forYouDownloads[video.id] ?: return null
+        return downloads.firstOrNull { it.id == id }
+    }
 
     /** The download each Discover song was sent to, by the song's Deezer id. */
     private val discoverDownloads = mutableStateMapOf<Long, Long>()
@@ -3481,6 +3547,7 @@ class DesktopController(parent: CoroutineScope) {
             settings.youtubeSignIn = value.name
             YouTubeSignIn.source = value
             signInNote = null
+            signInKeptAt = keptAtFor(value)
         }
 
     /** The cookies.txt file, when that is the sign-in. */
@@ -3499,9 +3566,24 @@ class DesktopController(parent: CoroutineScope) {
     var checkingSignIn by mutableStateOf(false)
         private set
 
-    /** Asks YouTube for a page only a signed-in account sees, with the sign-in as it is set. */
+    /** When the kept sign-in was made or last renewed, for the panel; null when there is none for the chosen source. */
+    var signInKeptAt by mutableStateOf(keptAtFor(signInState.value))
+        private set
+
+    private fun keptAtFor(chosen: YouTubeSignIn.Source): Long? =
+        YouTubeSignIn.keptAt()?.takeIf { YouTubeSignIn.keptSource() == chosen }
+
+    /** A sign-in window is open, waiting for the account. */
+    var signingIn by mutableStateOf(false)
+        private set
+
+    /**
+     * Asks YouTube for a page only a signed-in account sees, with the sign-in
+     * as it is set. For a browser, the same run makes Lucense's copy of its
+     * sign-in, so this is also how the copy is renewed by hand.
+     */
     fun checkYouTubeSignIn() {
-        if (checkingSignIn) return
+        if (checkingSignIn || signingIn) return
         val chosen = youtubeSignIn
         if (chosen == YouTubeSignIn.Source.OFF) {
             signInNote = "Choose where the sign-in comes from first."
@@ -3511,30 +3593,116 @@ class DesktopController(parent: CoroutineScope) {
             signInNote = "Choose the cookies.txt file first."
             return
         }
-        val exe = ToolPaths.ytDlp
-        if (!exe.isFile) {
+        if (chosen == YouTubeSignIn.Source.OWN && !YouTubeSignIn.active) {
+            signInNote = "Sign in first."
+            return
+        }
+        if (!ToolPaths.ytDlp.isFile) {
             signInNote = "Install yt-dlp first."
             return
         }
         checkingSignIn = true
-        signInNote = "Checking with YouTube…"
+        signInNote = if (chosen.copied) "Copying ${chosen.label}'s sign-in and checking it with YouTube…" else "Checking with YouTube…"
         scope.launch {
-            val error = io {
-                runCatching {
-                    val process = ProcessBuilder(
-                        listOf(exe.absolutePath) + YouTubeSignIn.CHECK_ARGUMENTS +
-                            NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs()
-                    ).redirectErrorStream(false).also(NetworkProxy::configure).start()
-                    val drain = Thread { process.inputStream.use { it.readBytes() } }.apply { isDaemon = true; start() }
-                    val err = process.errorStream.bufferedReader().use { it.readText() }
-                    process.waitFor()
-                    drain.join(2_000)
-                    err.lineSequence().filter { it.trim().startsWith("ERROR") }.joinToString("\n")
-                }.getOrElse { "ERROR: ${it.message}" }
-            }
+            val error = if (chosen.copied) copySignIn(chosen) else runSignInCheck(YouTubeSignIn.ytDlpArgs())
             signInNote = YouTubeSignIn.explain(error, chosen)
+            signInKeptAt = keptAtFor(chosen)
             checkingSignIn = false
         }
+    }
+
+    /** yt-dlp's errors from asking for the check page with [signIn], or blank when it worked. */
+    private suspend fun runSignInCheck(signIn: List<String>): String = io {
+        runCatching {
+            val process = ProcessBuilder(
+                listOf(ToolPaths.ytDlp.absolutePath) + YouTubeSignIn.CHECK_ARGUMENTS + NetworkProxy.ytDlpArgs() + signIn
+            ).redirectErrorStream(false).also(NetworkProxy::configure).start()
+            val drain = Thread { process.inputStream.use { it.readBytes() } }.apply { isDaemon = true; start() }
+            val err = process.errorStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+            drain.join(2_000)
+            err.lineSequence().filter { it.trim().startsWith("ERROR") }.joinToString("\n")
+        }.getOrElse { "ERROR: ${it.message}" }
+    }
+
+    /**
+     * Copies [chosen]'s sign-in into Lucense's own file while checking it:
+     * yt-dlp reads the browser and writes everything it read into a scratch
+     * file, of which YouTube's and Google's cookies are kept and the rest
+     * deleted straight away. Blank when it worked.
+     */
+    private suspend fun copySignIn(chosen: YouTubeSignIn.Source): String {
+        val scratch = YouTubeSignIn.scratch()
+        return try {
+            val error = runSignInCheck(YouTubeSignIn.copyArguments(chosen, scratch))
+            when {
+                error.isNotBlank() -> error
+                !io { YouTubeSignIn.keep(scratch, chosen) } -> "ERROR: Login details are needed"
+                else -> ""
+            }
+        } finally {
+            io { scratch.delete() }
+        }
+    }
+
+    /**
+     * Renews a browser's copy without a word when it is due, or when YouTube
+     * has just refused a download - at most every half hour. If the browser
+     * holds its cookies locked just then, the copy there is kept and used.
+     */
+    private fun renewSignInQuietly(refused: Boolean = false) {
+        val chosen = youtubeSignIn
+        if (!chosen.copied || checkingSignIn || !ToolPaths.ytDlp.isFile) return
+        if (!refused && !YouTubeSignIn.needsRenewal()) return
+        val now = System.currentTimeMillis()
+        if (now - lastQuietRenewal < QUIET_RENEWAL_GAP_MS) return
+        lastQuietRenewal = now
+        scope.launch {
+            if (copySignIn(chosen).isBlank()) signInKeptAt = keptAtFor(chosen)
+        }
+    }
+
+    private var lastQuietRenewal = 0L
+
+    init {
+        // A copy past its time is renewed once Lucense is up, out of the way.
+        scope.launch {
+            delay(20_000)
+            renewSignInQuietly()
+        }
+    }
+
+    /** Opens a browser window of Lucense's own to sign in to YouTube once ([OwnSignIn]). */
+    fun signInHere() {
+        if (signingIn || checkingSignIn) return
+        signingIn = true
+        signInNote = "Opening a browser window…"
+        scope.launch {
+            val outcome = OwnSignIn.signIn(NetworkProxy.urlFor()) { status -> scope.launch { signInNote = status } }
+            signingIn = false
+            when (outcome) {
+                OwnSignIn.Outcome.Kept -> {
+                    signInKeptAt = keptAtFor(YouTubeSignIn.Source.OWN)
+                    signInNote = "Signed in. Checking with YouTube…"
+                    checkingSignIn = true
+                    val error = runSignInCheck(YouTubeSignIn.ytDlpArgs())
+                    signInNote = YouTubeSignIn.explain(error, YouTubeSignIn.Source.OWN)
+                    checkingSignIn = false
+                }
+                OwnSignIn.Outcome.Stopped -> signInNote = "The window was closed before signing in; nothing was kept."
+                is OwnSignIn.Outcome.Failed -> signInNote = outcome.why
+            }
+        }
+    }
+
+    /** Closes a sign-in window that is still waiting. */
+    fun stopSigningIn() = OwnSignIn.stop()
+
+    /** Forgets the kept sign-in: Lucense's copy is deleted, and downloads go signed out. */
+    fun forgetYouTubeSignIn() {
+        YouTubeSignIn.forget()
+        signInKeptAt = null
+        signInNote = "Signed out: Lucense's copy of the sign-in is deleted."
     }
 
     private val embedArtState = mutableStateOf(settings.downloadEmbedArt)
@@ -3649,6 +3817,9 @@ class DesktopController(parent: CoroutineScope) {
     )
 
     private companion object {
+        /** A browser's sign-in is copied quietly at most this often. */
+        const val QUIET_RENEWAL_GAP_MS = 30L * 60 * 1000
+
         /** YouTube refusals in a row before a playlist stops asking it. */
         const val REFUSALS_BEFORE_GIVING_UP = 5
 
@@ -3729,7 +3900,10 @@ class DesktopController(parent: CoroutineScope) {
             quality = downloadQuality,
             cutNonMusic = downloadCutNonMusic,
             onProgress = { progress ->
-                if (YouTubeTrouble.refused(progress.line)) refused = true
+                if (YouTubeTrouble.refused(progress.line) && !refused) {
+                    refused = true
+                    renewSignInQuietly(refused = true)
+                }
                 if (progress.line.startsWith("ERROR")) said = progress.line
                 onProgress(progress)
             }

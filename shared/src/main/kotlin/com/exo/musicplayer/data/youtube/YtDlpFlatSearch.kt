@@ -68,6 +68,48 @@ object YtDlpFlatSearch {
     private val PLACEHOLDERS = setOf("[Private video]", "[Deleted video]", "")
 
     /**
+     * YouTube's home page as the signed-in account sees it: what its
+     * recommendations put there. Signed out it is empty - YouTube suggests
+     * nothing to someone it doesn't know.
+     */
+    const val HOME_FEED = ":ytrec"
+
+    /** Arguments for reading the home page, as far as its first [limit] suggestions. */
+    fun feedArguments(limit: Int): List<String> = PLAYLIST_ARGUMENTS + listOf("--playlist-end", "$limit")
+
+    /** A mix YouTube made: a list it keeps going, around a song or the account's taste. */
+    data class Mix(val id: String, val title: String) {
+        val url: String get() = "https://www.youtube.com/playlist?list=$id"
+    }
+
+    /** What the home page suggested: videos and Shorts, and the mixes among them. */
+    data class Feed(val videos: List<YouTubeVideo>, val mixes: List<Mix>)
+
+    /**
+     * Parses the home page's `-J` document. A video comes as a watch link, a
+     * Short as a shorts link, a mix as a playlist whose id starts "RD"; other
+     * playlists on the page are left out. Null when it isn't a feed at all.
+     */
+    fun parseFeed(json: String, source: String = "yt-dlp"): Feed? = runCatching {
+        val entries = JSONObject(json).optJSONArray("entries") ?: return null
+        val videos = ArrayList<YouTubeVideo>()
+        val mixes = ArrayList<Mix>()
+        for (index in 0 until entries.length()) {
+            val entry = entries.optJSONObject(index) ?: continue
+            val url = entry.optString("url")
+            val id = entry.optString("id")
+            if (entry.optString("ie_key") == "YoutubeTab" || "list=" in url) {
+                val title = entry.optString("title").takeIf { it.isNotBlank() && !entry.isNull("title") }
+                if (id.startsWith("RD") && title != null) mixes += Mix(id, title)
+                continue
+            }
+            val video = toVideo(entry, source) ?: continue
+            videos += if ("/shorts/" in url) video.copy(isShort = true) else video
+        }
+        Feed(videos.distinctBy { it.id }, mixes.distinctBy { it.id })
+    }.getOrNull()
+
+    /**
      * The search target. `ytsearchN:` is yt-dlp's own search scheme, so this
      * takes the same code path as any other URL it is handed.
      */
