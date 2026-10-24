@@ -120,6 +120,7 @@ compose.desktop {
                 "java.naming",      // required by java.sql
                 "java.prefs",       // settings live in the registry via Preferences
                 "jdk.crypto.ec",    // elliptic-curve TLS: most of the APIs need it
+                "java.net.http",    // WebSocket, to read the sign-in window's cookies
                 "jdk.unsupported"   // sun.misc.Unsafe, used by the audio SPIs
             )
             // Drives the MSI ProductVersion, which is the whole of Windows'

@@ -23,6 +23,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -411,28 +413,43 @@ private fun LogPanel(lines: List<String>) {
 
 /**
  * Downloads as the user's YouTube account, for when YouTube refuses the VPN's
- * address: the sign-in cookies of a browser, or of a cookies.txt file.
+ * address: a sign-in of Lucense's own, a browser's copied and renewed now and
+ * then, or a cookies.txt file.
  */
 @Composable
 private fun SignInPanel(controller: DesktopController) {
+    val chosen = controller.youtubeSignIn
     Panel(Modifier.fillMaxWidth()) {
         SectionTitle("YouTube account (optional)")
         Spacer(Modifier.height(4.dp))
         Hint(
             "If YouTube refuses downloads with \"confirm you're not a bot\", usually because of the VPN's " +
-                "address, yt-dlp can download as your YouTube account instead. It uses the sign-in of a " +
-                "browser you're signed in to YouTube with - Firefox works best, since Chrome and Edge lock " +
-                "their cookies away - or a cookies.txt file exported from one. Nothing leaves this PC except " +
-                "to YouTube. YouTube can flag accounts that download a lot, so a spare account is safer."
+                "address, yt-dlp can download as your YouTube account instead. Your YouTube suggestions in " +
+                "Discover come from it too. Nothing leaves this PC except to YouTube. YouTube can flag " +
+                "accounts that download a lot, so a spare account is safer."
         )
         Spacer(Modifier.height(10.dp))
         SegmentedRow(
             options = YouTubeSignIn.Source.entries,
-            selected = controller.youtubeSignIn,
+            selected = chosen,
             label = { it.label },
             onSelect = { controller.youtubeSignIn = it }
         )
-        if (controller.youtubeSignIn == YouTubeSignIn.Source.FILE) {
+        Spacer(Modifier.height(8.dp))
+        when {
+            chosen == YouTubeSignIn.Source.OWN -> Hint(
+                "Recommended. Opens a browser window of its own: sign in to YouTube there once, and Lucense " +
+                    "keeps that sign-in. No browser you use touches it, so YouTube doesn't cycle it out the way it " +
+                    "does a browser's - it lasts until you sign out."
+            )
+            chosen.copied -> Hint(
+                "Lucense copies ${chosen.label}'s sign-in and keeps the copy, renewing it every few days and " +
+                    "whenever YouTube stops taking it, so ${chosen.label} doesn't have to be closed each time. " +
+                    "Chrome-family browsers lock their cookies while open: close it when a copy is made."
+            )
+            else -> Unit
+        }
+        if (chosen == YouTubeSignIn.Source.FILE) {
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -447,16 +464,53 @@ private fun SignInPanel(controller: DesktopController) {
                 GhostButton("Choose file…") { chooseCookieFile()?.let { controller.youtubeCookieFile = it.absolutePath } }
             }
         }
-        if (controller.youtubeSignIn != YouTubeSignIn.Source.OFF) {
+        if (chosen != YouTubeSignIn.Source.OFF) {
             Spacer(Modifier.height(10.dp))
+            val keptAt = controller.signInKeptAt
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GhostButton(if (controller.checkingSignIn) "Checking…" else "Check sign-in", enabled = !controller.checkingSignIn) {
-                    controller.checkYouTubeSignIn()
+                when {
+                    controller.signingIn -> GhostButton("Stop", icon = Icons.Default.Close) { controller.stopSigningIn() }
+                    chosen == YouTubeSignIn.Source.OWN -> {
+                        val again = keptAt != null
+                        if (again) {
+                            GhostButton(if (controller.checkingSignIn) "Checking…" else "Check sign-in", enabled = !controller.checkingSignIn) {
+                                controller.checkYouTubeSignIn()
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            GhostButton("Sign in again", enabled = !controller.checkingSignIn) { controller.signInHere() }
+                            Spacer(Modifier.width(8.dp))
+                            GhostButton("Sign out", enabled = !controller.checkingSignIn) { controller.forgetYouTubeSignIn() }
+                        } else {
+                            AccentButton("Sign in to YouTube", icon = Icons.Default.Login, enabled = !controller.checkingSignIn) {
+                                controller.signInHere()
+                            }
+                        }
+                    }
+                    else -> {
+                        GhostButton(
+                            when {
+                                controller.checkingSignIn -> "Checking…"
+                                chosen.copied && keptAt != null -> "Renew and check"
+                                chosen.copied -> "Copy sign-in"
+                                else -> "Check sign-in"
+                            },
+                            enabled = !controller.checkingSignIn
+                        ) { controller.checkYouTubeSignIn() }
+                        if (chosen.copied && keptAt != null) {
+                            Spacer(Modifier.width(8.dp))
+                            GhostButton("Forget the copy", enabled = !controller.checkingSignIn) { controller.forgetYouTubeSignIn() }
+                        }
+                    }
                 }
-                controller.signInNote?.let {
-                    Spacer(Modifier.width(10.dp))
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
-                }
+            }
+            val said = controller.signInNote ?: keptAt?.let { at ->
+                val day = java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                val words = java.time.format.DateTimeFormatter.ofPattern("d MMMM").format(day)
+                if (chosen == YouTubeSignIn.Source.OWN) "Signed in here since $words." else "Copy made or renewed on $words."
+            }
+            if (said != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(said, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
             }
         }
     }

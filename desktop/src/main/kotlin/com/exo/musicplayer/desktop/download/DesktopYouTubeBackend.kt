@@ -89,6 +89,34 @@ class DesktopYouTubeBackend : YouTubeBackend {
         }.getOrElse { null to it.message }
     }
 
+    /**
+     * YouTube's home page as the signed-in account sees it, as far as its
+     * first [limit] suggestions; with yt-dlp's error line when it couldn't.
+     */
+    suspend fun homeFeed(limit: Int): Pair<YtDlpFlatSearch.Feed?, String?> = withContext(Dispatchers.IO) {
+        val exe = ToolPaths.ytDlp
+        if (!exe.isFile) return@withContext null to "yt-dlp is missing from this installation."
+        runCatching {
+            val process = ProcessBuilder(
+                buildList {
+                    add(exe.absolutePath)
+                    add(YtDlpFlatSearch.HOME_FEED)
+                    addAll(YtDlpFlatSearch.feedArguments(limit))
+                    addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
+                    addAll(YT_DLP_NETWORK)
+                }
+            ).redirectErrorStream(false).also(NetworkProxy::configure).start()
+            var errors = ""
+            val drain = Thread { errors = runCatching { process.errorStream.bufferedReader().readText() }.getOrDefault("") }
+                .apply { isDaemon = true; start() }
+            val json = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            process.waitFor()
+            drain.join(2_000)
+            YtDlpFlatSearch.parseFeed(json, label) to
+                errors.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("ERROR") }
+        }.getOrElse { null to it.message }
+    }
+
     private suspend fun flatSearch(target: String, label: String): List<YouTubeVideo> =
         withContext(Dispatchers.IO) {
             val exe = ToolPaths.ytDlp
