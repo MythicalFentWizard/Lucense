@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 7.0 predates some of the certificate roots Lucense's services use:
+    Let's Encrypt's own root arrived in 7.1.1, and cover art, lyrics.ovh and the
+    weather come through it. The app carries those roots itself. Newer Android
+    already trusts them, so for it nothing changes.
+-->
+<network-security-config>
+    <base-config>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/isrg_root_x1" />
+            <certificates src="@raw/digicert_global_root_g2" />
+            <certificates src="@raw/usertrust_ecc" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
