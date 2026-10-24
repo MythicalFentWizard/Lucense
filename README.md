@@ -286,10 +286,12 @@ file said before anything touched it.
 - **Liquid glass** (Windows, in Appearance): the window as panes of frosted
   glass over a slowly drifting glow of the theme's colours, or your wallpaper,
   with rounder controls and lit edges.
-- **Its own window frame** (Windows): no Windows title bar or border. Drag the
-  strip along the top to move it, double-click to maximise; Windows 11 rounds
-  the corners. Drag it to the left or right edge for half the screen, a corner
-  for a quarter, or the top to maximise, with an outline where it will go.
+- **Its own window frame** (Windows): no Windows title bar or border, but
+  Windows itself still moves, sizes and snaps it, so it behaves like any other
+  window. Drag the strip along the top to move it, double-click to maximise,
+  drag it to an edge or a corner for half or a quarter of the screen, use
+  Win+arrows, or hover the maximise button for Windows 11's snap layouts.
+  Windows 11 rounds the corners and gives it its shadow.
 - **Any window size** (Windows): on a smaller window the sidebar becomes icons,
   the side panel narrows and the buttons fold down, rather than everything
   shrinking.
@@ -297,7 +299,9 @@ file said before anything touched it.
   scrollbar, and middle-click scrolling as in a browser.
 - **Backgrounds and wallpaper:** stars, aurora, fireflies, snow, a scrolling graph
   of the song, or visuals that move with the music, on both apps. You can set
-  your own picture behind them.
+  your own picture behind them. They draw only while there's something to
+  show: the visuals that follow the music come to rest when it stops, and a
+  still window draws nothing.
 - **Backups.** Favourites, ratings, playlists, play counts and listening time go
   to a plain text file. Restoring adds them back and never deletes anything.
 - **Stats** on what you listen to, and when.
