@@ -2,6 +2,7 @@ package com.exo.musicplayer.ui.theme
 
 import android.graphics.BlurMaskFilter
 import android.graphics.RuntimeShader
+import androidx.annotation.RequiresApi
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -557,11 +558,18 @@ half4 main(float2 fragCoord) {
 """
 
 private fun DrawScope.aurora(t: Float, color: Color) {
-    val shader = AuroraShader.shader
-    if (shader == null) {
-        drawnAurora(t, color)
-        return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        AuroraShader.shader?.let { shader ->
+            shadedAurora(shader, t, color)
+            return
+        }
     }
+    drawnAurora(t, color)
+}
+
+/** The aurora as the runtime shader draws it, on Android 13 and up. */
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private fun DrawScope.shadedAurora(shader: RuntimeShader, t: Float, color: Color) {
     val edge = lerp(color, Color(0xFF3DF2A6), 0.55f)
     val violet = lerp(color, Color(0xFFB36BFF), 0.45f)
     shader.setFloatUniform("iResolution", size.width, size.height)

@@ -3,6 +3,7 @@ package com.exo.musicplayer.data.recognition
 import com.exo.musicplayer.data.net.Http
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.exo.musicplayer.data.lyrics.isGeniusTranslation
 import org.json.JSONObject
 import java.net.URLEncoder
 
@@ -39,9 +40,11 @@ class GeniusMetadataProvider : MetadataProvider {
                     ?.optJSONArray("hits")
             }.getOrNull() ?: return@withContext emptyList()
 
-            (0 until minOf(hits.length(), limit)).mapNotNull { index ->
+            (0 until hits.length()).asSequence().mapNotNull { index ->
                 val result = hits.optJSONObject(index)?.optJSONObject("result")
                     ?: return@mapNotNull null
+                // Genius's own translations of a song are not the song.
+                if (isGeniusTranslation(result)) return@mapNotNull null
                 val title = result.optString("title").takeIf { it.isNotBlank() }
                     ?: return@mapNotNull null
 
@@ -64,7 +67,7 @@ class GeniusMetadataProvider : MetadataProvider {
                     source = MusicMatch.Source.SEARCH,
                     provider = label
                 )
-            }
+            }.take(limit).toList()
         }
 
     private companion object {

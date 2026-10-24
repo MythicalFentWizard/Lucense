@@ -28,19 +28,26 @@ android {
 
     defaultConfig {
         applicationId = "com.exo.musicplayer"
-        minSdk = 26
+        // Android 7.0. java.time, which the shared code uses, comes through
+        // core library desugaring below; nothing else here needs newer.
+        minSdk = 24
         targetSdk = 35
         versionCode = lucenseVersionCode
         versionName = lucenseVersion
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // yt-dlp ships a Python runtime and ffmpeg as native libraries. Building
-        // every ABI would roughly triple the APK; arm64 covers every Android
-        // phone shipped in the last several years. -PlucenseEmulator=true adds
-        // x86_64 for a local emulator build; nothing released carries it.
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-            if (providers.gradleProperty("lucenseEmulator").orNull == "true") abiFilters += "x86_64"
+    }
+
+    // yt-dlp ships a Python runtime and ffmpeg as native libraries, about 50 MB
+    // for each processor type. One APK per type keeps each download that size;
+    // the universal one carries all four and installs anywhere. Plenty of phones
+    // run 32-bit Android even on a 64-bit chip, and those need armeabi-v7a.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
         }
     }
 
@@ -66,6 +73,8 @@ android {
     }
 
     compileOptions {
+        // java.time on Android 7, where the platform doesn't have it yet.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -92,6 +101,7 @@ android {
 
 dependencies {
     implementation(project(":shared"))
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

@@ -2,8 +2,10 @@ package com.exo.musicplayer.desktop.data
 
 import com.exo.musicplayer.desktop.ui.Glass
 import com.exo.musicplayer.desktop.download.OwnSignIn
+import com.exo.musicplayer.desktop.download.YouTubeAhead
 import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import com.exo.musicplayer.data.playlist.ParsedPlaylist
+import com.exo.musicplayer.data.youtube.StreamItem
 import com.exo.musicplayer.data.youtube.StreamResolver
 import com.exo.musicplayer.data.youtube.StreamQueue
 import com.exo.musicplayer.data.playlist.PlaylistLinks
@@ -125,6 +127,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -2061,9 +2065,18 @@ class DesktopController(parent: CoroutineScope) {
         if (engine.status.value.playing) engine.togglePlay()
         preview.toggle(
             video.id,
-            PreviewLabel(video.title, video.channel, video.thumbnail(YouTubeVideo.ThumbSize.SMALL))
-        ) { id -> youtubeBackend.audioStreamUrl(id, downloadQuality) }
+            PreviewLabel(video.title, video.channel, video.thumbnail(YouTubeVideo.ThumbSize.SMALL)),
+            retry = ::readAgain
+        ) { id -> YouTubeAhead.audioUrl(id, downloadQuality) }
     }
+
+    /**
+     * A kept address that played nothing is read afresh: YouTube may have
+     * stopped answering it, or the connection now comes from elsewhere. One
+     * read moments ago is left be; reading it again wouldn't change anything.
+     */
+    private suspend fun readAgain(id: String): String? =
+        if (YouTubeAhead.forgetIfOlder(id, READ_AGAIN_AFTER_MS)) YouTubeAhead.audioUrl(id, downloadQuality) else null
 
     fun stopPreview() = preview.stop()
 
@@ -2077,7 +2090,11 @@ class DesktopController(parent: CoroutineScope) {
         private set
 
     private val streamResolver by lazy {
-        StreamResolver({ page -> youtubeBackend.audioUrl(page, downloadQuality) }, linkFinder)
+        StreamResolver({ page ->
+            // A YouTube video is read once for everything (YouTubeAhead); SoundCloud and the rest as before.
+            YouTubeAhead.videoId(page)?.let { YouTubeAhead.audioUrl(it, downloadQuality) }
+                ?: youtubeBackend.audioUrl(page, downloadQuality)
+        }, linkFinder)
     }
 
     /** Songs in a row that wouldn't play; past a few, the list stops rather than asking YouTube for every one. */
@@ -2115,7 +2132,7 @@ class DesktopController(parent: CoroutineScope) {
         // One thing playing at a time.
         if (engine.status.value.playing) engine.togglePlay()
         val item = moved.items[at]
-        preview.toggle(moved.key(at), moved.label(at)) { streamResolver.resolve(item) }
+        preview.toggle(moved.key(at), moved.label(at), retry = { _ -> streamAgain(item) }) { streamResolver.resolve(item) }
         // The next one is looked up meanwhile, so it starts as soon as this ends.
         moved.items.getOrNull(at + 1)?.let { next -> scope.launch { runCatching { streamResolver.resolve(next) } } }
     }
@@ -2141,6 +2158,12 @@ class DesktopController(parent: CoroutineScope) {
                 }
             }
         }
+    }
+
+    /** A streamed YouTube song whose kept address played nothing, read afresh; see [readAgain]. */
+    private suspend fun streamAgain(item: StreamItem): String? {
+        val id = item.link?.let(YouTubeAhead::videoId) ?: return null
+        return readAgain(id)
     }
 
     /** Streams a list read from a link, in its own order. */
@@ -2238,6 +2261,22 @@ class DesktopController(parent: CoroutineScope) {
             playlist?.songs to error?.let(YouTubeTrouble::explain)
         }
     )
+
+    init {
+        // Your YouTube's songs are read ahead as soon as they are sorted out, so
+        // a preview or a download starts at once; an opened mix's first few too,
+        // ahead of the rest, being what was looked at last.
+        scope.launch {
+            forYou.state.map { state -> state.songs.take(FOR_YOU_AHEAD).map { it.video.id } }
+                .distinctUntilChanged()
+                .collect { ids -> if (ids.isNotEmpty() && tools.ready) YouTubeAhead.lookAhead(ids, downloadQuality) }
+        }
+        scope.launch {
+            forYou.mixes.map { mixes -> mixes.values.toList().asReversed().flatMap { mix -> mix.songs.take(MIX_AHEAD).map { it.video.id } } }
+                .distinctUntilChanged()
+                .collect { ids -> if (ids.isNotEmpty() && tools.ready) YouTubeAhead.lookAhead(ids, downloadQuality) }
+        }
+    }
 
 
     /** The download each Discover song was sent to, by the song's Deezer id. */
@@ -3650,7 +3689,10 @@ class DesktopController(parent: CoroutineScope) {
                     signInNote = YouTubeSignIn.explain(error, YouTubeSignIn.Source.OWN)
                     checkingSignIn = false
                 }
-                OwnSignIn.Outcome.Stopped -> signInNote = "The window was closed before signing in; nothing was kept."
+                OwnSignIn.Outcome.Stopped -> signInNote = "Stopped; nothing was kept."
+                OwnSignIn.Outcome.NotSignedIn -> signInNote =
+                    "The window closed before YouTube was signed in to, so nothing was kept. Sign in again, and close " +
+                        "the window (or press Done) once YouTube shows your account."
                 is OwnSignIn.Outcome.Failed -> signInNote = outcome.why
             }
         }
@@ -3658,6 +3700,9 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Closes a sign-in window that is still waiting. */
     fun stopSigningIn() = OwnSignIn.stop()
+
+    /** Signed in, in the window: it is closed and the sign-in read. */
+    fun doneSigningIn() = OwnSignIn.done()
 
     /** Forgets the kept sign-in: Lucense's copy is deleted, and downloads go signed out. */
     fun forgetYouTubeSignIn() {
@@ -3792,6 +3837,13 @@ class DesktopController(parent: CoroutineScope) {
 
         /** Songs in a row that wouldn't stream before a list stops trying. */
         const val STREAM_FAILURES_TO_STOP = 3
+
+        /** A kept YouTube address that plays nothing is read again only if it is at least this old. */
+        const val READ_AGAIN_AFTER_MS = 30_000L
+
+        /** How many of Your YouTube's songs, and of an opened mix's, are read ahead. */
+        const val FOR_YOU_AHEAD = 10
+        const val MIX_AHEAD = 5
 
         /** Songs of a playlist downloading at once. */
         const val PLAYLIST_WORKERS = 4

@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -439,8 +440,9 @@ private fun SignInPanel(controller: DesktopController) {
         when {
             chosen == YouTubeSignIn.Source.OWN -> Hint(
                 "Recommended. Opens your default browser in a window of its own, apart from your usual one: " +
-                    "sign in to YouTube there once, and Lucense keeps that sign-in. Nothing you browse with touches " +
-                    "it, so YouTube doesn't cycle it out the way it does a browser's - it lasts until you sign out."
+                    "sign in to YouTube there once, close the window, and Lucense keeps that sign-in. Nothing you " +
+                    "browse with touches it, so YouTube doesn't cycle it out the way it does a browser's - it lasts " +
+                    "until you sign out."
             )
             chosen.copied -> Hint(
                 "Lucense copies ${chosen.label}'s sign-in and keeps the copy, renewing it every few days and " +
@@ -469,7 +471,11 @@ private fun SignInPanel(controller: DesktopController) {
             val keptAt = controller.signInKeptAt
             Row(verticalAlignment = Alignment.CenterVertically) {
                 when {
-                    controller.signingIn -> GhostButton("Stop", icon = Icons.Default.Close) { controller.stopSigningIn() }
+                    controller.signingIn -> {
+                        AccentButton("Done, I've signed in", icon = Icons.Default.Check) { controller.doneSigningIn() }
+                        Spacer(Modifier.width(8.dp))
+                        GhostButton("Stop", icon = Icons.Default.Close) { controller.stopSigningIn() }
+                    }
                     chosen == YouTubeSignIn.Source.OWN -> {
                         val again = keptAt != null
                         if (again) {

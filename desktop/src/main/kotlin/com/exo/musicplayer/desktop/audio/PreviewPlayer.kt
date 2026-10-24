@@ -73,13 +73,16 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
      * one: a click on what is playing stops it, a click on what is paused
      * carries on. [label] is shown at once; [found] replaces it once the
      * stream has been found, for an artist or a genre, where which song it is
-     * isn't known until then.
+     * isn't known until then. [retry] finds the stream once more when the
+     * address [resolve] gave plays nothing at all: one remembered from earlier,
+     * which YouTube has stopped answering; null when there is nothing better.
      */
     fun toggle(
         key: String,
         label: PreviewLabel? = null,
         found: () -> PreviewLabel? = { null },
         clip: LongRange? = null,
+        retry: (suspend (String) -> String?)? = null,
         resolve: suspend (String) -> String?
     ) {
         val current = _state.value
@@ -87,7 +90,7 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
             if (current.paused) pauseOrResume() else stop()
             return
         }
-        start(key, label, found, clip, resolve)
+        start(key, label, found, clip, retry, resolve)
     }
 
     /**
@@ -105,9 +108,10 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
         label: PreviewLabel?,
         found: () -> PreviewLabel?,
         clip: LongRange?,
+        retry: (suspend (String) -> String?)?,
         resolve: suspend (String) -> String?
     ) {
-        again = { start(key, label, found, clip, resolve) }
+        again = { start(key, label, found, clip, retry, resolve) }
         val previous = job
         // Announced at once, so the small player says what is coming while
         // the old preview is still being torn down.
@@ -149,7 +153,19 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
 
             _state.value = PreviewState(videoId = key, loading = false, playing = true, label = named)
             try {
-                stream(ffmpeg, url, key, clip)
+                val played = stream(ffmpeg, url, key, clip, quietIfSilent = retry != null)
+                if (played == 0L && retry != null && isActive && _state.value.videoId == key) {
+                    // Nothing came from that address: found again, once.
+                    _state.value = PreviewState(videoId = key, loading = true, label = named)
+                    val fresh = runCatching { retry(key) }.getOrNull()
+                    if (_state.value.videoId != key) return@launch
+                    if (fresh == null || fresh == url) {
+                        _state.value = PreviewState(videoId = key, error = "Couldn't get a playable stream for that.", label = named)
+                        return@launch
+                    }
+                    _state.value = PreviewState(videoId = key, loading = false, playing = true, label = named)
+                    stream(ffmpeg, fresh, key, clip)
+                }
             } catch (stopped: CancellationException) {
                 // Being stopped is not a failure. Reporting it as one put an
                 // error back on screen a moment after the preview was closed.
@@ -166,8 +182,19 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
     private fun isSegmented(url: String): Boolean =
         ".m3u8" in url || "/hls_playlist/" in url || "/hls_variant/" in url || url.startsWith("https://manifest.googlevideo.com/")
 
-    /** [clip] plays only that stretch of [url], in milliseconds: the trimmer's preview of a cut. */
-    private suspend fun stream(ffmpeg: java.io.File, url: String, key: String, clip: LongRange? = null) =
+    /**
+     * Plays [url]; how many bytes of sound it played, or -1 when there was no
+     * output to play them on. [clip] plays only that stretch of it, in
+     * milliseconds: the trimmer's preview of a cut. [quietIfSilent] leaves the
+     * state as it is when nothing played, for the caller to try again.
+     */
+    private suspend fun stream(
+        ffmpeg: java.io.File,
+        url: String,
+        key: String,
+        clip: LongRange? = null,
+        quietIfSilent: Boolean = false
+    ): Long =
         withContext(Dispatchers.IO) {
             val format = AudioDevices.FORMAT
             // ffmpeg cannot speak SOCKS, and its own HTTP proxy option would be a
@@ -232,15 +259,15 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
             if (out == null) {
                 started.destroy()
                 _state.value = PreviewState(videoId = key, error = "No audio output.", label = _state.value.label)
-                return@withContext
+                return@withContext -1L
             }
             line = out
             held = false
 
             var finished = false
+            var totalBytes = 0L
             try {
                 val buffer = ByteArray(format.frameSize * 4096)
-                var totalBytes = 0L
                 val bytesPerSecond = format.sampleRate.toInt() * format.frameSize
 
                 while (true) {
@@ -283,7 +310,8 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
                 // Left alone if something else has already taken over, so a
                 // finished preview cannot touch the state of the next one.
                 val current = _state.value
-                if (current.videoId == key) {
+                val silent = totalBytes == 0L && quietIfSilent && isActive
+                if (current.videoId == key && !silent) {
                     // Played to the end: it stays in the small player, to be
                     // played again or closed. Anything else was a stop.
                     _state.value = if (finished) {
@@ -293,6 +321,7 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
                     }
                 }
             }
+            totalBytes
         }
 
     /** Holds what is playing, or carries on with what is held. Does nothing while a stream is still being found. */

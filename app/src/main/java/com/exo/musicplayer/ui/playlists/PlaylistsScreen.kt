@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.playlists
 
+import android.annotation.SuppressLint
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -332,6 +333,8 @@ fun PlaylistsScreen(
                     )
                     // Counted as it's typed, as on Windows, so a rule that
                     // matches nothing is caught before it's kept.
+                    // Lint misses the value set from an if expression; it is set.
+                    @SuppressLint("ProduceStateDoesNotAssignValue")
                     val matching by produceState<Int?>(null, rule) {
                         value = if (rule.isBlank()) null else {
                             delay(250)

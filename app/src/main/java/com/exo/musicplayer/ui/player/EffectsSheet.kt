@@ -1,5 +1,7 @@
 package com.exo.musicplayer.ui.player
 
+import androidx.media3.common.util.UnstableApi
+import androidx.annotation.OptIn
 import com.exo.musicplayer.data.audio.CharacterEffect
 import com.exo.musicplayer.data.audio.CharacterFx
 import androidx.compose.animation.AnimatedVisibility
@@ -46,6 +48,8 @@ import com.exo.musicplayer.playback.FxPreset
 import com.exo.musicplayer.playback.ReverbRoom
 import kotlin.math.roundToInt
 
+// The band labels live on ToneProcessor, which media3 marks unstable; only the labels are read here.
+@OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun EffectsSheet(
     state: AudioFxState,
