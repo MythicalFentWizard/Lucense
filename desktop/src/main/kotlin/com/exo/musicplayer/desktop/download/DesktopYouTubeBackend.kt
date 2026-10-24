@@ -128,6 +128,12 @@ class DesktopYouTubeBackend : YouTubeBackend {
     suspend fun audioStreamUrl(
         videoId: String,
         quality: DownloadQuality = DownloadQuality.LOW
+    ): String? = audioUrl("https://www.youtube.com/watch?v=$videoId", quality)
+
+    /** The audio's own address on any page yt-dlp reads: a YouTube video, a SoundCloud track. */
+    suspend fun audioUrl(
+        page: String,
+        quality: DownloadQuality = DownloadQuality.LOW
     ): String? = withContext(Dispatchers.IO) {
         val exe = ToolPaths.ytDlp
         if (!exe.isFile) return@withContext null
@@ -135,7 +141,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
         runCatching {
             val process = ProcessBuilder(
                 exe.absolutePath,
-                "https://www.youtube.com/watch?v=$videoId",
+                page,
                 // The preview only has to be recognisable, so the smallest
                 // rendition is the right one - it starts sooner.
                 "-f", quality.formatSelector,

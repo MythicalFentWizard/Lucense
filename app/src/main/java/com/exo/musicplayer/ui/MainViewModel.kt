@@ -1573,6 +1573,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importPlaylist(text: String, fallbackName: String) {
+        linkPlaylist = null
         viewModelScope.launch {
             val parsed = PlaylistFile.parse(text, fallbackName)
             if (parsed.entries.isEmpty()) {
@@ -1619,6 +1620,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _readingLink = MutableStateFlow(false)
 
+    /** The list behind the import under review, when it came from a link: for streaming it. */
+    private var linkPlaylist: com.exo.musicplayer.data.playlist.ParsedPlaylist? = null
+
+    /** [result]'s list as read from its link, or null when it came from a file. */
+    fun linkPlaylistFor(result: com.exo.musicplayer.data.playlist.ImportResult<Track>) =
+        linkPlaylist?.takeIf { it.name == result.name && it.entries.size == result.total }
+
     /** True while a playlist link is being read. */
     val readingLink: StateFlow<Boolean> = _readingLink.asStateFlow()
 
@@ -1632,6 +1640,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (outcome) {
                 is PlaylistLinks.Outcome.Problem -> _notice.value = outcome.message
                 is PlaylistLinks.Outcome.Read -> {
+                    linkPlaylist = outcome.playlist
                     _importResult.value = PlaylistFile.matchAgainst(
                         playlist = outcome.playlist,
                         library = library.allTracks(),

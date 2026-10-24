@@ -1,5 +1,8 @@
 package com.exo.musicplayer.ui.recognition
 
+import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
+import com.exo.musicplayer.data.youtube.StreamResolver
+import com.exo.musicplayer.data.youtube.StreamQueue
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -99,6 +102,85 @@ class RecognitionViewModel(
     }
 
     val preview by lazy { YouTubePreviewPlayer(application, viewModelScope) }
+
+    // ---- Streaming, after Riff (github.com/rootscripts/riff, MIT) ------------
+    //
+    // Songs played online one after another, through the preview player and
+    // the small player above the tabs: nothing joins the library or the queue.
+
+    private val _streamQueue = MutableStateFlow<StreamQueue?>(null)
+
+    /** The list being streamed, or null. */
+    val streamQueue: StateFlow<StreamQueue?> = _streamQueue.asStateFlow()
+
+    private val streamResolver by lazy {
+        StreamResolver({ page -> youtubeBackend.audioUrl(page, quality) }, YouTubeLinkFinder(youtube))
+    }
+
+    /** Pauses the library's music, so a stream isn't played over it. */
+    private var pauseLibrary: () -> Unit = {}
+
+    /** Songs in a row that wouldn't play; past a few the list stops rather than asking for every one. */
+    private var streamFailures = 0
+    private var streamWatcher: kotlinx.coroutines.Job? = null
+
+    fun stream(queue: StreamQueue, pauseLibrary: () -> Unit) {
+        if (queue.items.isEmpty()) return
+        this.pauseLibrary = pauseLibrary
+        streamFailures = 0
+        watchStream()
+        playStreamAt(queue, queue.index)
+    }
+
+    fun streamNext() {
+        val queue = _streamQueue.value ?: return
+        if (queue.hasNext) playStreamAt(queue, queue.index + 1)
+    }
+
+    fun streamPrevious() {
+        val queue = _streamQueue.value ?: return
+        if (queue.hasPrevious) playStreamAt(queue, queue.index - 1)
+    }
+
+    private fun playStreamAt(queue: StreamQueue, at: Int) {
+        val moved = queue.copy(index = at)
+        _streamQueue.value = moved
+        pauseLibrary()
+        val item = moved.items[at]
+        preview.toggle(moved.key(at), moved.label(at)) { streamResolver.resolve(item) }
+        // The next one is looked up meanwhile, so it starts as soon as this ends.
+        moved.items.getOrNull(at + 1)?.let { next -> viewModelScope.launch { runCatching { streamResolver.resolve(next) } } }
+    }
+
+    /** On to the next song when one ends; gone when something else is previewed or the bar is closed. */
+    private fun watchStream() {
+        if (streamWatcher?.isActive == true) return
+        streamWatcher = viewModelScope.launch {
+            preview.state.collect { state ->
+                val queue = _streamQueue.value ?: return@collect
+                when {
+                    !queue.owns(state.videoId) -> _streamQueue.value = null
+                    state.videoId != queue.key() -> Unit
+                    state.ended && queue.hasNext -> {
+                        streamFailures = 0
+                        playStreamAt(queue, queue.index + 1)
+                    }
+                    state.playing -> streamFailures = 0
+                    state.error != null && queue.hasNext && ++streamFailures < STREAM_FAILURES_TO_STOP -> {
+                        kotlinx.coroutines.delay(1_500)
+                        if (_streamQueue.value?.key() == state.videoId) playStreamAt(queue, queue.index + 1)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Streams the YouTube results on screen, from the first. */
+    fun streamResults(pauseLibrary: () -> Unit) {
+        val videos = _youtubeResults.value
+        if (videos.isEmpty()) return
+        stream(StreamQueue.ofVideos("YouTube: ${_query.value}", videos), pauseLibrary)
+    }
 
     private val _youtubeResults = MutableStateFlow<List<YouTubeVideo>>(emptyList())
     val youtubeResults: StateFlow<List<YouTubeVideo>> = _youtubeResults.asStateFlow()
@@ -421,3 +503,6 @@ enum class SearchMode(val label: String, val hint: String) {
     LINK("Link", "TikTok, Instagram, YouTube link"),
     YOUTUBE("YouTube", "Search YouTube for anything")
 }
+
+/** Songs in a row that wouldn't stream before a list stops trying. */
+private const val STREAM_FAILURES_TO_STOP = 3

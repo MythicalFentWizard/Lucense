@@ -1,5 +1,6 @@
 package com.exo.musicplayer
 
+import com.exo.musicplayer.data.youtube.StreamQueue
 import androidx.compose.material3.OutlinedTextField
 import com.exo.musicplayer.ui.trim.TrimScreen
 import com.exo.musicplayer.data.trim.TrackTrimmer
@@ -315,6 +316,7 @@ private fun AppScaffold(
     val update by viewModel.update.collectAsStateWithLifecycle()
     val discoverStack by discover.browser.stack.collectAsStateWithLifecycle()
     val previewNow by recognition.preview.state.collectAsStateWithLifecycle()
+    val streaming by recognition.streamQueue.collectAsStateWithLifecycle()
     val queueFailure by download.queueFailure.collectAsStateWithLifecycle()
 
     // Selection actions work on what is on screen: an open album's songs, the
@@ -438,7 +440,15 @@ private fun AppScaffold(
                     PreviewBar(
                         state = previewNow,
                         onPauseResume = { recognition.preview.pauseOrResume() },
-                        onClose = recognition::stopPreview
+                        onClose = recognition::stopPreview,
+                        stream = streaming?.takeIf { it.owns(previewNow.videoId) },
+                        onPrevious = recognition::streamPrevious,
+                        onNext = recognition::streamNext,
+                        onKeep = {
+                            streaming?.current?.let { item ->
+                                download.downloadMatch(item.link, item.artist, item.title, item.durationMs.takeIf { it > 0 })
+                            }
+                        }
                     )
                     MiniPlayer(
                         track = currentTrack,
@@ -738,6 +748,7 @@ private fun AppScaffold(
                             youtubeStatus = youtubeStatus,
                             preview = preview,
                             onPreviewYouTube = recognition::previewYouTube,
+                            onStreamAll = { recognition.streamResults { if (isPlaying) viewModel.togglePlayPause() } },
                             onDownloadYouTube = { video ->
                                 // A real watch URL, so this takes the direct path
                                 // rather than the search-by-name fallback.
@@ -1087,6 +1098,13 @@ private fun AppScaffold(
                             onClick = { viewModel.confirmImport(pending) },
                             enabled = pending.matched.isNotEmpty()
                         ) { Text("Add ${pending.matched.size} ${if (pending.matched.size == 1) "track" else "tracks"}") }
+                        // A list from a link can be played online as it is, without keeping anything.
+                        viewModel.linkPlaylistFor(pending)?.let { playlist ->
+                            TextButton(onClick = {
+                                recognition.stream(StreamQueue.ofPlaylist(playlist)) { if (isPlaying) viewModel.togglePlayPause() }
+                                viewModel.dismissImport()
+                            }) { Text("Stream it") }
+                        }
                     }
                 },
                 dismissButton = { TextButton(onClick = { viewModel.dismissImport() }) { Text("Cancel") } }

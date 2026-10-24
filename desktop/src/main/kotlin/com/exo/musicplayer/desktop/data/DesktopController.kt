@@ -1,5 +1,8 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.data.playlist.ParsedPlaylist
+import com.exo.musicplayer.data.youtube.StreamResolver
+import com.exo.musicplayer.data.youtube.StreamQueue
 import com.exo.musicplayer.data.playlist.PlaylistLinks
 import com.exo.musicplayer.data.audio.Trim
 import androidx.compose.ui.graphics.toArgb
@@ -2003,6 +2006,91 @@ class DesktopController(parent: CoroutineScope) {
 
     fun stopPreview() = preview.stop()
 
+    // ---- Streaming, after Riff (github.com/rootscripts/riff, MIT) ------------
+    //
+    // Songs played online one after another, through the preview player and
+    // its small player: nothing joins the library, the queue or the counts.
+
+    /** The list being streamed, or null. */
+    var streamQueue by mutableStateOf<StreamQueue?>(null)
+        private set
+
+    private val streamResolver by lazy {
+        StreamResolver({ page -> youtubeBackend.audioUrl(page, downloadQuality) }, linkFinder)
+    }
+
+    /** Songs in a row that wouldn't play; past a few, the list stops rather than asking YouTube for every one. */
+    private var streamFailures = 0
+
+    fun stream(queue: StreamQueue) {
+        if (queue.items.isEmpty()) return
+        if (!tools.ready) {
+            toolNote = "Install yt-dlp first; it finds what to stream."
+            return
+        }
+        streamFailures = 0
+        playStreamAt(queue, queue.index)
+    }
+
+    fun streamNext() {
+        val queue = streamQueue ?: return
+        if (queue.hasNext) playStreamAt(queue, queue.index + 1)
+    }
+
+    fun streamPrevious() {
+        val queue = streamQueue ?: return
+        if (queue.hasPrevious) playStreamAt(queue, queue.index - 1)
+    }
+
+    /** Downloads the song being streamed, to keep it. */
+    fun keepStreamed() {
+        val item = streamQueue?.current ?: return
+        item.link?.let { queueDownload(it, song = null) } ?: downloadSong(item.artist.orEmpty(), item.title, item.durationMs)
+    }
+
+    private fun playStreamAt(queue: StreamQueue, at: Int) {
+        val moved = queue.copy(index = at)
+        streamQueue = moved
+        // One thing playing at a time.
+        if (engine.status.value.playing) engine.togglePlay()
+        val item = moved.items[at]
+        preview.toggle(moved.key(at), moved.label(at)) { streamResolver.resolve(item) }
+        // The next one is looked up meanwhile, so it starts as soon as this ends.
+        moved.items.getOrNull(at + 1)?.let { next -> scope.launch { runCatching { streamResolver.resolve(next) } } }
+    }
+
+    init {
+        // On to the next song when one ends; gone when something else is
+        // previewed or the small player is closed.
+        scope.launch {
+            preview.state.collect { state ->
+                val queue = streamQueue ?: return@collect
+                when {
+                    !queue.owns(state.videoId) -> streamQueue = null
+                    state.videoId != queue.key() -> Unit
+                    state.ended && queue.hasNext -> {
+                        streamFailures = 0
+                        playStreamAt(queue, queue.index + 1)
+                    }
+                    state.playing -> streamFailures = 0
+                    state.error != null && queue.hasNext && ++streamFailures < STREAM_FAILURES_TO_STOP -> {
+                        delay(1_500)
+                        if (streamQueue?.key() == state.videoId) playStreamAt(queue, queue.index + 1)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Streams a list read from a link, in its own order. */
+    fun streamImport() {
+        val playlist = linkPlaylist ?: return
+        stream(StreamQueue.ofPlaylist(playlist))
+    }
+
+    /** The list behind the import under review, when it came from a link. */
+    private var linkPlaylist: ParsedPlaylist? = null
+
     // ---- Trimming, after Riff (github.com/rootscripts/riff, MIT) -------------
 
     /** The song open in the trimmer, or null. */
@@ -3084,6 +3172,7 @@ class DesktopController(parent: CoroutineScope) {
             when (outcome) {
                 is PlaylistLinks.Outcome.Problem -> playlistNote = outcome.message
                 is PlaylistLinks.Outcome.Read -> {
+                    linkPlaylist = outcome.playlist
                     importResult = PlaylistFile.matchAgainst(
                         playlist = outcome.playlist,
                         library = tracks,
@@ -3432,6 +3521,9 @@ class DesktopController(parent: CoroutineScope) {
 
         /** What the format setting holds for "keep what the site served". */
         const val ORIGINAL_FORMAT = "ORIGINAL"
+
+        /** Songs in a row that wouldn't stream before a list stops trying. */
+        const val STREAM_FAILURES_TO_STOP = 3
 
         /** Songs of a playlist downloading at once. */
         const val PLAYLIST_WORKERS = 4

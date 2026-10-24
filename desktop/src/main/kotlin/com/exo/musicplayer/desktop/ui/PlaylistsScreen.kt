@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.foundation.background
@@ -346,6 +347,7 @@ fun PlaylistsScreen(
                 result = result,
                 onConfirm = { controller.confirmImport(result) },
                 onDownloadMissing = { controller.confirmImport(result, downloadMissing = true) },
+                onStream = if (controller.importFromLink) ({ controller.streamImport() }) else null,
                 onCancel = { controller.dismissImport() }
             )
         }
@@ -445,6 +447,8 @@ private fun ImportReview(
     result: ImportResult<DesktopTrack>,
     onConfirm: () -> Unit,
     onDownloadMissing: () -> Unit,
+    /** Plays the list online without keeping anything; null for a playlist file. */
+    onStream: (() -> Unit)?,
     onCancel: () -> Unit
 ) {
     Panel(Modifier.fillMaxWidth()) {
@@ -452,6 +456,10 @@ private fun ImportReview(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GhostButton("Cancel", onClick = onCancel)
                 Spacer(Modifier.width(8.dp))
+                if (onStream != null) {
+                    GhostButton("Stream it", icon = Icons.Default.PlayCircle, onClick = onStream)
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (result.missing.isNotEmpty()) {
                     GhostButton(
                         "Add, and download the ${result.missing.size} missing",

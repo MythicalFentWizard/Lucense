@@ -1,5 +1,6 @@
 package com.exo.musicplayer.data.youtube
 
+import androidx.media3.common.MimeTypes
 import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -142,6 +143,8 @@ class YouTubePreviewPlayer(
                 MediaItem.Builder()
                     .setUri(url)
                     .apply {
+                        // SoundCloud hands out HLS playlists, which aren't always named for it.
+                        if (".m3u8" in url) setMimeType(MimeTypes.APPLICATION_M3U8)
                         if (clip != null) {
                             setClippingConfiguration(
                                 MediaItem.ClippingConfiguration.Builder()

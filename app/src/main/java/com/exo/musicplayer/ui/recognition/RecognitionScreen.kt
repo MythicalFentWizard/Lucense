@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.recognition
 
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -107,6 +108,8 @@ fun RecognitionScreen(
     preview: PreviewState,
     onPreviewYouTube: (YouTubeVideo) -> Unit,
     onDownloadYouTube: (YouTubeVideo) -> Unit,
+    /** Plays every result online, one after another. */
+    onStreamAll: () -> Unit = {},
     /** Several picked results at once: catalogue matches or YouTube videos. */
     onDownloadMany: (matches: List<MusicMatch>, videos: List<YouTubeVideo>) -> Unit,
     modifier: Modifier = Modifier
@@ -177,6 +180,20 @@ fun RecognitionScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                             )
+                        }
+                    }
+                    // Riff's streaming: the whole list, online, one after another.
+                    item(key = "youtube-stream") {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = onStreamAll,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                        ) {
+                            androidx.compose.material3.Icon(
+                                androidx.compose.material.icons.Icons.Default.PlayCircle,
+                                contentDescription = null
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Stream all ${youtubeResults.size}")
                         }
                     }
                     youTubeResults(

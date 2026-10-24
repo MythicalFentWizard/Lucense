@@ -7,7 +7,9 @@ import kotlin.math.abs
 data class PlaylistEntry(
     val artist: String?,
     val title: String,
-    val durationMs: Long = 0L
+    val durationMs: Long = 0L,
+    /** Where it can be played from, when a list from a link said: for streaming it. Not written to files. */
+    val link: String? = null
 ) {
     val display: String get() = if (artist.isNullOrBlank()) title else "$artist — $title"
 }

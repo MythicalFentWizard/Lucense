@@ -73,7 +73,7 @@ object PlaylistLinks {
         "--no-warnings",
         "--ignore-config",
         "--yes-playlist",
-        "--print", "%(title)s\t%(artist,creator,uploader)s\t%(duration)s",
+        "--print", "%(title)s\t%(artist,creator,uploader)s\t%(duration)s\t%(webpage_url)s",
         "--print", "playlist:$NAME_MARK\t%(title)s"
     )
 
@@ -295,7 +295,7 @@ object PlaylistLinks {
             } else {
                 channel to video.title.trim()
             }
-            PlaylistEntry(artist, title, (video.durationSeconds ?: 0) * 1000L)
+            PlaylistEntry(artist, title, (video.durationSeconds ?: 0) * 1000L, video.watchUrl)
         }
     )
 
@@ -320,7 +320,8 @@ object PlaylistLinks {
                 artist to rawTitle
             }
             val seconds = parts[2].trim().toDoubleOrNull() ?: 0.0
-            entries += PlaylistEntry(who, title, (seconds * 1000).toLong())
+            val page = parts.getOrNull(3)?.trim()?.takeIf { it.startsWith("http") }
+            entries += PlaylistEntry(who, title, (seconds * 1000).toLong(), page)
         }
         return ParsedPlaylist(name ?: fallbackName, entries)
     }
