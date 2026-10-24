@@ -83,6 +83,21 @@ enum class ReactiveMode(val label: String, val note: String) {
 }
 
 private const val TAU = (2 * PI).toFloat()
+
+/** About sixty a second, for the backdrops that move with the music. */
+private const val FRAME_NANOS = 16_600_000L
+
+/** Woken this much early, so the next display frame isn't missed and the rate halved. */
+private const val FRAME_SLACK_MS = 4L
+
+/** Less than this between ticks reads as nothing moving. */
+private const val SETTLED_CHANGE = 0.0005f
+
+/** A quarter of a second of nothing moving, and the reactive backdrop rests. */
+private const val SETTLED_TICKS = 15
+
+/** How often a resting backdrop listens for the music coming back. */
+private const val REST_POLL_MS = 150L
 private const val GRAPH_SPAN_MS = 12_000.0
 private const val SLICE_MS = 10.0
 
@@ -124,14 +139,25 @@ class Pulse(bands: Int = 14) {
     private var kickPeak = 0f
     private var lastRing = -10f
     private var lastTime = -1f
+    private val reading = FloatArray(levels.size)
+
+    /** The most anything drawn from this moved in the last [update]: nearly nothing once it has settled. */
+    var change = 1f
+        private set
+
+    /** A ring sent out in the last moment is still travelling. */
+    fun ringsOut(t: Float): Boolean = rings.any { t - it in 0f..RING_SECONDS }
 
     fun update(snapshot: FloatArray, t: Float) {
         val dt = if (lastTime < 0f) 0f else (t - lastTime).coerceIn(0f, 0.1f)
         lastTime = t
-        val reading = FloatArray(levels.size) { i ->
-            if (snapshot.isEmpty()) 0f
+        for (i in reading.indices) {
+            reading[i] = if (snapshot.isEmpty()) 0f
             else snapshot[(i * snapshot.size / levels.size).coerceAtMost(snapshot.size - 1)].coerceIn(0f, 1f)
         }
+        var moved = 0f
+        val punchBefore = punch
+        val kickBefore = kick
         val attack = ease(dt, 0.03f)
         val release = ease(dt, 0.12f)
         val settle = ease(dt, 1.6f)
@@ -141,7 +167,9 @@ class Pulse(bands: Int = 14) {
             ceilings[i] = if (value > ceilings[i]) value else ceilings[i] + (value - ceilings[i]) * settle
             val swing = ((value - floors[i]) / max(ceilings[i] - floors[i], MIN_SPAN)).coerceIn(0f, 1f)
             val target = (value * 0.3f + swing * 0.7f) * (value / 0.08f).coerceAtMost(1f)
-            levels[i] += (target - levels[i]) * (if (target > levels[i]) attack else release)
+            val step = (target - levels[i]) * (if (target > levels[i]) attack else release)
+            levels[i] += step
+            moved = max(moved, abs(step))
         }
         val lowEnd = (levels.size * 0.22f).toInt().coerceAtLeast(1)
         bass = average(0, lowEnd)
@@ -162,6 +190,7 @@ class Pulse(bands: Int = 14) {
         val onset = ((heard - heardSlow) * 2.4f).coerceIn(0f, 1f)
         kickPeak = max(kickPeak * exp(-dt / 0.14f), onset)
         kick += (kickPeak - kick) * ease(dt, 0.015f)
+        change = max(moved, max(abs(punch - punchBefore), abs(kick - kickBefore)))
         travel += dt * (0.015f + energy * 0.1f)
         if (onset > 0.45f && t - lastRing > 0.22f) {
             var oldest = 0
@@ -184,6 +213,8 @@ class Pulse(bands: Int = 14) {
     private companion object {
         const val MIN_SPAN = 0.12f
         const val MIN_HEARD_SPAN = 0.10f
+        /** How long a ring takes to go out and fade. */
+        const val RING_SECONDS = 1.2f
     }
 }
 
@@ -313,11 +344,44 @@ fun AppBackdrop(
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             // Picks up where it left off rather than jumping ahead by the time away.
             val origin = System.nanoTime() - (seconds.floatValue * 1e9f).toLong()
+            var lastTick = 0L
+            // Ticks in a row that changed nothing to see.
+            var still = 0
             while (isActive) {
-                if (moving) withFrameNanos { } else delay(50L)
-                val now = (System.nanoTime() - origin) / 1e9f
-                if (analyser != null) pulse.update(analyser.snapshot(raw), now)
-                seconds.floatValue = now
+                if (analyser != null && style == BackdropStyle.REACTIVE && still >= SETTLED_TICKS) {
+                    // At rest: drawn again, it would look the same. Listen now and
+                    // then, without asking for a frame - waiting on one draws one -
+                    // and wake when there is something to hear.
+                    if (analyser.snapshot(raw).all { it == 0f }) {
+                        delay(REST_POLL_MS)
+                        continue
+                    }
+                    still = 0
+                }
+                // One step of the picture: the music read, the clock moved on.
+                fun advance() {
+                    val now = (System.nanoTime() - origin) / 1e9f
+                    if (analyser != null) {
+                        val reading = analyser.snapshot(raw)
+                        pulse.update(reading, now)
+                        val settled = pulse.change < SETTLED_CHANGE && !pulse.ringsOut(now) && reading.all { it == 0f }
+                        still = if (settled) still + 1 else 0
+                    }
+                    seconds.floatValue = now
+                }
+                if (moving) {
+                    // About sixty updates a second, each on a display frame; a phone
+                    // at 90 or 120 would otherwise redraw everything that often.
+                    // Stepped inside the frame, so that frame draws it: stepped
+                    // after, it took a second frame to show.
+                    val wait = (FRAME_NANOS - (System.nanoTime() - lastTick)) / 1_000_000L - FRAME_SLACK_MS
+                    if (wait > 0) delay(wait)
+                    withFrameNanos { advance() }
+                    lastTick = System.nanoTime()
+                } else {
+                    delay(50L)
+                    advance()
+                }
             }
         }
     }

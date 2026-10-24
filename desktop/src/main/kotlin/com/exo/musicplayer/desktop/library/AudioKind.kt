@@ -4,6 +4,8 @@ import org.jaudiotagger.audio.AudioFile
 import org.jaudiotagger.audio.AudioFileIO
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /**
  * What a music file really is, read from its first bytes rather than its name.
@@ -19,6 +21,15 @@ import java.io.RandomAccessFile
  * clear: this only steps in when the two plainly disagree.
  */
 object AudioKind {
+
+    /**
+     * jaudiotagger logs an INFO line per file, which is unusable noise when
+     * scanning thousands of tracks, and costs time writing it. Every read
+     * comes through here, so it is quietened here, and held: Java keeps
+     * loggers only weakly, and one collected comes back without its level,
+     * logging every file again.
+     */
+    private val quietTags: Logger = Logger.getLogger("org.jaudiotagger").apply { level = Level.SEVERE }
 
     /**
      * Each format's own name, and the other names of it the tag reader knows.

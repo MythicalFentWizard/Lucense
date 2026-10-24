@@ -39,6 +39,10 @@ class SpectrumAnalyser(private val bandCount: Int = 14) {
         const val FLOOR_DB = -68f
         /** Fraction of the previous level retained, so bars fall rather than flicker. */
         const val DECAY = 0.72f
+        /** About how often audio is fed while playing. */
+        const val FEED_NANOS = 90_000_000L
+        /** Fed nothing for this long, the music has stopped: the levels fall away. */
+        const val STALE_NANOS = 250_000_000L
     }
 
     @Volatile var enabled: Boolean = false
@@ -79,6 +83,8 @@ class SpectrumAnalyser(private val bandCount: Int = 14) {
 
     private val levels = FloatArray(bandCount)
 
+    @Volatile private var fedAt = 0L
+
     /**
      * Feeds interleaved stereo samples. Only the first [FFT_SIZE] frames are
      * used; a buffer is short enough that the rest would show the same thing.
@@ -116,12 +122,25 @@ class SpectrumAnalyser(private val bandCount: Int = 14) {
                 levels[band] * DECAY + target * (1f - DECAY)
             }
         }
+        fedAt = System.nanoTime()
     }
 
-    /** Copies the current levels, 0..1 per band. */
-    fun snapshot(into: FloatArray): FloatArray {
+    /**
+     * Copies the current levels, 0..1 per band.
+     *
+     * With nothing fed lately - paused, stopped, between songs - the bars fall
+     * as they would have while playing, down to exactly nothing, rather than
+     * staying where the music left them; a display can then tell it has
+     * nothing more to show.
+     */
+    fun snapshot(into: FloatArray, nowNanos: Long = System.nanoTime()): FloatArray {
         val out = if (into.size == bandCount) into else FloatArray(bandCount)
         System.arraycopy(levels, 0, out, 0, bandCount)
+        val quiet = nowNanos - fedAt - STALE_NANOS
+        if (quiet > 0) {
+            val fade = DECAY.toDouble().pow(quiet / FEED_NANOS.toDouble()).toFloat()
+            for (i in 0 until bandCount) out[i] = if (fade < 0.01f) 0f else out[i] * fade
+        }
         return out
     }
 

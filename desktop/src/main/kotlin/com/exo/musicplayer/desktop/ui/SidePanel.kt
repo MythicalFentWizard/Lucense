@@ -482,9 +482,11 @@ private fun Spectrum(spectrum: SpectrumAnalyser, playing: Boolean) {
         while (true) {
             // A reactive background switches the analyser off when it goes away.
             spectrum.enabled = true
-            levels = spectrum.snapshot(buffer).copyOf()
-            withFrameNanos { }
-            kotlinx.coroutines.delay(60)
+            val now = spectrum.snapshot(buffer)
+            // Only a change is drawn: an idle meter, all at nothing, redraws nothing,
+            // and is looked at less often.
+            if (!now.contentEquals(levels)) levels = now.copyOf()
+            kotlinx.coroutines.delay(if (levels.all { it == 0f }) 200 else 60)
         }
     }
 

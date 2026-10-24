@@ -1,6 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.ui.graphics.Brush
@@ -66,6 +66,7 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.sign
@@ -141,11 +142,29 @@ fun AccentButton(
 /**
  * The width the page has to work with, so its parts can give way on a small
  * window: buttons down to their icons, a table down to fewer columns.
+ *
+ * In steps rather than exact: the widest of [PANE_STEPS] the page reaches,
+ * so it only changes when one of them is crossed. The exact width changes on
+ * every pixel of a resize, and each change rebuilt everything under it. So
+ * compare it only with one of the steps; add a step for a new threshold.
  */
-val LocalPaneWidth = staticCompositionLocalOf { 10_000.dp }
+val LocalPaneWidth = compositionLocalOf { 10_000.dp }
 
-/** The whole window's width, for the parts that span it: the playback bar. */
-val LocalWindowWidth = staticCompositionLocalOf { 10_000.dp }
+/** The widths the page's layout changes at: the album column, the header's buttons. */
+val PANE_STEPS = listOf(640.dp, 860.dp)
+
+/**
+ * The whole window's width, for the parts that span it: the playback bar and
+ * the sidebar. In steps, as [LocalPaneWidth] is: compare it only with one of
+ * [WINDOW_STEPS].
+ */
+val LocalWindowWidth = compositionLocalOf { 10_000.dp }
+
+/** The widths the window's layout changes at: the playback bar's two, and the sidebar's. */
+val WINDOW_STEPS = listOf(900.dp, 1000.dp, 1100.dp)
+
+/** This width as the widest of [steps] it reaches, or nothing below the first. */
+fun Dp.steppedAt(steps: List<Dp>): Dp = steps.lastOrNull { this >= it } ?: 0.dp
 
 /** A ghost button showing only its [icon], its words in a tooltip: for a page with no room. */
 @OptIn(ExperimentalFoundationApi::class)

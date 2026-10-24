@@ -17,7 +17,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,20 +54,17 @@ fun SpectrumMeter(playing: Boolean, modifier: Modifier = Modifier) {
 
     SpectrumWhileVisible()
 
-    val live by rememberUpdatedState(playing)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(analyser, lifecycle) {
         val buffer = FloatArray(analyser.bands())
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                levels = if (live) {
-                    analyser.snapshot(buffer).copyOf()
-                } else {
-                    // Paused, the sink stops sending audio and the analyser keeps
-                    // its last reading; let the bars settle instead of freezing.
-                    FloatArray(levels.size) { levels[it] * 0.7f }
-                }
-                delay(60)
+                // Paused, the sink stops sending audio, and the analyser lets its
+                // reading fall away to nothing by itself. Only a change is drawn,
+                // and bars all at nothing are looked at less often.
+                val now = analyser.snapshot(buffer)
+                if (!now.contentEquals(levels)) levels = now.copyOf()
+                delay(if (levels.all { it == 0f }) 200 else 60)
             }
         }
     }
