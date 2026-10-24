@@ -101,6 +101,7 @@ class FxControls(
     val onReverbEnabled: (Boolean) -> Unit,
     val onReverbRoom: (ReverbRoom) -> Unit,
     val onReverbAmount: (Float) -> Unit,
+    val onDrive: (Float) -> Unit,
     val onEqEnabled: (Boolean) -> Unit,
     val onEqBand: (Int, Float) -> Unit,
     val onEqFlat: () -> Unit,

@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.discover.DiscoverBrowser
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.youtube.PreviewLabel
 import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.prefs.LibraryView
@@ -836,6 +837,7 @@ private fun AppScaffold(
                     onReverbEnabled = viewModel::setReverbEnabled,
                     onReverbRoom = viewModel::setReverbRoom,
                     onReverbAmount = viewModel::setReverbAmount,
+                    onDrive = viewModel::setFxDrive,
                     onEqEnabled = viewModel::setEqEnabled,
                     onEqBand = viewModel::setEqBand,
                     onEqFlat = viewModel::flattenEq,
@@ -862,6 +864,8 @@ private fun AppScaffold(
             val dlState by download.state.collectAsStateWithLifecycle()
             val dlUrl by download.url.collectAsStateWithLifecycle()
             val dlQuality by download.quality.collectAsStateWithLifecycle()
+            val dlFormat by context.musicApp.prefs.downloadFormat.collectAsStateWithLifecycle()
+            val dlCutNonMusic by context.musicApp.prefs.cutNonMusic.collectAsStateWithLifecycle()
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 contentColor = MaterialTheme.colorScheme.onBackground,
@@ -877,6 +881,10 @@ private fun AppScaffold(
                             onDownload = download::download,
                             quality = dlQuality,
                             onQualityChange = download::setQuality,
+                            format = DownloadFormat.fromName(dlFormat),
+                            onFormatChange = { context.musicApp.prefs.setDownloadFormat(it.name) },
+                            cutNonMusic = dlCutNonMusic,
+                            onCutNonMusicChange = context.musicApp.prefs::setCutNonMusic,
                             onCancel = download::cancel,
                             onUpdate = download::update,
                             onBack = { showDownload = false }

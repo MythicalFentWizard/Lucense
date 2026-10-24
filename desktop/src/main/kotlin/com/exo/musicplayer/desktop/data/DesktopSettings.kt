@@ -110,6 +110,14 @@ class DesktopSettings {
         get() = prefs.get(KEY_DOWNLOAD_QUALITY, "MEDIUM")
         set(value) = prefs.put(KEY_DOWNLOAD_QUALITY, value)
 
+    var downloadFormatName: String
+        get() = prefs.get(KEY_DOWNLOAD_FORMAT, "MP3")
+        set(value) = prefs.put(KEY_DOWNLOAD_FORMAT, value)
+
+    var downloadCutNonMusic: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, true)
+        set(value) = prefs.putBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, value)
+
     var duckEnabled: Boolean
         get() = prefs.getBoolean(KEY_DUCK_ENABLED, false)
         set(value) = prefs.putBoolean(KEY_DUCK_ENABLED, value)
@@ -296,6 +304,8 @@ class DesktopSettings {
         const val KEY_WEATHER_LON = "weather_lon"
         const val KEY_WRITE_TAGS = "write_tags_on_identify"
         const val KEY_DOWNLOAD_QUALITY = "download_quality"
+        const val KEY_DOWNLOAD_FORMAT = "download_format"
+        const val KEY_DOWNLOAD_CUT_NON_MUSIC = "download_cut_non_music"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"

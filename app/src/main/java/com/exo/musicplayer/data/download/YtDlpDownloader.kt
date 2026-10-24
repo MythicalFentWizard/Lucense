@@ -154,15 +154,22 @@ class YtDlpDownloader(private val context: Context) {
 
         val workDir = File(context.cacheDir, "ytdlp/${UUID.randomUUID()}").apply { mkdirs() }
         return@withContext try {
+            val prefs = context.musicApp.prefs
+            val format = DownloadFormat.fromName(prefs.downloadFormat.value)
             val request = newRequest(url).apply {
                 addOption("-x")                              // audio only
-                addOption("--audio-format", "mp3")
-                addOption("--audio-quality", quality.audioQuality)
+                addOption("--audio-format", format.ytDlp)
+                if (format.lossy) addOption("--audio-quality", quality.audioQuality)
                 // Narrows what is fetched, not just what it is re-encoded to,
                 // which matters more on a phone than on a desktop.
                 addOption("-f", quality.formatSelector)
-                addOption("--embed-thumbnail")               // cover art
+                if (format.holdsCover) {
+                    addOption("--embed-thumbnail")           // cover art, square
+                    addCommands(YtDlpTidy.squareCover(windows = false))
+                }
                 addOption("--add-metadata")                  // title/artist tags
+                addCommands(YtDlpTidy.TAGS)
+                if (prefs.cutNonMusic.value) addCommands(YtDlpTidy.NON_MUSIC_CUT)
                 addOption("--no-playlist")                   // a link inside a playlist
                 addOption("--no-mtime")
                 addOption("-o", "${workDir.absolutePath}/%(title)s.%(ext)s")
@@ -184,6 +191,12 @@ class YtDlpDownloader(private val context: Context) {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "download failed", t)
+            // A song that downloaded and converted, with only a step after it
+            // failing - the cover, say - is still the song.
+            val saved = workDir.listFiles()
+                ?.filter { it.isFile && it.length() > 0 && it.extension.lowercase() in AUDIO_EXTENSIONS }
+                ?.maxByOrNull { it.length() }
+            if (saved != null) return@withContext DownloadOutcome.Done(saved, saved.nameWithoutExtension)
             workDir.deleteRecursively()
             // A 403 on the audio is what an out-of-date yt-dlp gets. Once a
             // run, that is answered by looking for a newer one and trying the
@@ -268,6 +281,9 @@ class YtDlpDownloader(private val context: Context) {
             "getaddrinfo failed", "Connection reset", "No route to host"
         )
         const val TAG = "YtDlpDownloader"
+
+        /** What a finished download can be, as opposed to what it leaves behind. */
+        val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "opus", "ogg", "flac", "wav")
 
         const val KEY_CHECKED = "checked_at"
 

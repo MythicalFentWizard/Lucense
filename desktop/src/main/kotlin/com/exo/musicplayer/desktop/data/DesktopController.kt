@@ -51,6 +51,7 @@ import com.exo.musicplayer.data.weather.WeatherAffinity
 import com.exo.musicplayer.data.weather.WeatherCondition
 import com.exo.musicplayer.data.weather.WeatherSnapshot
 import com.exo.musicplayer.data.download.YouTubeTrouble
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.audio.AudioDevices
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
@@ -692,6 +693,7 @@ class DesktopController(parent: CoroutineScope) {
             engine.effects.reverb.decay = value.reverbDecay
             engine.effects.equalizer.enabled = value.eqEnabled
             engine.effects.equalizer.setGains(value.eqGains)
+            engine.effects.drive = value.drive
         }
 
     private val volumeState = mutableStateOf(settings.volume)
@@ -2023,7 +2025,7 @@ class DesktopController(parent: CoroutineScope) {
                     destination = staging,
                     // No conversion: the fingerprinter only needs samples, and
                     // ffmpeg may not be installed.
-                    toMp3 = false,
+                    format = null,
                     embedThumbnail = false,
                     wholePlaylist = false,
                     onProgress = { progress ->
@@ -3005,7 +3007,27 @@ class DesktopController(parent: CoroutineScope) {
     var toolProgress by mutableStateOf<Float?>(null)
         private set
     var downloadUrl by mutableStateOf("")
-    var downloadToMp3 by mutableStateOf(true)
+    private val formatState = mutableStateOf(
+        settings.downloadFormatName.takeIf { it != ORIGINAL_FORMAT }?.let(DownloadFormat::fromName)
+    )
+
+    /** What downloads are converted to; null keeps whatever the site served. */
+    var downloadFormat: DownloadFormat?
+        get() = formatState.value
+        set(value) {
+            formatState.value = value
+            settings.downloadFormatName = value?.name ?: ORIGINAL_FORMAT
+        }
+
+    private val cutNonMusicState = mutableStateOf(settings.downloadCutNonMusic)
+
+    /** Whether SponsorBlock's non-music parts of music videos are cut out. */
+    var downloadCutNonMusic: Boolean
+        get() = cutNonMusicState.value
+        set(value) {
+            cutNonMusicState.value = value
+            settings.downloadCutNonMusic = value
+        }
     var downloadEmbedArt by mutableStateOf(true)
     var downloadPlaylist by mutableStateOf(false)
 
@@ -3108,6 +3130,9 @@ class DesktopController(parent: CoroutineScope) {
         /** How long a yt-dlp is trusted before it is checked for a newer one. */
         const val YT_DLP_STALE_AFTER_MS = 2L * 24 * 60 * 60 * 1000
 
+        /** What the format setting holds for "keep what the site served". */
+        const val ORIGINAL_FORMAT = "ORIGINAL"
+
         /** Songs of a playlist downloading at once. */
         const val PLAYLIST_WORKERS = 4
 
@@ -3169,10 +3194,11 @@ class DesktopController(parent: CoroutineScope) {
         val result = YtDlp.download(
             target = target,
             destination = File(settings.downloadDir),
-            toMp3 = downloadToMp3 && tools.ffmpeg,
+            format = downloadFormat?.takeIf { tools.ffmpeg },
             embedThumbnail = downloadEmbedArt,
             wholePlaylist = wholePlaylist,
             quality = downloadQuality,
+            cutNonMusic = downloadCutNonMusic,
             onProgress = { progress ->
                 if (YouTubeTrouble.refused(progress.line)) refused = true
                 if (progress.line.startsWith("ERROR")) said = progress.line
@@ -3500,7 +3526,7 @@ class DesktopController(parent: CoroutineScope) {
             val result = YtDlp.download(
                 target = link,
                 destination = File(settings.downloadDir),
-                toMp3 = downloadToMp3 && tools.ffmpeg,
+                format = downloadFormat?.takeIf { tools.ffmpeg },
                 embedThumbnail = downloadEmbedArt,
                 wholePlaylist = false,
                 quality = downloadQuality,
@@ -3551,7 +3577,7 @@ class DesktopController(parent: CoroutineScope) {
         val result = YtDlp.downloadSpotify(
             url = url,
             destination = File(settings.downloadDir),
-            toMp3 = downloadToMp3,
+            format = downloadFormat,
             quality = downloadQuality,
             onProgress = { progress -> onDownloadProgress(id, progress) }
         )
@@ -4545,16 +4571,20 @@ private fun encodeFx(fx: DesktopFxState): String =
         if (fx.reverbEnabled) 1f else 0f,
         fx.reverbMix,
         fx.reverbDecay,
-        if (fx.eqEnabled) 1f else 0f
+        if (fx.eqEnabled) 1f else 0f,
+        fx.drive
     ).joinToString(",") + "|" + fx.eqGains.joinToString(",")
 
-/** Null for anything that isn't the six numbers and ten bands written above. */
+/**
+ * Null for anything that isn't the numbers and ten bands written above: six
+ * before distortion was added, seven since.
+ */
 private fun decodeFx(text: String): DesktopFxState? {
     val halves = text.split('|')
     if (halves.size != 2) return null
     val head = halves[0].split(',').mapNotNull { it.toFloatOrNull() }
     val gains = halves[1].split(',').mapNotNull { it.toFloatOrNull() }
-    if (head.size != 6 || gains.size != 10) return null
+    if (head.size !in 6..7 || gains.size != 10) return null
     return DesktopFxState(
         speed = head[0],
         pitchSemitones = head[1],
@@ -4562,7 +4592,8 @@ private fun decodeFx(text: String): DesktopFxState? {
         reverbMix = head[3],
         reverbDecay = head[4],
         eqEnabled = head[5] > 0.5f,
-        eqGains = gains
+        eqGains = gains,
+        drive = head.getOrElse(6) { 0f }.coerceIn(0f, 1f)
     )
 }
 

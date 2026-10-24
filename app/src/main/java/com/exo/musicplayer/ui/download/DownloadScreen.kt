@@ -1,5 +1,7 @@
 package com.exo.musicplayer.ui.download
 
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Update
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.download.DownloadQuality
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
@@ -48,6 +51,10 @@ fun DownloadScreen(
     onDownload: () -> Unit,
     quality: DownloadQuality,
     onQualityChange: (DownloadQuality) -> Unit,
+    format: DownloadFormat,
+    onFormatChange: (DownloadFormat) -> Unit,
+    cutNonMusic: Boolean,
+    onCutNonMusicChange: (Boolean) -> Unit,
     onCancel: () -> Unit,
     onUpdate: () -> Unit,
     onBack: () -> Unit,
@@ -140,10 +147,46 @@ fun DownloadScreen(
                 }
             }
             Text(
-                quality.description,
+                if (format.lossy) quality.description else "Doesn't apply to ${format.label}, which keeps everything",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Format", style = MaterialTheme.typography.bodySmall)
+                DownloadFormat.entries.forEach { option ->
+                    FilterChip(
+                        selected = option == format,
+                        onClick = { onFormatChange(option) },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+            Text(
+                format.note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Cut the non-music parts of music videos", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Spoken intros and skits that SponsorBlock's listeners have marked",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = cutNonMusic, onCheckedChange = onCutNonMusicChange)
+            }
             Spacer(Modifier.height(10.dp))
             Row(
                 Modifier.fillMaxWidth(),

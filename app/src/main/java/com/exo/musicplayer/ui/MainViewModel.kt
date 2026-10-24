@@ -920,6 +920,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setReverbRoom(room: ReverbRoom) = app.audioFx.setReverbRoom(room)
     fun setReverbAmount(amount: Float) = app.audioFx.setReverbAmount(amount)
     fun setEqEnabled(enabled: Boolean) = app.audioFx.setEqEnabled(enabled)
+    fun setFxDrive(amount: Float) = app.audioFx.setDrive(amount)
     fun setEqBand(band: Int, db: Float) = app.audioFx.setEqBand(band, db)
     fun flattenEq() = app.audioFx.flattenEq()
     fun resetFx() = app.audioFx.reset()

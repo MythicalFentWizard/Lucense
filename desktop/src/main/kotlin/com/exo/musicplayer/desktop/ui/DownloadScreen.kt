@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.DownloadEntry
@@ -102,16 +103,31 @@ fun DownloadScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 Column(Modifier.weight(1f)) {
-                    CheckRow(
-                        label = "Convert to MP3",
-                        checked = controller.downloadToMp3,
-                        note = "Off keeps whatever the site served — usually Opus, " +
-                            "which the player can't decode"
-                    ) { controller.downloadToMp3 = it }
+                    Text("Format", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+                    Spacer(Modifier.height(6.dp))
+                    SegmentedRow(
+                        options = listOf<DownloadFormat?>(null) + DownloadFormat.entries,
+                        selected = controller.downloadFormat,
+                        label = { it?.label ?: "As sent" },
+                        onSelect = { controller.downloadFormat = it }
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        controller.downloadFormat?.note ?: "whatever the site served, usually Opus, not converted",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Palette.TextFaint
+                    )
+                    Spacer(Modifier.height(10.dp))
                     CheckRow(
                         label = "Embed cover art",
-                        checked = controller.downloadEmbedArt
+                        checked = controller.downloadEmbedArt,
+                        note = "Cut square from the middle of a video's thumbnail"
                     ) { controller.downloadEmbedArt = it }
+                    CheckRow(
+                        label = "Cut the non-music parts of music videos",
+                        checked = controller.downloadCutNonMusic,
+                        note = "Spoken intros and skits that SponsorBlock's listeners have marked"
+                    ) { controller.downloadCutNonMusic = it }
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -128,7 +144,8 @@ fun DownloadScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        controller.downloadQuality.description,
+                        if (controller.downloadFormat?.lossy == false) "Doesn't apply to ${controller.downloadFormat?.label}, which keeps everything"
+                        else controller.downloadQuality.description,
                         style = MaterialTheme.typography.labelSmall,
                         color = Palette.TextFaint
                     )
