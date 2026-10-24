@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.download
 
+import com.sun.jna.platform.win32.Advapi32Util
+import com.sun.jna.platform.win32.WinReg
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -14,26 +16,29 @@ import java.net.URI
 import java.net.URL
 import java.net.http.HttpClient
 import java.net.http.WebSocket
+import java.sql.DriverManager
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * YouTube signed in to once, in a browser window of Lucense's own.
+ * YouTube signed in to once, in the default browser, with a profile of
+ * Lucense's own.
  *
  * A browser's own sign-in won't do for long: YouTube cycles a session's
  * cookies while it is used, and copies taken from a browser in daily use stop
  * working soon after. A session nothing else touches isn't cycled. So this
- * opens a browser from the Chromium family - Edge, which every Windows has,
- * or Chrome or Brave - with a profile of its own, at YouTube's sign-in. Once
- * the account is signed in, its cookies are read over the browser's local
- * debugging connection (Chrome-family browsers encrypt them on disk so no
- * other program can), the window is closed and its profile deleted. What is
- * left is Lucense's copy, used only by yt-dlp.
+ * opens the default browser - started apart from the one in daily use, with a
+ * profile of its own - at YouTube's sign-in. Once the account is signed in its
+ * cookies are read, the window is closed and the profile deleted. What is left
+ * is Lucense's copy, used only by yt-dlp.
  *
- * The browser is started as it would be by hand, with a debugging port on
- * this PC only and nothing driving its pages, so YouTube's sign-in sees an
- * ordinary browser.
+ * Chrome-family browsers (Opera, Opera GX, Chrome, Edge, Brave, Vivaldi) are
+ * read over their local debugging connection: they encrypt their cookies on
+ * disk so no other program can. Firefox keeps them readable in its profile.
+ * The browser is started as it would be by hand, with nothing driving its
+ * pages, so YouTube's sign-in sees an ordinary browser.
  */
 object OwnSignIn {
 
@@ -45,8 +50,32 @@ object OwnSignIn {
         data class Failed(val why: String) : Outcome
     }
 
-    /** The Chromium-family browser to sign in with: Edge first, since every Windows has it. */
-    fun browser(): File? {
+    enum class Family { CHROMIUM, FIREFOX }
+
+    /** A browser to sign in with: its program and how its cookies are read. */
+    data class Browser(val name: String, val exe: File, val family: Family)
+
+    /**
+     * The default browser, as Windows opens a web link; Edge, or another
+     * Chrome-family browser, when the default is one this can't use.
+     */
+    fun browser(): Browser? = defaultBrowser() ?: fallback()
+
+    private fun defaultBrowser(): Browser? = runCatching {
+        val progId = Advapi32Util.registryGetStringValue(
+            WinReg.HKEY_CURRENT_USER,
+            "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice",
+            "ProgId"
+        )
+        val command = Advapi32Util.registryGetStringValue(WinReg.HKEY_CLASSES_ROOT, "$progId\\shell\\open\\command", "")
+        // The program is the first part: quoted, or up to the first space.
+        val exe = File(
+            if (command.startsWith("\"")) command.drop(1).substringBefore('"') else command.substringBefore(' ')
+        ).takeIf { it.isFile } ?: return null
+        describe(exe)
+    }.getOrNull()
+
+    private fun fallback(): Browser? {
         val programs = listOfNotNull(System.getenv("ProgramFiles(x86)"), System.getenv("ProgramFiles"), System.getenv("LOCALAPPDATA"))
         val candidates = listOf(
             "Microsoft/Edge/Application/msedge.exe",
@@ -54,7 +83,22 @@ object OwnSignIn {
             "BraveSoftware/Brave-Browser/Application/brave.exe",
             "Vivaldi/Application/vivaldi.exe"
         )
-        return candidates.firstNotNullOfOrNull { path -> programs.map { File(it, path) }.firstOrNull { it.isFile } }
+        return candidates.firstNotNullOfOrNull { path -> programs.map { File(it, path) }.firstOrNull { it.isFile } }?.let(::describe)
+    }
+
+    /** What [exe] is, by its name and folder; null for a browser this can't read. */
+    private fun describe(exe: File): Browser? {
+        val name = exe.nameWithoutExtension.lowercase()
+        val where = exe.parentFile?.path.orEmpty().lowercase()
+        return when {
+            name == "firefox" -> Browser("Firefox", exe, Family.FIREFOX)
+            name == "msedge" -> Browser("Microsoft Edge", exe, Family.CHROMIUM)
+            name == "chrome" -> Browser("Chrome", exe, Family.CHROMIUM)
+            name == "brave" -> Browser("Brave", exe, Family.CHROMIUM)
+            name == "vivaldi" -> Browser("Vivaldi", exe, Family.CHROMIUM)
+            name == "opera" || name == "launcher" -> Browser(if ("opera gx" in where) "Opera GX" else "Opera", exe, Family.CHROMIUM)
+            else -> null
+        }
     }
 
     @Volatile private var stopRequested = false
@@ -72,23 +116,31 @@ object OwnSignIn {
      */
     suspend fun signIn(proxy: String?, onStatus: (String) -> Unit): Outcome = withContext(Dispatchers.IO) {
         stopRequested = false
-        val exe = browser() ?: return@withContext Outcome.Failed(
-            "No Edge, Chrome or Brave was found to sign in with. Use Firefox or a cookies.txt file instead."
+        val browser = browser() ?: return@withContext Outcome.Failed(
+            "No browser was found to sign in with. Use a cookies.txt file instead."
         )
         val profile = YouTubeSignIn.windowProfile
         profile.deleteRecursively()
         profile.mkdirs()
-        val window = runCatching { Window.open(exe, profile, SIGN_IN_URL, proxy, headless = false) }.getOrElse {
+        val window = runCatching {
+            when (browser.family) {
+                Family.CHROMIUM -> ChromiumWindow.open(browser.exe, profile, SIGN_IN_URL, proxy, hidden = false)
+                Family.FIREFOX -> FirefoxWindow.open(browser.exe, profile, SIGN_IN_URL, proxy)
+            }
+        }.getOrElse {
             profile.deleteRecursively()
-            return@withContext Outcome.Failed("${exe.nameWithoutExtension} didn't open: ${it.message}")
+            return@withContext Outcome.Failed("${browser.name} didn't open: ${it.message}")
         }
         try {
-            onStatus("A ${browserName(exe)} window opened. Sign in to YouTube there; it closes by itself once you have.")
+            onStatus(
+                "${browser.name} opened in a window of its own, apart from your usual one. Sign in to YouTube " +
+                    "there; it closes by itself once you have."
+            )
             waitForSignIn(window, onStatus)
         } finally {
             window.close()
             // The profile held the session too; only Lucense's copy is left.
-            repeat(10) {
+            repeat(20) {
                 if (!profile.exists() || profile.deleteRecursively()) return@repeat
                 delay(500)
             }
@@ -97,9 +149,9 @@ object OwnSignIn {
 
     private suspend fun waitForSignIn(window: Window, onStatus: (String) -> Unit): Outcome {
         val deadline = System.currentTimeMillis() + GIVE_UP_MS
-        var withoutPages = 0
+        var gone = 0
         while (true) {
-            if (stopRequested || !window.alive) return Outcome.Stopped
+            if (stopRequested) return Outcome.Stopped
             if (System.currentTimeMillis() > deadline) {
                 return Outcome.Failed("Nobody signed in for half an hour, so the window was closed.")
             }
@@ -109,73 +161,94 @@ object OwnSignIn {
                 // YouTube sets its last cookies a moment after the account's.
                 delay(SETTLE_MS)
                 val final = window.cookies() ?: cookies
-                return if (YouTubeSignIn.keepLines(netscape(final), YouTubeSignIn.Source.OWN)) {
+                return if (YouTubeSignIn.keepLines(final, YouTubeSignIn.Source.OWN)) {
                     Outcome.Kept
                 } else {
                     Outcome.Failed("The sign-in finished without YouTube's cookies. Try again.")
                 }
             }
-            // Every tab closed, though the browser may linger in the background.
-            withoutPages = if (window.pages() == 0) withoutPages + 1 else 0
-            if (withoutPages >= 2) return Outcome.Stopped
+            // Closed by hand, though a browser may linger in the background.
+            gone = if (window.open()) 0 else gone + 1
+            if (gone >= 2) return Outcome.Stopped
             delay(POLL_MS)
         }
     }
 
-    private fun browserName(exe: File): String = when (exe.nameWithoutExtension.lowercase()) {
-        "msedge" -> "Microsoft Edge"
-        "chrome" -> "Chrome"
-        "brave" -> "Brave"
-        "vivaldi" -> "Vivaldi"
-        else -> "browser"
-    }
-
     /** Signed in to YouTube, not only to Google: YouTube's own copy of the account cookie is there. */
-    private fun signedIn(cookies: JSONArray): Boolean = (0 until cookies.length()).any { index ->
-        val cookie = cookies.optJSONObject(index) ?: return@any false
-        cookie.optString("domain").endsWith("youtube.com") &&
-            cookie.optString("name") in setOf("SAPISID", "__Secure-3PAPISID")
+    private fun signedIn(lines: List<String>): Boolean = lines.any { line ->
+        val fields = line.removePrefix("#HttpOnly_").split('\t')
+        fields.size >= 7 && fields[0].endsWith("youtube.com") && fields[5] in setOf("SAPISID", "__Secure-3PAPISID")
     }
 
-    /** The browser's cookies as cookies.txt lines, the format yt-dlp reads. */
+    /** A browser window being signed in with, whichever kind. */
+    interface Window {
+        /** The browser's cookies as cookies.txt lines, or null when it didn't say. */
+        suspend fun cookies(): List<String>?
+
+        /** Whether the window is still there to sign in with. */
+        suspend fun open(): Boolean
+
+        suspend fun close()
+    }
+
+    /** A cookies.txt line, the format yt-dlp reads. */
+    private fun line(domain: String, path: String, secure: Boolean, httpOnly: Boolean, expires: Long, name: String, value: String): String =
+        listOf(
+            (if (httpOnly) "#HttpOnly_" else "") + domain,
+            if (domain.startsWith(".")) "TRUE" else "FALSE",
+            path.ifEmpty { "/" },
+            if (secure) "TRUE" else "FALSE",
+            expires.coerceAtLeast(0).toString(),
+            name,
+            value
+        ).joinToString("\t")
+
+    /** The browser's cookies, from the debugging connection's answer, as cookies.txt lines. */
     fun netscape(cookies: JSONArray): List<String> = (0 until cookies.length()).mapNotNull { index ->
         val cookie = cookies.optJSONObject(index) ?: return@mapNotNull null
         val domain = cookie.optString("domain").takeIf { it.isNotBlank() } ?: return@mapNotNull null
         val expires = cookie.optDouble("expires", -1.0)
-        listOf(
-            (if (cookie.optBoolean("httpOnly")) "#HttpOnly_" else "") + domain,
-            if (domain.startsWith(".")) "TRUE" else "FALSE",
+        line(
+            domain,
             cookie.optString("path", "/"),
-            if (cookie.optBoolean("secure")) "TRUE" else "FALSE",
-            if (cookie.optBoolean("session") || expires <= 0) "0" else expires.toLong().toString(),
+            cookie.optBoolean("secure"),
+            cookie.optBoolean("httpOnly"),
+            if (cookie.optBoolean("session") || expires <= 0) 0 else expires.toLong(),
             cookie.optString("name"),
             cookie.optString("value")
-        ).joinToString("\t")
+        )
     }
 
     /**
-     * A browser started with a profile of its own and a debugging port, and the
-     * connection to it. The port is the browser's own pick, read from the file
-     * it writes into the profile, so nothing else on the PC is in the way.
+     * A Chrome-family browser started with a profile of its own and a
+     * debugging port, and the connection to it. The port is the browser's own
+     * pick, read from the file it writes into the profile. Some browsers start
+     * through a launcher that hands over and exits - Opera does - so the
+     * browser is followed by its connection, not by the program started.
      */
-    class Window private constructor(
-        private val process: Process,
+    class ChromiumWindow private constructor(
+        private val profile: File,
         private val socket: WebSocket,
-        private val replies: ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>
-    ) {
+        private val replies: ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>,
+        private val listener: Replies
+    ) : Window {
         private val ids = AtomicInteger()
 
-        val alive: Boolean get() = process.isAlive
+        override suspend fun cookies(): List<String>? =
+            call("Storage.getCookies")?.optJSONObject("result")?.optJSONArray("cookies")?.let(::netscape)
 
-        /** Every cookie the browser holds, or null when it didn't answer. */
-        suspend fun cookies(): JSONArray? = call("Storage.getCookies")?.optJSONObject("result")?.optJSONArray("cookies")
+        override suspend fun open(): Boolean {
+            if (listener.closed) return false
+            val infos = call("Target.getTargets")?.optJSONObject("result")?.optJSONArray("targetInfos") ?: return false
+            return (0 until infos.length()).any { infos.optJSONObject(it)?.optString("type") == "page" }
+        }
 
-        /** How many tabs are open. */
+        /** How many tabs are open; for checking. */
         suspend fun pages(): Int = call("Target.getTargets")?.optJSONObject("result")?.optJSONArray("targetInfos")
             ?.let { infos -> (0 until infos.length()).count { infos.optJSONObject(it)?.optString("type") == "page" } } ?: 0
 
         private suspend fun call(method: String, params: JSONObject = JSONObject()): JSONObject? {
-            if (!process.isAlive) return null
+            if (listener.closed) return null
             val id = ids.incrementAndGet()
             val reply = CompletableDeferred<JSONObject>()
             replies[id] = reply
@@ -185,22 +258,30 @@ object OwnSignIn {
             }.getOrNull().also { replies.remove(id) }
         }
 
-        /** Closes the browser, asking first and insisting after. */
-        suspend fun close() {
+        /** Closes the browser: asked first, then its processes ended if it is still there. */
+        override suspend fun close() {
+            val pid = call("SystemInfo.getProcessInfo")?.optJSONObject("result")?.optJSONArray("processInfo")
+                ?.let { infos -> (0 until infos.length()).mapNotNull { infos.optJSONObject(it) }.firstOrNull { it.optString("type") == "browser" } }
+                ?.optLong("id")?.takeIf { it > 0 }
             runCatching { withTimeoutOrNull(3_000) { call("Browser.close") } }
             runCatching { socket.abort() }
             withContext(Dispatchers.IO) {
-                if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
-                    process.descendants().forEach { it.destroyForcibly() }
-                    process.destroyForcibly()
-                    process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+                val browser = pid?.let { ProcessHandle.of(it).orElse(null) }
+                if (browser != null) {
+                    runCatching { browser.onExit().get(10, TimeUnit.SECONDS) }
+                    if (browser.isAlive) {
+                        browser.descendants().forEach { it.destroyForcibly() }
+                        browser.destroyForcibly()
+                    }
                 }
+                // Anything still holding the profile: helpers, or a browser its launcher left.
+                endProcessesUsing(profile)
             }
         }
 
         companion object {
-            /** Starts [exe] on [url] with [profile]; [headless] only for checking this works without a window. */
-            suspend fun open(exe: File, profile: File, url: String, proxy: String?, headless: Boolean): Window {
+            /** Starts [exe] on [url] with [profile]; [hidden] only for checking this works without a window. */
+            suspend fun open(exe: File, profile: File, url: String, proxy: String?, hidden: Boolean): ChromiumWindow {
                 val command = buildList {
                     add(exe.absolutePath)
                     add("--user-data-dir=${profile.absolutePath}")
@@ -208,48 +289,169 @@ object OwnSignIn {
                     add("--no-first-run")
                     add("--no-default-browser-check")
                     add("--disable-sync")
-                    if (headless) add("--headless=new")
+                    if (hidden) {
+                        add("--headless=new")
+                        // Off the screen, for a browser that starts a window all the same.
+                        add("--window-position=-4000,-4000")
+                    }
                     // Chrome takes socks5:// where yt-dlp says socks5h://; the name is resolved through it either way.
                     proxy?.let { add("--proxy-server=" + it.replace("socks5h://", "socks5://").replace("socks4a://", "socks4://")) }
                     add("--new-window")
                     add(url)
                 }
-                val process = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+                ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
                 try {
                     // The browser writes the port it chose into the profile once it listens.
                     val portFile = File(profile, "DevToolsActivePort")
                     val port = withTimeoutOrNull(STARTUP_MS) {
-                        while (true) {
-                            portFile.takeIf { it.isFile }?.readLines()?.firstOrNull()?.trim()?.toIntOrNull()?.let { return@withTimeoutOrNull it }
-                            if (!process.isAlive) error("it closed straight away")
-                            delay(200)
+                        var found: Int? = null
+                        while (found == null) {
+                            found = portFile.takeIf { it.isFile }?.readLines()?.firstOrNull()?.trim()?.toIntOrNull()
+                            if (found == null) delay(200)
                         }
-                        @Suppress("UNREACHABLE_CODE")
-                        null
+                        found
                     } ?: error("it didn't start in time")
                     // Straight to this PC: Lucense's proxy is for the internet, not for localhost.
                     val version = withContext(Dispatchers.IO) {
+                        @Suppress("DEPRECATION")
                         URL("http://127.0.0.1:$port/json/version").openConnection(Proxy.NO_PROXY).getInputStream().use { it.readBytes().decodeToString() }
                     }
                     val address = JSONObject(version).getString("webSocketDebuggerUrl")
                     val replies = ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>()
+                    val listener = Replies(replies)
                     val socket = HttpClient.newBuilder().proxy(HttpClient.Builder.NO_PROXY).build()
                         .newWebSocketBuilder()
-                        .buildAsync(URI(address), Replies(replies))
+                        .buildAsync(URI(address), listener)
                         .await()
-                    return Window(process, socket, replies)
+                    return ChromiumWindow(profile, socket, replies, listener)
                 } catch (failure: Throwable) {
-                    process.descendants().forEach { it.destroyForcibly() }
-                    process.destroyForcibly()
+                    withContext(Dispatchers.IO) { endProcessesUsing(profile) }
                     throw failure
                 }
             }
         }
     }
 
+    /**
+     * Firefox with a profile of its own: started apart from any Firefox
+     * already open, told to wait for its browser so the program started is
+     * the browser's life, with first-run pages off and Lucense's proxy set.
+     * Its cookies are read from the profile's own database.
+     */
+    class FirefoxWindow private constructor(private val process: Process, private val profile: File) : Window {
+
+        override suspend fun cookies(): List<String>? = withContext(Dispatchers.IO) {
+            val database = File(profile, "cookies.sqlite").takeIf { it.isFile } ?: return@withContext null
+            // Copied with its write-ahead log, so the read sees what Firefox has written and doesn't lock it.
+            val copy = File(profile.parentFile, "firefox-cookies-${System.nanoTime()}")
+            copy.mkdirs()
+            try {
+                database.copyTo(File(copy, "cookies.sqlite"), overwrite = true)
+                File(profile, "cookies.sqlite-wal").takeIf { it.isFile }?.copyTo(File(copy, "cookies.sqlite-wal"), overwrite = true)
+                DriverManager.getConnection("jdbc:sqlite:" + File(copy, "cookies.sqlite").absolutePath).use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.executeQuery("SELECT host, path, isSecure, isHttpOnly, expiry, name, value FROM moz_cookies").use { rows ->
+                            buildList {
+                                while (rows.next()) {
+                                    var expiry = rows.getLong(5)
+                                    // Newer Firefox counts it in milliseconds.
+                                    if (expiry > 100_000_000_000L) expiry /= 1000
+                                    add(line(rows.getString(1), rows.getString(2), rows.getInt(3) != 0, rows.getInt(4) != 0, expiry, rows.getString(6), rows.getString(7)))
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (failure: Exception) {
+                null
+            } finally {
+                copy.deleteRecursively()
+            }
+        }
+
+        /**
+         * Firefox's launcher may hand over and exit even when asked to wait, so
+         * the browser is followed by the lock it holds on its profile instead.
+         */
+        override suspend fun open(): Boolean = process.isAlive || withContext(Dispatchers.IO) {
+            val lock = File(profile, "parent.lock")
+            lock.isFile && runCatching { java.io.RandomAccessFile(lock, "rw").close() }.isFailure
+        }
+
+        override suspend fun close() {
+            withContext(Dispatchers.IO) {
+                process.descendants().forEach { it.destroy() }
+                process.destroy()
+                if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                    process.descendants().forEach { it.destroyForcibly() }
+                    process.destroyForcibly()
+                }
+                endProcessesUsing(profile)
+            }
+        }
+
+        companion object {
+            /** [hidden] only for checking this works without a window. */
+            fun open(exe: File, profile: File, url: String, proxy: String?, hidden: Boolean = false): FirefoxWindow {
+                File(profile, "user.js").writeText(firefoxPrefs(proxy))
+                val command = buildList {
+                    addAll(listOf(exe.absolutePath, "-profile", profile.absolutePath, "-no-remote", "-new-instance", "-wait-for-browser"))
+                    if (hidden) add("-headless")
+                    add(url)
+                }
+                val process = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+                return FirefoxWindow(process, profile)
+            }
+
+            private fun firefoxPrefs(proxy: String?): String = buildString {
+                fun pref(name: String, value: Any) =
+                    appendLine("user_pref(\"$name\", ${if (value is String) "\"$value\"" else value});")
+                pref("browser.shell.checkDefaultBrowser", false)
+                pref("browser.aboutwelcome.enabled", false)
+                pref("startup.homepage_welcome_url", "")
+                pref("startup.homepage_welcome_url.additional", "")
+                pref("browser.startup.homepage_override.mstone", "ignore")
+                pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true)
+                pref("toolkit.telemetry.reportingpolicy.firstRun", false)
+                pref("browser.sessionstore.resume_from_crash", false)
+                val route = proxy?.let { runCatching { URI(it) }.getOrNull() }
+                if (route?.host != null && route.port > 0) {
+                    pref("network.proxy.type", 1)
+                    if (route.scheme.startsWith("socks")) {
+                        pref("network.proxy.socks", route.host)
+                        pref("network.proxy.socks_port", route.port)
+                        pref("network.proxy.socks_version", if (route.scheme.startsWith("socks4")) 4 else 5)
+                        pref("network.proxy.socks_remote_dns", true)
+                    } else {
+                        pref("network.proxy.http", route.host)
+                        pref("network.proxy.http_port", route.port)
+                        pref("network.proxy.ssl", route.host)
+                        pref("network.proxy.ssl_port", route.port)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Ends whatever is still running with [profile] - a browser left behind by its launcher. */
+    private fun endProcessesUsing(profile: File) {
+        runCatching {
+            val path = profile.absolutePath.replace("'", "''")
+            ProcessBuilder(
+                "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                // Not this search itself, whose own command line names the profile too.
+                "Get-CimInstance Win32_Process | Where-Object { \$_.ProcessId -ne \$PID -and \$_.CommandLine -and \$_.CommandLine.Contains('$path') } | " +
+                    "ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            ).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start().waitFor(20, TimeUnit.SECONDS)
+        }
+    }
+
     /** Collects the browser's answers, a message at a time, and hands each to whoever asked. */
-    private class Replies(private val waiting: ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>) : WebSocket.Listener {
+    class Replies(private val waiting: ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>) : WebSocket.Listener {
         private val partial = StringBuilder()
+
+        @Volatile var closed = false
+            private set
 
         override fun onText(webSocket: WebSocket, data: CharSequence, last: Boolean): CompletionStage<*>? {
             partial.append(data)
@@ -261,9 +463,18 @@ object OwnSignIn {
             webSocket.request(1)
             return null
         }
+
+        override fun onClose(webSocket: WebSocket, statusCode: Int, reason: String?): CompletionStage<*>? {
+            closed = true
+            return null
+        }
+
+        override fun onError(webSocket: WebSocket, error: Throwable?) {
+            closed = true
+        }
     }
 
-    /** YouTube's sign-in, landing back on YouTube: the same address the phone's sign-in uses. */
+    /** YouTube's sign-in, landing back on YouTube. */
     const val SIGN_IN_URL =
         "https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true" +
             "&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26app%3Ddesktop%26next%3Dhttps%253A%252F%252Fwww.youtube.com%252F"

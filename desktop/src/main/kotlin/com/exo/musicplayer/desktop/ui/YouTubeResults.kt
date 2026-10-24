@@ -75,8 +75,13 @@ fun YouTubeResultList(
     }
 }
 
+/**
+ * One result, as Identify's YouTube search shows it: the thumbnail to preview
+ * by, the title, the channel, Download mp3 and Preview. Discover's Your
+ * YouTube shows its songs with the same row.
+ */
 @Composable
-private fun YouTubeRow(
+fun YouTubeRow(
     video: YouTubeVideo,
     preview: PreviewState,
     onPreview: () -> Unit,

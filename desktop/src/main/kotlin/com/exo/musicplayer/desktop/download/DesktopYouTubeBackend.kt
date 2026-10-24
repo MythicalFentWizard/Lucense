@@ -61,7 +61,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
      * What a playlist link holds, without downloading any of it; with yt-dlp's
      * own error when it can't be read (a private playlist, a dead link).
      */
-    suspend fun playlist(url: String): Pair<YtDlpFlatSearch.Playlist?, String?> = withContext(Dispatchers.IO) {
+    suspend fun playlist(url: String, limit: Int? = null): Pair<YtDlpFlatSearch.Playlist?, String?> = withContext(Dispatchers.IO) {
         val exe = ToolPaths.ytDlp
         if (!exe.isFile) return@withContext null to "yt-dlp is missing from this installation."
 
@@ -71,6 +71,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                     add(exe.absolutePath)
                     add(url)
                     addAll(YtDlpFlatSearch.PLAYLIST_ARGUMENTS)
+                    limit?.let { addAll(listOf("--playlist-end", "$it")) }
                     addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
                     addAll(YT_DLP_NETWORK)
                 }

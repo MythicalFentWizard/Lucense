@@ -3,6 +3,7 @@ package com.exo.musicplayer.desktop.audio
 import com.exo.musicplayer.data.youtube.PreviewLabel
 import com.exo.musicplayer.data.youtube.PreviewState
 import com.exo.musicplayer.desktop.data.NetworkProxy
+import com.exo.musicplayer.desktop.data.ProxyRelay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -161,6 +162,10 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
         }
     }
 
+    /** A playlist of pieces rather than one file: YouTube hands these out when it has nothing else. */
+    private fun isSegmented(url: String): Boolean =
+        ".m3u8" in url || "/hls_playlist/" in url || "/hls_variant/" in url || url.startsWith("https://manifest.googlevideo.com/")
+
     /** [clip] plays only that stretch of [url], in milliseconds: the trimmer's preview of a cut. */
     private suspend fun stream(ffmpeg: java.io.File, url: String, key: String, clip: LongRange? = null) =
         withContext(Dispatchers.IO) {
@@ -170,7 +175,12 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
             // fetched here, along the same route as everything else, and fed to
             // ffmpeg on stdin; without one ffmpeg reads the URL itself as before.
             val local = java.io.File(url).isFile
-            val proxied = !local && NetworkProxy.urlFor(url) != null
+            // A segmented stream (HLS) can't come over stdin: its playlist names
+            // the pieces, which ffmpeg fetches itself. Behind a proxy it fetches
+            // them through the relay, along the same route; on stdin it would
+            // get only the playlist and wait on pieces it couldn't reach.
+            val relay = if (!local && isSegmented(url)) ProxyRelay.forFfmpeg(url) else null
+            val proxied = !local && relay == null && NetworkProxy.urlFor(url) != null
             val started = ProcessBuilder(
                 buildList {
                     add(ffmpeg.absolutePath)
@@ -178,6 +188,7 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
                     if (clip != null) addAll(listOf("-ss", "%.3f".format(java.util.Locale.ROOT, clip.first / 1000.0)))
                     when {
                         local -> addAll(listOf("-i", url))
+                        relay != null -> addAll(listOf("-http_proxy", relay, "-rw_timeout", "15000000", "-i", url))
                         proxied -> addAll(listOf("-i", "pipe:0"))
                         // Keeps a stalled connection from hanging the preview forever.
                         else -> addAll(listOf("-rw_timeout", "15000000", "-i", url))

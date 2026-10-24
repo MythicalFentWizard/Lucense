@@ -79,8 +79,27 @@ object YtDlpFlatSearch {
 
     /** A mix YouTube made: a list it keeps going, around a song or the account's taste. */
     data class Mix(val id: String, val title: String) {
-        val url: String get() = "https://www.youtube.com/playlist?list=$id"
+        /**
+         * Where it can be read. A mix has no playlist page of its own - YouTube
+         * says "This playlist type is unviewable" - only a watch page of the song
+         * it grew from, with the list beside it; the song is the id's last eleven
+         * characters. YouTube Music's lists ("RDCLAK…") are ordinary playlists.
+         */
+        val url: String
+            get() {
+                val seed = id.takeLast(11)
+                return if (!id.startsWith("RDCLAK") && id.length >= 13 && VIDEO_ID.matches(seed)) {
+                    "https://www.youtube.com/watch?v=$seed&list=$id"
+                } else {
+                    "https://www.youtube.com/playlist?list=$id"
+                }
+            }
     }
+
+    private val VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
+
+    /** How much of a mix is read: it never ends, so it is cut off. */
+    const val MIX_LIMIT = 50
 
     /** What the home page suggested: videos and Shorts, and the mixes among them. */
     data class Feed(val videos: List<YouTubeVideo>, val mixes: List<Mix>)

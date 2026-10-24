@@ -72,6 +72,7 @@ import com.exo.musicplayer.data.youtube.YouTubeFormat
 import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
+import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
 import com.exo.musicplayer.data.lyrics.LyricsTranslator
 import com.exo.musicplayer.data.lyrics.LrcParser
@@ -84,8 +85,6 @@ import kotlinx.coroutines.sync.Semaphore
 import com.exo.musicplayer.data.discover.Discovery
 import com.exo.musicplayer.data.discover.DiscoverTrack
 import com.exo.musicplayer.data.discover.DiscoverBrowser
-import com.exo.musicplayer.data.youtube.StreamItem
-import com.exo.musicplayer.data.discover.ForYouItem
 import com.exo.musicplayer.data.discover.YouTubeForYou
 import com.exo.musicplayer.desktop.audio.SongGraph
 import com.exo.musicplayer.desktop.download.DesktopYouTubeBackend
@@ -2235,49 +2234,11 @@ class DesktopController(parent: CoroutineScope) {
             }
         },
         readMix = { url ->
-            val (playlist, error) = youtubeBackend.playlist(url)
+            val (playlist, error) = youtubeBackend.playlist(url, limit = YtDlpFlatSearch.MIX_LIMIT)
             playlist?.songs to error?.let(YouTubeTrouble::explain)
         }
     )
 
-    /** A suggested song heard through the small player, named as the tab names it. */
-    fun previewForYou(item: ForYouItem) = hear(
-        item.video.id,
-        PreviewLabel(item.title, item.artist ?: item.video.channel, item.coverUrl ?: item.video.thumbnail(YouTubeVideo.ThumbSize.SMALL))
-    ) { id -> youtubeBackend.audioStreamUrl(id, downloadQuality) }
-
-    /** Suggested songs streamed one after another, from [start]. */
-    fun streamForYou(items: List<ForYouItem>, start: Int = 0, name: String = "Your YouTube") {
-        stream(
-            StreamQueue(
-                name,
-                items.map { item ->
-                    StreamItem(
-                        title = item.title,
-                        artist = item.artist,
-                        link = item.video.watchUrl,
-                        durationMs = (item.video.durationSeconds ?: 0) * 1000L,
-                        artworkUrl = item.coverUrl ?: item.video.thumbnail(YouTubeVideo.ThumbSize.SMALL)
-                    )
-                },
-                index = start.coerceIn(0, (items.size - 1).coerceAtLeast(0))
-            )
-        )
-    }
-
-    /** Which download each suggested video turned into, by video id. */
-    private val forYouDownloads = mutableStateMapOf<String, Long>()
-
-    /** The video itself, as it was suggested, tagged the way any YouTube download is. */
-    fun downloadForYou(video: YouTubeVideo) {
-        queueDownload(video.watchUrl, song = null)?.let { forYouDownloads[video.id] = it }
-    }
-
-    /** How a suggested video's download is going, or null if it was never asked for. */
-    fun forYouDownload(video: YouTubeVideo): DownloadEntry? {
-        val id = forYouDownloads[video.id] ?: return null
-        return downloads.firstOrNull { it.id == id }
-    }
 
     /** The download each Discover song was sent to, by the song's Deezer id. */
     private val discoverDownloads = mutableStateMapOf<Long, Long>()
