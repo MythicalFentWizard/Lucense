@@ -711,11 +711,13 @@ private fun AppScaffold(
                     }
 
                     Tab.IDENTIFY -> {
-                        val stage by recognition.stage.collectAsStateWithLifecycle()
-                        val result by recognition.result.collectAsStateWithLifecycle()
-                        val rquery by recognition.query.collectAsStateWithLifecycle()
-                        val label by recognition.sourceLabel.collectAsStateWithLifecycle()
                         val rmode by recognition.mode.collectAsStateWithLifecycle()
+                        // The open tab's own box, result and progress; each tab keeps its own.
+                        val openTab = recognition.tab(rmode)
+                        val stage by openTab.stage.collectAsStateWithLifecycle()
+                        val result by openTab.result.collectAsStateWithLifecycle()
+                        val rquery by openTab.query.collectAsStateWithLifecycle()
+                        val label by openTab.sourceLabel.collectAsStateWithLifecycle()
                         val rartist by recognition.artist.collectAsStateWithLifecycle()
                         val rtitle by recognition.title.collectAsStateWithLifecycle()
                         val youtubeResults by recognition.youtubeResults.collectAsStateWithLifecycle()

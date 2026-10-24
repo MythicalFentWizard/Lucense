@@ -179,7 +179,7 @@ class RecognitionViewModel(
     fun streamResults(pauseLibrary: () -> Unit) {
         val videos = _youtubeResults.value
         if (videos.isEmpty()) return
-        stream(StreamQueue.ofVideos("YouTube: ${_query.value}", videos), pauseLibrary)
+        stream(StreamQueue.ofVideos("YouTube: ${tab(SearchMode.YOUTUBE).query.value}", videos), pauseLibrary)
     }
 
     private val _youtubeResults = MutableStateFlow<List<YouTubeVideo>>(emptyList())
@@ -189,13 +189,14 @@ class RecognitionViewModel(
     val youtubeStatus: StateFlow<String?> = _youtubeStatus.asStateFlow()
 
     fun searchYouTube() {
-        val text = _query.value.trim()
+        val tab = tab(SearchMode.YOUTUBE)
+        val text = tab.query.value.trim()
         if (text.isEmpty()) return
-        _sourceLabel.value = null
+        tab.sourceLabel.value = null
 
         viewModelScope.launch {
             _youtubeResults.value = emptyList()
-            _stage.value = RecognitionStage.SEARCHING
+            tab.stage.value = RecognitionStage.SEARCHING
             _youtubeStatus.value = null
 
             val result = youtube.search(text, limit = 25)
@@ -211,7 +212,7 @@ class RecognitionViewModel(
                     "${counted(result.videos.size, "result")} via ${result.via} — " +
                         "${result.skipped.joinToString(", ")} did not answer"
             }
-            _stage.value = RecognitionStage.IDLE
+            tab.stage.value = RecognitionStage.IDLE
         }
     }
 
@@ -248,11 +249,26 @@ class RecognitionViewModel(
     private val _mode = MutableStateFlow(SearchMode.NAME)
     val mode: StateFlow<SearchMode> = _mode.asStateFlow()
 
-    private val _stage = MutableStateFlow(RecognitionStage.IDLE)
-    val stage: StateFlow<RecognitionStage> = _stage.asStateFlow()
+    /**
+     * One Identify tab's own box, result, progress and sources.
+     *
+     * The tabs used to share them, so a lyrics search's songs showed under
+     * Name, a YouTube search's spinner under Link, and a search that finished
+     * after the tab was changed landed in whichever was open by then. Each
+     * tab now keeps its own while the app runs (not from one launch to the
+     * next), and a search writes into the tab it was started from.
+     */
+    class IdentifyTab {
+        val query = MutableStateFlow("")
+        val result = MutableStateFlow<RecognitionResult?>(null)
+        val stage = MutableStateFlow(RecognitionStage.IDLE)
+        val sourceLabel = MutableStateFlow<String?>(null)
+    }
 
-    private val _result = MutableStateFlow<RecognitionResult?>(null)
-    val result: StateFlow<RecognitionResult?> = _result.asStateFlow()
+    private val tabs = SearchMode.entries.associateWith { IdentifyTab() }
+
+    /** The tab [mode] keeps; the open one by default. */
+    fun tab(mode: SearchMode = _mode.value): IdentifyTab = tabs.getValue(mode)
 
     /**
      * Artist and title asked for separately, as on the desktop.
@@ -273,13 +289,8 @@ class RecognitionViewModel(
 
     fun setTitle(value: String) { _title.value = value }
 
-    private val _query = MutableStateFlow("")
-    val query: StateFlow<String> = _query.asStateFlow()
-
-    private val _sourceLabel = MutableStateFlow<String?>(null)
-    val sourceLabel: StateFlow<String?> = _sourceLabel.asStateFlow()
-
-    fun setQuery(value: String) { _query.value = value }
+    /** Types into the open tab's box. */
+    fun setQuery(value: String) { tab().query.value = value }
 
     fun setMode(value: SearchMode) { _mode.value = value }
 
@@ -304,13 +315,14 @@ class RecognitionViewModel(
      * recognisable audio, not a keepable copy, and on a phone the smaller
      * download is the difference between a few seconds and a wait.
      */
-    fun identifyLink(url: String = _query.value) {
+    fun identifyLink(url: String = tab(SearchMode.LINK).query.value) {
+        val tab = tab(SearchMode.LINK)
         val target = url.trim()
         if (target.isEmpty()) return
-        _sourceLabel.value = null
+        tab.sourceLabel.value = null
         viewModelScope.launch {
-            _result.value = null
-            _stage.value = RecognitionStage.FETCHING
+            tab.result.value = null
+            tab.stage.value = RecognitionStage.FETCHING
 
             val outcome = runCatching {
                 downloader.downloadAudio(target, DownloadQuality.LOW) { _, _, _ -> }
@@ -318,21 +330,21 @@ class RecognitionViewModel(
 
             when (outcome) {
                 is DownloadOutcome.NotReady -> {
-                    _stage.value = RecognitionStage.IDLE
-                    _result.value = RecognitionResult.Error(
+                    tab.stage.value = RecognitionStage.IDLE
+                    tab.result.value = RecognitionResult.Error(
                         "The downloader isn't ready yet. Open the download window once " +
                             "so it can finish setting itself up, then try again."
                     )
                 }
 
                 is DownloadOutcome.Failed -> {
-                    _stage.value = RecognitionStage.IDLE
-                    _result.value = RecognitionResult.Error(outcome.message)
+                    tab.stage.value = RecognitionStage.IDLE
+                    tab.result.value = RecognitionResult.Error(outcome.message)
                 }
 
                 is DownloadOutcome.Done -> {
                     try {
-                        _stage.value = RecognitionStage.EXTRACTING
+                        tab.stage.value = RecognitionStage.EXTRACTING
                         val samples = runCatching {
                             AudioSampler.sampleMono16k(
                                 getApplication(),
@@ -341,12 +353,12 @@ class RecognitionViewModel(
                         }.getOrNull()
 
                         if (samples == null) {
-                            _result.value = RecognitionResult.Error(
+                            tab.result.value = RecognitionResult.Error(
                                 "Downloaded the audio but couldn't decode it."
                             )
                         } else {
-                            _stage.value = RecognitionStage.IDENTIFYING
-                            _result.value = runCatching { shazam.recognize(samples) }
+                            tab.stage.value = RecognitionStage.IDENTIFYING
+                            tab.result.value = runCatching { shazam.recognize(samples) }
                                 .getOrElse {
                                     RecognitionResult.Error(
                                         it.message ?: "Identification failed."
@@ -360,7 +372,7 @@ class RecognitionViewModel(
                             outcome.file.parentFile?.deleteRecursively()
                                 ?: outcome.file.delete()
                         }
-                        _stage.value = RecognitionStage.IDLE
+                        tab.stage.value = RecognitionStage.IDLE
                     }
                 }
             }
@@ -368,33 +380,35 @@ class RecognitionViewModel(
     }
 
     fun clearResult() {
-        _result.value = null
-        _sourceLabel.value = null
+        val tab = tab()
+        tab.result.value = null
+        tab.sourceLabel.value = null
     }
 
     /** Fingerprints a snippet of [uri] and asks Shazam what it is. */
     fun identify(uri: Uri, label: String?) {
-        _sourceLabel.value = label
+        val tab = tab()
+        tab.sourceLabel.value = label
         viewModelScope.launch {
-            _result.value = null
-            _stage.value = RecognitionStage.EXTRACTING
+            tab.result.value = null
+            tab.stage.value = RecognitionStage.EXTRACTING
             val samples = runCatching {
                 AudioSampler.sampleMono16k(getApplication(), uri)
             }.getOrNull()
 
             if (samples == null) {
-                _stage.value = RecognitionStage.IDLE
-                _result.value = RecognitionResult.Error(
+                tab.stage.value = RecognitionStage.IDLE
+                tab.result.value = RecognitionResult.Error(
                     "Couldn't read any audio from that file. If it's a video, it may " +
                         "have no audio track or use a codec this device can't decode."
                 )
                 return@launch
             }
 
-            _stage.value = RecognitionStage.IDENTIFYING
-            _result.value = runCatching { shazam.recognize(samples) }
+            tab.stage.value = RecognitionStage.IDENTIFYING
+            tab.result.value = runCatching { shazam.recognize(samples) }
                 .getOrElse { RecognitionResult.Error(it.message ?: "Identification failed.") }
-            _stage.value = RecognitionStage.IDLE
+            tab.stage.value = RecognitionStage.IDLE
         }
     }
 
@@ -405,19 +419,20 @@ class RecognitionViewModel(
      * query box otherwise - so a pasted "artist - title" still works.
      */
     fun searchByName() {
+        val tab = tab(SearchMode.NAME)
         val artistText = _artist.value.trim()
         val titleText = _title.value.trim()
         if (artistText.isNotEmpty() || titleText.isNotEmpty()) {
             searchByFields(artistText, titleText)
             return
         }
-        val text = _query.value.trim()
+        val text = tab.query.value.trim()
         if (text.isEmpty()) return
-        _sourceLabel.value = null
+        tab.sourceLabel.value = null
         viewModelScope.launch {
-            _result.value = null
-            _stage.value = RecognitionStage.SEARCHING
-            _result.value = runCatching {
+            tab.result.value = null
+            tab.stage.value = RecognitionStage.SEARCHING
+            tab.result.value = runCatching {
                 val found = search.searchAll(text)
                 // Each service answers loosely and none can see the others, so
                 // relevance is decided here rather than trusting the order they
@@ -425,7 +440,7 @@ class RecognitionViewModel(
                 // returns another that merely shares a couple of words.
                 val matches = MatchRanker.rank(text, found)
                 val dropped = found.size - matches.size
-                _sourceLabel.value = buildString {
+                tab.sourceLabel.value = buildString {
                     append(
                         matches.map { it.provider }.distinct()
                             .filter { it.isNotBlank() }
@@ -436,16 +451,17 @@ class RecognitionViewModel(
                 if (matches.isEmpty()) RecognitionResult.NoMatch
                 else RecognitionResult.Found(matches)
             }.getOrElse { RecognitionResult.Error(it.message ?: "Search failed.") }
-            _stage.value = RecognitionStage.IDLE
+            tab.stage.value = RecognitionStage.IDLE
         }
     }
 
     private fun searchByFields(artistText: String, titleText: String) {
-        _sourceLabel.value = null
+        val tab = tab(SearchMode.NAME)
+        tab.sourceLabel.value = null
         viewModelScope.launch {
-            _result.value = null
-            _stage.value = RecognitionStage.SEARCHING
-            _result.value = runCatching {
+            tab.result.value = null
+            tab.stage.value = RecognitionStage.SEARCHING
+            tab.result.value = runCatching {
                 // The providers take one string, so the halves are joined for
                 // the lookup and separated again only for scoring.
                 val combined = listOf(artistText, titleText)
@@ -454,7 +470,7 @@ class RecognitionViewModel(
                 val found = search.searchAll(combined)
                 val matches = MatchRanker.rankSplit(artistText, titleText, found)
                 val dropped = found.size - matches.size
-                _sourceLabel.value = buildString {
+                tab.sourceLabel.value = buildString {
                     append(
                         matches.map { it.provider }.distinct()
                             .filter { it.isNotBlank() }
@@ -465,7 +481,7 @@ class RecognitionViewModel(
                 if (matches.isEmpty()) RecognitionResult.NoMatch
                 else RecognitionResult.Found(matches)
             }.getOrElse { RecognitionResult.Error(it.message ?: "Search failed.") }
-            _stage.value = RecognitionStage.IDLE
+            tab.stage.value = RecognitionStage.IDLE
         }
     }
 
@@ -476,22 +492,23 @@ class RecognitionViewModel(
      * the query against titles would throw away every correct answer.
      */
     fun searchByLyrics() {
-        val text = _query.value.trim()
+        val tab = tab(SearchMode.LYRICS)
+        val text = tab.query.value.trim()
         if (text.isEmpty()) return
-        _sourceLabel.value = null
+        tab.sourceLabel.value = null
         viewModelScope.launch {
-            _result.value = null
-            _stage.value = RecognitionStage.SEARCHING
-            _result.value = runCatching {
+            tab.result.value = null
+            tab.stage.value = RecognitionStage.SEARCHING
+            tab.result.value = runCatching {
                 val matches = lyricSearch.searchAll(text, limitPer = 8)
-                _sourceLabel.value = matches.map { it.provider }.distinct()
+                tab.sourceLabel.value = matches.map { it.provider }.distinct()
                     .filter { it.isNotBlank() }
                     .joinToString(" · ")
                     .takeIf { it.isNotBlank() }
                 if (matches.isEmpty()) RecognitionResult.NoMatch
                 else RecognitionResult.Found(matches)
             }.getOrElse { RecognitionResult.Error(it.message ?: "Search failed.") }
-            _stage.value = RecognitionStage.IDLE
+            tab.stage.value = RecognitionStage.IDLE
         }
     }
 }

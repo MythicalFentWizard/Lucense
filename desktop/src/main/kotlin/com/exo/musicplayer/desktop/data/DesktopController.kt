@@ -207,7 +207,7 @@ class DesktopController(parent: CoroutineScope) {
                 scanning = false
                 lyricsLoading = false
                 youtubeBusy = false
-                identifyBusy = false
+                identifyTabs.values.forEach { it.busy = false }
                 merging = false
                 System.err.println("Lucense: a background job failed: ${error.stackTraceToString()}")
             }
@@ -1930,13 +1930,39 @@ class DesktopController(parent: CoroutineScope) {
 
     // ---- Identify -----------------------------------------------------------
 
-    var identifyQuery by mutableStateOf("")
-    var identifyResults by mutableStateOf<List<MusicMatch>>(emptyList())
-        private set
-    var identifyBusy by mutableStateOf(false)
-        private set
-    var identifyStatus by mutableStateOf<String?>(null)
-        private set
+    /**
+     * One Identify tab's own box, results and word on how it went.
+     *
+     * The tabs used to share one box, one list and one status line, so a
+     * lyrics search's results showed under Name, and a search that finished
+     * after the tab was changed landed in whichever tab was open by then. Now
+     * each tab keeps its own for as long as the app is open (not from one
+     * launch to the next), and a search writes into the tab it was started
+     * from.
+     */
+    class IdentifyTab {
+        var query by mutableStateOf("")
+        var results by mutableStateOf<List<MusicMatch>>(emptyList())
+        var status by mutableStateOf<String?>(null)
+        var busy by mutableStateOf(false)
+        var needsFfmpeg by mutableStateOf(false)
+    }
+
+    private val identifyTabs = IdentifyMode.entries.associateWith { IdentifyTab() }
+
+    /** The tab [mode] keeps; the open one by default. */
+    fun identifyTab(mode: IdentifyMode = identifyMode): IdentifyTab = identifyTabs.getValue(mode)
+
+    /** The open tab's box. */
+    var identifyQuery: String
+        get() = identifyTab().query
+        set(value) {
+            identifyTab().query = value
+        }
+    val identifyResults: List<MusicMatch> get() = identifyTab().results
+    val identifyBusy: Boolean get() = identifyTab().busy
+    val identifyStatus: String? get() = identifyTab().status
+
     var identifyTarget by mutableStateOf<DesktopTrack?>(null)
     var identifyMode by mutableStateOf(IdentifyMode.NAME)
 
@@ -2206,9 +2232,8 @@ class DesktopController(parent: CoroutineScope) {
         searchYouTube(text)
     }
 
-    /** Set when the last attempt failed only because ffmpeg is missing. */
-    var identifyNeedsFfmpeg by mutableStateOf(false)
-        private set
+    /** Set when the open tab's last attempt failed only because ffmpeg is missing. */
+    val identifyNeedsFfmpeg: Boolean get() = identifyTab().needsFfmpeg
 
     /**
      * Finds a song from a line of its lyrics.
@@ -2217,20 +2242,21 @@ class DesktopController(parent: CoroutineScope) {
      * and NetEase both search lyric text, where the seven catalogues only match
      * titles and artists and would return nothing at all for a remembered line.
      */
-    fun searchByLyrics(text: String = identifyQuery) {
+    fun searchByLyrics(text: String = identifyTab(IdentifyMode.LYRICS).query) {
         if (text.isBlank()) return
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Searching lyrics..."
+        val tab = identifyTab(IdentifyMode.LYRICS)
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Searching lyrics..."
         scope.launch {
             val results = lyricSearch.searchAll(text, limitPer = 8)
-            identifyResults = results
-            identifyStatus = if (results.isEmpty()) {
+            tab.results = results
+            tab.status = if (results.isEmpty()) {
                 "No song matched those words. Try a longer or more distinctive line."
             } else {
                 "${results.size} songs contain those words"
             }
-            identifyBusy = false
+            tab.busy = false
         }
     }
 
@@ -2242,10 +2268,11 @@ class DesktopController(parent: CoroutineScope) {
      */
     fun identifyMediaFile(file: File) {
         identifyTarget = null
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Reading ${file.name}..."
-        scope.launch { fingerprint(file, file.nameWithoutExtension, markPath = null) }
+        val tab = identifyTab()
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Reading ${file.name}..."
+        scope.launch { fingerprint(file, file.nameWithoutExtension, markPath = null, tab = tab) }
     }
 
     /**
@@ -2255,17 +2282,18 @@ class DesktopController(parent: CoroutineScope) {
      * stopping at a temporary file rather than the library - yt-dlp handles well
      * over a thousand sites, so this is not limited to the obvious three.
      */
-    fun identifyLink(url: String = identifyQuery) {
+    fun identifyLink(url: String = identifyTab(IdentifyMode.LINK).query) {
         val target = url.trim()
+        val tab = identifyTab(IdentifyMode.LINK)
         if (target.isBlank()) return
         if (!tools.ready) {
-            identifyStatus = "yt-dlp is missing from this installation - try reinstalling."
+            tab.status = "yt-dlp is missing from this installation - try reinstalling."
             return
         }
         identifyTarget = null
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Fetching audio from that link..."
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Fetching audio from that link..."
 
         scope.launch {
             val staging = io {
@@ -2276,19 +2304,19 @@ class DesktopController(parent: CoroutineScope) {
                 val fetchTarget = when (resolved) {
                     is ResolvedLink.Direct -> resolved.url
                     is ResolvedLink.Search -> {
-                        identifyStatus = "Finding that track on YouTube..."
+                        tab.status = "Finding that track on YouTube..."
                         when (val found = linkFinder.find(YouTubeLinkFinder.Wanted(title = resolved.query))) {
                             is YouTubeLinkFinder.Outcome.Found -> found.pick.video.watchUrl
                             is YouTubeLinkFinder.Outcome.NothingSuitable -> {
-                                identifyStatus = found.message
-                                identifyBusy = false
+                                tab.status = found.message
+                                tab.busy = false
                                 return@launch
                             }
                         }
                     }
                     is ResolvedLink.Unsupported -> {
-                        identifyStatus = resolved.reason
-                        identifyBusy = false
+                        tab.status = resolved.reason
+                        tab.busy = false
                         return@launch
                     }
                 }
@@ -2303,19 +2331,19 @@ class DesktopController(parent: CoroutineScope) {
                     wholePlaylist = false,
                     onProgress = { progress ->
                         progress.percent?.let {
-                            identifyStatus = "Fetching audio... ${(it * 100).toInt()}%"
+                            tab.status = "Fetching audio... ${(it * 100).toInt()}%"
                         }
                     }
                 )
 
                 val file = result.getOrNull()?.firstOrNull()
                 if (file == null) {
-                    identifyStatus = result.exceptionOrNull()?.message
+                    tab.status = result.exceptionOrNull()?.message
                         ?: "Couldn't get any audio from that link."
-                    identifyBusy = false
+                    tab.busy = false
                     return@launch
                 }
-                fingerprint(file, file.nameWithoutExtension, markPath = null)
+                fingerprint(file, file.nameWithoutExtension, markPath = null, tab = tab)
             } finally {
                 io { staging.deleteRecursively() }
             }
@@ -2323,41 +2351,40 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     /** Shared tail of every fingerprint route. */
-    private suspend fun fingerprint(file: File, fallbackName: String, markPath: String?) {
+    private suspend fun fingerprint(file: File, fallbackName: String, markPath: String?, tab: IdentifyTab) {
         when (val outcome = MediaAudio.sample(file)) {
             SampleOutcome.NeedsFfmpeg -> {
-                identifyNeedsFfmpeg = true
-                identifyStatus = "That format needs ffmpeg - one click in the Download tab."
-                identifyBusy = false
+                tab.needsFfmpeg = true
+                tab.status = "That format needs ffmpeg - one click in the Download tab."
+                tab.busy = false
             }
 
             is SampleOutcome.Failed -> {
-                identifyStatus = outcome.message
-                identifyBusy = false
+                tab.status = outcome.message
+                tab.busy = false
             }
 
             is SampleOutcome.Ok -> {
-                identifyStatus = "Matching against Shazam..."
+                tab.status = "Matching against Shazam..."
                 when (val result = shazam.recognize(outcome.samples)) {
                     is RecognitionResult.Found -> {
-                        identifyResults = result.matches
+                        tab.results = result.matches
                         val best = result.matches.firstOrNull()
-                        identifyStatus = "Identified: ${best?.display ?: fallbackName}"
-                        identifyQuery = best?.display ?: fallbackName
+                        tab.status = "Identified: ${best?.display ?: fallbackName}"
                     }
                     RecognitionResult.NoMatch -> {
-                        identifyStatus = "No fingerprint match. Searching by name instead..."
-                        identifyMode = IdentifyMode.NAME
-                        identifyQuery = fallbackName
-                        identifyBusy = false
+                        // Searched by name in this same tab, rather than moving
+                        // to Name and writing over what was typed there.
+                        tab.status = "No fingerprint match. Searching by name instead..."
+                        tab.busy = false
                         markPath?.let { io { store.mark(it, "fingerprintedAt") } }
-                        searchCatalogues(fallbackName)
+                        searchCatalogues(fallbackName, tab)
                         return
                     }
-                    is RecognitionResult.Error -> identifyStatus = result.message
+                    is RecognitionResult.Error -> tab.status = result.message
                 }
                 markPath?.let { io { store.mark(it, "fingerprintedAt") } }
-                identifyBusy = false
+                tab.busy = false
             }
         }
     }
@@ -2374,22 +2401,22 @@ class DesktopController(parent: CoroutineScope) {
         val artist = identifyArtist.trim()
         val title = identifyTitle.trim()
         if (artist.isBlank() && title.isBlank()) return
+        val tab = identifyTab(IdentifyMode.NAME)
 
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Searching seven catalogues..."
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Searching seven catalogues..."
         scope.launch {
             // Providers take a single string, so the halves are joined for the
             // lookup and separated again only for scoring.
             val combined = listOf(artist, title).filter { it.isNotBlank() }.joinToString(" ")
             val found = catalogue.searchAll(combined, limitPer = 8)
             val results = MatchRanker.rankSplit(artist, title, found)
-            identifyResults = results
-            identifyQuery = combined
+            tab.results = results
 
             val dropped = found.size - results.size
             val services = results.map { it.provider }.distinct().size
-            identifyStatus = when {
+            tab.status = when {
                 results.isEmpty() ->
                     "Nothing came back. Try fewer words, or just the artist."
                 dropped > 0 ->
@@ -2398,24 +2425,24 @@ class DesktopController(parent: CoroutineScope) {
                 else ->
                     "${results.size} matches from $services services"
             }
-            identifyBusy = false
+            tab.busy = false
         }
     }
 
-    fun searchCatalogues(text: String = identifyQuery) {
+    fun searchCatalogues(text: String = identifyQuery, tab: IdentifyTab = identifyTab()) {
         if (text.isBlank()) return
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Searching seven catalogues…"
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Searching seven catalogues…"
         scope.launch {
             val found = catalogue.searchAll(text, limitPer = 8)
             // Providers each answer loosely and none of them can see the others,
             // so relevance is decided here rather than trusting whatever order
             // they came back in.
             val results = MatchRanker.rank(text, found)
-            identifyResults = results
+            tab.results = results
             val dropped = found.size - results.size
-            identifyStatus = when {
+            tab.status = when {
                 results.isEmpty() -> "Nothing came back. Try fewer words, or just the artist."
                 dropped > 0 ->
                     "${results.size} matches from " +
@@ -2425,24 +2452,26 @@ class DesktopController(parent: CoroutineScope) {
                     "${results.size} matches from " +
                         "${results.map { it.provider }.distinct().size} services"
             }
-            identifyBusy = false
+            tab.busy = false
         }
     }
 
     /** Fingerprints a track in the library and asks Shazam what it is. */
     fun identifyFile(track: DesktopTrack) {
         identifyTarget = track
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Fingerprinting ${track.title}..."
+        val tab = identifyTab()
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Fingerprinting ${track.title}..."
         scope.launch {
-            fingerprint(track.file, track.title, markPath = track.file.absolutePath)
+            fingerprint(track.file, track.title, markPath = track.file.absolutePath, tab = tab)
         }
     }
 
     /** Writes a chosen match onto a track: tags, and art if the match has any. */
     fun applyMatch(track: DesktopTrack, match: MusicMatch) {
-        identifyBusy = true
+        val tab = identifyTab()
+        tab.busy = true
         scope.launch {
             if (writeTags) {
                 io {
@@ -2457,8 +2486,8 @@ class DesktopController(parent: CoroutineScope) {
             }
             match.artworkUrl?.let { Covers.fetchAndStore(track, it, writeTags) }
             io { store.mark(track.file.absolutePath, "identifiedAt") }
-            identifyStatus = "Applied \"${match.display}\" to ${track.file.name}."
-            identifyBusy = false
+            tab.status = "Applied \"${match.display}\" to ${track.file.name}."
+            tab.busy = false
             rescan()
         }
     }

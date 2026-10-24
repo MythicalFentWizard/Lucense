@@ -158,7 +158,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                 Spacer(Modifier.width(10.dp))
                 AccentButton(
                     if (mode == IdentifyMode.LINK) "Identify" else "Search",
-                    enabled = !controller.identifyBusy && !controller.youtubeBusy && canRun
+                    enabled = canRun && !(if (mode == IdentifyMode.YOUTUBE) controller.youtubeBusy else controller.identifyBusy)
                 ) { run() }
             }
 
@@ -224,7 +224,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                     color = Palette.TextDim
                 )
             }
-            if (controller.identifyBusy || controller.youtubeBusy) {
+            if (if (mode == IdentifyMode.YOUTUBE) controller.youtubeBusy else controller.identifyBusy) {
                 Spacer(Modifier.height(10.dp))
                 ThinProgress(null)
             }
