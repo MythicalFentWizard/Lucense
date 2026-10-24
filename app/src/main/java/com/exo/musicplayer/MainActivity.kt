@@ -169,7 +169,7 @@ class MainActivity : ComponentActivity() {
                 song?.positionMs = { musicApp.playback.state.value.positionNow().toDouble() }
                 song?.load(path)
             }
-            MusicPlayerTheme(theme = theme, song = song) {
+            MusicPlayerTheme(theme = theme, song = song, coverArt = current?.artPath) {
                 NotificationPermissionGate()
                 AppScaffold(
                     viewModel = viewModel,
@@ -928,6 +928,7 @@ private fun AppScaffold(
                                 onPalette = themeSettings::setPalette,
                                 onMode = themeSettings::setMode,
                                 onDynamic = themeSettings::setDynamicColor,
+                                onCoverColours = themeSettings::setCoverColours,
                                 onBackdrop = themeSettings::setBackdrop,
                                 onReactiveMode = themeSettings::setReactiveMode,
                                 onWallpaper = themeSettings::setWallpaper,

@@ -73,7 +73,7 @@ fun ThemeEditorWindow(controller: DesktopController, onClose: () -> Unit) {
 private fun ThemeEditor(controller: DesktopController, onClose: () -> Unit) {
     // Starts from what is on screen, so a preset can be tweaked rather than rebuilt.
     var draft by remember {
-        mutableStateOf(if (controller.accent == AccentChoice.CUSTOM) Palette.custom else Palette.colors)
+        mutableStateOf(if (controller.accent == AccentChoice.CUSTOM) Palette.custom else Palette.themeColors)
     }
     var field by remember { mutableStateOf(ColourField.PRIMARY) }
 

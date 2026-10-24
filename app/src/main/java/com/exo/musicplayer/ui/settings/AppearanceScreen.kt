@@ -66,6 +66,7 @@ fun AppearanceScreen(
     onPalette: (AppPalette) -> Unit,
     onMode: (ThemeMode) -> Unit,
     onDynamic: (Boolean) -> Unit,
+    onCoverColours: (Boolean) -> Unit,
     onBackdrop: (BackdropStyle) -> Unit,
     onReactiveMode: (ReactiveMode) -> Unit,
     onWallpaper: (Uri) -> Unit,
@@ -187,6 +188,15 @@ fun AppearanceScreen(
                     onCheckedChange = onDynamic
                 )
             }
+        }
+
+        item {
+            ToggleRow(
+                title = "Colours from the cover",
+                subtitle = "The accent follows the artwork of the song playing",
+                checked = theme.coverColours,
+                onCheckedChange = onCoverColours
+            )
         }
 
         item { SectionLabel("Background") }

@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.data
 
+import androidx.compose.ui.graphics.toArgb
+import com.exo.musicplayer.data.art.CoverColour
 import com.exo.musicplayer.data.library.AudioPrint
 import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.library.SearchQuery
@@ -307,6 +309,7 @@ class DesktopController(parent: CoroutineScope) {
                 openListenEvent(started)
                 engine.trackGain = gainFor(started)
                 loadLyricsFor(started)
+                followCover(started)
                 applyFxFor(started)
                 tellDiscord()
                 refreshUpNext()
@@ -1001,7 +1004,54 @@ class DesktopController(parent: CoroutineScope) {
         set(value) {
             Palette.use(value)
             settings.accentName = value.name
+            // Taken again against the new theme's background, which may be light.
+            if (coverColours) followCover(engine.status.value.track)
         }
+
+    // Colours from the cover, after Riff (github.com/rootscripts/riff, MIT).
+
+    private val coverColoursState = mutableStateOf(settings.coverColours)
+
+    /** Whether the accent follows the cover of the song playing. */
+    var coverColours: Boolean
+        get() = coverColoursState.value
+        set(value) {
+            coverColoursState.value = value
+            settings.coverColours = value
+            followCover(engine.status.value.track)
+        }
+
+    private var coverJob: Job? = null
+
+    /** Eases the accent to [track]'s cover colour, or back to the theme's own. */
+    private fun followCover(track: DesktopTrack?) {
+        if (!coverColours && Palette.colors === Palette.themeColors) return
+        coverJob?.cancel()
+        coverJob = scope.launch {
+            val target = if (coverColours && track != null) {
+                val art = Covers.cached(track) ?: if (Covers.knownMissing(track)) null else Covers.load(track)
+                art?.let { accentOf(it) }
+            } else {
+                null
+            }
+            val from = Palette.Accent
+            val to = target ?: Palette.themeColors.accent
+            if (from != to) {
+                for (step in 1..COVER_STEPS) {
+                    Palette.setCoverAccent(androidx.compose.ui.graphics.lerp(from, to, step / COVER_STEPS.toFloat()))
+                    delay(24)
+                }
+            }
+            Palette.setCoverAccent(target)
+        }
+    }
+
+    private suspend fun accentOf(art: ImageBitmap): Color? = withContext(Dispatchers.Default) {
+        if (art.width == 0 || art.height == 0) return@withContext null
+        val pixels = IntArray(art.width * art.height)
+        art.readPixels(pixels)
+        CoverColour.accentFrom(pixels, Palette.Content.toArgb())?.let { Color(it) }
+    }
 
     private val backdropState = mutableStateOf(BackdropStyle.fromName(settings.backdrop))
 
@@ -1286,6 +1336,7 @@ class DesktopController(parent: CoroutineScope) {
         engine.play(track)
         openListenEvent(track)
         loadLyricsFor(track)
+        followCover(track)
         applyFxFor(track)
         tellDiscord()
         refreshUpNext()
@@ -1349,6 +1400,7 @@ class DesktopController(parent: CoroutineScope) {
         val track = tracks.firstOrNull { it.file.absolutePath == path } ?: return
         engine.prepare(track, settings.lastPosition)
         loadLyricsFor(track)
+        followCover(track)
     }
 
     // ---- Sleep timer ----------------------------------------------------------
@@ -4707,3 +4759,6 @@ enum class RepeatMode(val label: String) {
 /** What to send a catalogue when looking a track up. */
 private val DesktopTrack.searchQuery: String
     get() = listOfNotNull(artist?.takeIf { it.isNotBlank() }, title).joinToString(" ")
+
+/** Steps in the accent's ease from one cover to the next, about 0.4 s. */
+private const val COVER_STEPS = 16

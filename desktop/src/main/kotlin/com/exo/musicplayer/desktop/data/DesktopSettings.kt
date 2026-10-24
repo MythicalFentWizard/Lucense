@@ -118,6 +118,11 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, true)
         set(value) = prefs.putBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, value)
 
+    /** Whether the accent follows the cover of the song playing. */
+    var coverColours: Boolean
+        get() = prefs.getBoolean(KEY_COVER_COLOURS, false)
+        set(value) = prefs.putBoolean(KEY_COVER_COLOURS, value)
+
     var duckEnabled: Boolean
         get() = prefs.getBoolean(KEY_DUCK_ENABLED, false)
         set(value) = prefs.putBoolean(KEY_DUCK_ENABLED, value)
@@ -306,6 +311,7 @@ class DesktopSettings {
         const val KEY_DOWNLOAD_QUALITY = "download_quality"
         const val KEY_DOWNLOAD_FORMAT = "download_format"
         const val KEY_DOWNLOAD_CUT_NON_MUSIC = "download_cut_non_music"
+        const val KEY_COVER_COLOURS = "cover_colours"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"

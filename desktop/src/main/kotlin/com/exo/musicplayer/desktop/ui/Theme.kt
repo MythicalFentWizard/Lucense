@@ -42,6 +42,12 @@ object Palette {
     private val chosen = mutableStateOf(AccentChoice.MOCHA)
     private val scheme = mutableStateOf(AccentChoice.MOCHA.colors)
     private val customScheme = mutableStateOf(AccentChoice.MOCHA.colors)
+
+    /** The accent taken from the song's cover, laid over the theme; null for the theme's own. */
+    private val coverAccent = mutableStateOf<Color?>(null)
+
+    /** The theme with the cover's accent over it, when there is one: what every getter reads. */
+    private val shown = mutableStateOf(AccentChoice.MOCHA.colors)
     private val starsOverride = mutableStateOf<Color?>(null)
     private val lyricsActiveOverride = mutableStateOf<Color?>(null)
     private val lyricsInactiveOverride = mutableStateOf<Color?>(null)
@@ -49,46 +55,61 @@ object Palette {
     val choice: AccentChoice get() = chosen.value
 
     /** The colours in use right now. */
-    val colors: ThemeColors get() = scheme.value
+    val colors: ThemeColors get() = shown.value
+
+    /** The chosen theme's own colours, without the cover's accent. */
+    val themeColors: ThemeColors get() = scheme.value
 
     /** The Custom theme's colours, whether or not it is the one in use. */
     val custom: ThemeColors get() = customScheme.value
 
-    val Base: Color get() = scheme.value.base          // window, deepest layer
-    val Sidebar: Color get() = scheme.value.sidebar    // navigation rail
-    val Content: Color get() = scheme.value.content    // main surface
-    val Raised: Color get() = scheme.value.raised      // transport bar, headers
-    val Hover: Color get() = scheme.value.hover
-    val Line: Color get() = scheme.value.line
+    val Base: Color get() = shown.value.base          // window, deepest layer
+    val Sidebar: Color get() = shown.value.sidebar    // navigation rail
+    val Content: Color get() = shown.value.content    // main surface
+    val Raised: Color get() = shown.value.raised      // transport bar, headers
+    val Hover: Color get() = shown.value.hover
+    val Line: Color get() = shown.value.line
 
-    val Text: Color get() = scheme.value.text
-    val TextDim: Color get() = scheme.value.textDim
-    val TextFaint: Color get() = scheme.value.textFaint
+    val Text: Color get() = shown.value.text
+    val TextDim: Color get() = shown.value.textDim
+    val TextFaint: Color get() = shown.value.textFaint
 
-    val Accent: Color get() = scheme.value.accent
-    val AccentSoft: Color get() = scheme.value.soft
-    val Selected: Color get() = scheme.value.selected
+    val Accent: Color get() = shown.value.accent
+    val AccentSoft: Color get() = shown.value.soft
+    val Selected: Color get() = shown.value.selected
 
     /** Foreground for anything sitting on [Accent]. */
-    val OnAccent: Color get() = scheme.value.onAccent
+    val OnAccent: Color get() = shown.value.onAccent
 
     /** The resting fill of the main buttons. */
-    val Button: Color get() = scheme.value.button
+    val Button: Color get() = shown.value.button
 
     /** Foreground for anything sitting on [Button]. */
-    val OnButton: Color get() = ThemeColors.readableOn(scheme.value.button, scheme.value)
+    val OnButton: Color get() = ThemeColors.readableOn(shown.value.button, shown.value)
 
     /** The background effect's colour: the user's own pick, or the accent. */
-    val Stars: Color get() = starsOverride.value ?: scheme.value.accent
+    val Stars: Color get() = starsOverride.value ?: shown.value.accent
 
     fun use(choice: AccentChoice) {
         chosen.value = choice
         scheme.value = if (choice == AccentChoice.CUSTOM) customScheme.value else choice.colors
+        refresh()
     }
 
     fun setCustom(colors: ThemeColors) {
         customScheme.value = colors
         if (chosen.value == AccentChoice.CUSTOM) scheme.value = colors
+        refresh()
+    }
+
+    /** Lays [color] over the theme as its accent, after Riff's colours from the cover; null takes it off. */
+    fun setCoverAccent(color: Color?) {
+        coverAccent.value = color
+        refresh()
+    }
+
+    private fun refresh() {
+        shown.value = coverAccent.value?.let { scheme.value.withAccent(it) } ?: scheme.value
     }
 
     fun setStars(color: Color?) {
@@ -96,7 +117,7 @@ object Palette {
     }
 
     /** The line being sung: the user's own colour, or the accent. */
-    val LyricsActive: Color get() = lyricsActiveOverride.value ?: scheme.value.accent
+    val LyricsActive: Color get() = lyricsActiveOverride.value ?: shown.value.accent
 
     /** Every other line: the user's own colour, or the dimmed text colour. */
     val LyricsInactive: Color get() = lyricsInactiveOverride.value ?: TextDim
@@ -133,6 +154,18 @@ data class ThemeColors(
      * from the primary, so an old saved theme still loads.
      */
     fun encode(): String = listOf(accent, soft, selected, button).joinToString(",") { hex(it) }
+
+    /**
+     * These colours with another accent, mixed into the soft, selected and
+     * button tones the way a published scheme mixes its own.
+     */
+    fun withAccent(accent: Color): ThemeColors = copy(
+        accent = accent,
+        soft = lerp(accent, content, 0.45f),
+        selected = lerp(accent, content, 0.82f),
+        onAccent = contrastingWith(accent),
+        button = lerp(accent, content, 0.38f)
+    )
 
     companion object {
         fun hex(color: Color): String = "%08X".format(color.toArgb())
