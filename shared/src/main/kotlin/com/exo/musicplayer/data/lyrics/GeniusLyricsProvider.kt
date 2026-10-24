@@ -21,6 +21,17 @@ import java.util.Locale
  * breaks it where the other three would be unaffected. Every failure path
  * returns NotFound so the chain simply ends without lyrics rather than erroring.
  */
+/**
+ * A page of Genius's own: a translation or a romanization of someone else's
+ * song, filed under one of Genius's accounts ("Genius Traducciones al
+ * Español", "Genius English Translations", "Genius Romanizations"). Its title
+ * names the original - "Alan Walker - Faded (Traducción al Español)" - so it
+ * can look like the best match for a song, and was taken for one: its words,
+ * and its account as the artist.
+ */
+internal fun isGeniusTranslation(result: JSONObject): Boolean =
+    result.optJSONObject("primary_artist")?.optString("name").orEmpty().startsWith("Genius ", ignoreCase = true)
+
 class GeniusLyricsProvider : LyricsProvider {
 
     override val label = "Genius"
@@ -60,6 +71,7 @@ class GeniusLyricsProvider : LyricsProvider {
             val result = hits.optJSONObject(index)?.optJSONObject("result") ?: continue
             // "incomplete" and "unreleased" pages exist and hold nothing useful.
             if (result.optString("lyrics_state") != "complete") continue
+            if (isGeniusTranslation(result)) continue
             val url = result.optString("url").takeIf { it.isNotBlank() } ?: continue
 
             // Guard against confidently returning the wrong song's words.
@@ -125,7 +137,43 @@ class GeniusLyricsProvider : LyricsProvider {
         }
 
         if (parts.isEmpty()) return null
-        return parts.joinToString("\n").let(::toPlainText).takeIf { it.isNotBlank() }
+        return parts.joinToString("\n") { withoutExcluded(it) }.let(::toPlainText).takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Drops what Genius marks as no part of the words: the header inside the
+     * first container, "278 Contributors · Translations · Español …", which
+     * otherwise opened every song's lyrics.
+     */
+    private fun withoutExcluded(fragment: String): String {
+        var text = fragment
+        while (true) {
+            val marker = text.indexOf("data-exclude-from-selection=\"true\"")
+            if (marker < 0) return text
+            val open = text.lastIndexOf("<div", marker, ignoreCase = true)
+            var index = text.indexOf('>', marker) + 1
+            if (open < 0 || index <= 0) return text
+            var depth = 1
+            var end = -1
+            while (index < text.length) {
+                val nextOpen = text.indexOf("<div", index, ignoreCase = true)
+                val nextClose = text.indexOf("</div", index, ignoreCase = true)
+                if (nextClose < 0) break
+                if (nextOpen in 0 until nextClose) {
+                    depth++
+                    index = nextOpen + 4
+                } else {
+                    depth--
+                    if (depth == 0) {
+                        end = text.indexOf('>', nextClose).let { if (it < 0) text.length else it + 1 }
+                        break
+                    }
+                    index = nextClose + 5
+                }
+            }
+            if (end < 0) return text
+            text = text.removeRange(open, end)
+        }
     }
 
     private fun toPlainText(fragment: String): String = fragment
