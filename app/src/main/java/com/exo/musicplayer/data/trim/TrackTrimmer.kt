@@ -7,6 +7,7 @@ import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.ingest.ImportResult
 import com.exo.musicplayer.musicApp
 import com.yausername.ffmpeg.FFmpeg
+import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -17,8 +18,9 @@ import java.io.File
  *
  * The ffmpeg that comes with the downloader does the cutting. It is run
  * directly, the way the downloader's own runner starts it: the program is in
- * the app's native library folder, and the libraries it needs are unpacked
- * under no_backup the first time it is set up. The piece is written to the
+ * the app's native library folder, and the libraries it needs (its own, and
+ * the C++ runtime that comes with Python) are unpacked under no_backup when
+ * the packages are set up. The piece is written to the
  * cache and handed to the importer, which gives it a place in the library like
  * any other song, and then the cache copy goes.
  */
@@ -26,6 +28,9 @@ class TrackTrimmer(private val context: Context) {
 
     suspend fun save(track: Track, startMs: Long, endMs: Long): Result<Track> = withContext(Dispatchers.IO) {
         runCatching {
+            // Both packages, as the downloader sets them up: ffmpeg's own
+            // libraries need the C++ runtime, which comes in Python's.
+            YoutubeDL.getInstance().init(context)
             FFmpeg.getInstance().init(context)
             val binary = File(context.applicationInfo.nativeLibraryDir, "libffmpeg.so")
             check(binary.isFile) { "ffmpeg isn't part of this build." }

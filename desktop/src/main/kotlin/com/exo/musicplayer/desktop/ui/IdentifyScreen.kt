@@ -103,7 +103,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                     IdentifyMode.YOUTUBE ->
                         "The whole of YouTube, not just YouTube Music, because the music " +
                             "filter reports no view counts, dates or descriptions at all. " +
-                            "Preview a result to hear it, then take it as an mp3."
+                            "Preview a result to hear it, then download it."
                 }
             )
             Spacer(Modifier.height(12.dp))

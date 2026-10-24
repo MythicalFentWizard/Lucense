@@ -2047,7 +2047,7 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
-    /** Hands the video to the existing downloader, as an mp3 at the set quality. */
+    /** Hands the video to the existing downloader, in the chosen format at the set quality. */
     fun downloadYouTube(video: YouTubeVideo) {
         startDownload(video.watchUrl)
     }

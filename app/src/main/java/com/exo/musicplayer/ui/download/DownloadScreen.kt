@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun DownloadScreen(
     state: DownloadUiState,
@@ -90,7 +91,7 @@ fun DownloadScreen(
         Text(
             text = "Paste a YouTube, SoundCloud or Bandcamp link, or just type an artist " +
                 "and song name and Lucense finds the song on YouTube first. Either way " +
-                "the audio arrives as an mp3, tagged and added to your library. Spotify " +
+                "the audio arrives in the format picked below, tagged and added to your library. Spotify " +
                 "links work too, by finding the same track.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -151,15 +152,19 @@ fun DownloadScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(
+            // Wrapped rather than scrolled, so every format is in sight.
+            androidx.compose.foundation.layout.FlowRow(
                 Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                Text("Format", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Format",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
                 DownloadFormat.entries.forEach { option ->
                     FilterChip(
                         selected = option == format,
