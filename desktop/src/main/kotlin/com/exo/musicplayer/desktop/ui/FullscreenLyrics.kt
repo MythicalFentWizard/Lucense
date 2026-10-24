@@ -1,5 +1,10 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -94,7 +99,7 @@ fun FullscreenLyrics(controller: DesktopController) {
                 RoundButton(Icons.Default.Close, "Close fullscreen lyrics") { controller.lyricsFullscreen = false }
             }
 
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth().fadeEdges(), contentAlignment = Alignment.Center) {
                 val synced = controller.lyricsSynced
                 val plain = controller.lyricsPlain
                 val lines = remember(synced) { synced?.let(LrcParser::parse).orEmpty() }
@@ -178,3 +183,19 @@ private fun RoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, d
         Icon(icon, description, Modifier.size(if (big) 32.dp else 20.dp), tint = if (big) Color.Black else Color.White)
     }
 }
+
+/** Fades the top and bottom edges, so lines leave the view softly rather than being sliced off. */
+private fun Modifier.fadeEdges(): Modifier = this
+    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            Brush.verticalGradient(
+                0f to Color.Transparent,
+                0.14f to Color.Black,
+                0.86f to Color.Black,
+                1f to Color.Transparent
+            ),
+            blendMode = BlendMode.DstIn
+        )
+    }

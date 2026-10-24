@@ -1,5 +1,7 @@
 package com.exo.musicplayer
 
+import com.exo.musicplayer.ui.trim.TrimScreen
+import com.exo.musicplayer.data.trim.TrackTrimmer
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -235,6 +237,7 @@ private fun AppScaffold(
 
     var playerOpen by rememberSaveable { mutableStateOf(openPlayerOnLaunch) }
     var addingToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var trimming by remember { mutableStateOf<Track?>(null) }
     var pendingDelete by remember { mutableStateOf<List<Track>>(emptyList()) }
     var deleteSelection by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
@@ -412,6 +415,7 @@ private fun AppScaffold(
             fix = { viewModel.fixOne(it) },
             identify = { viewModel.startFixTags(it) },
             edit = { viewModel.editTrack(it) },
+            trim = { trimming = it },
             revert = { viewModel.revertTrackToFile(it) },
             share = { share(listOf(it)) },
             delete = { pendingDelete = listOf(it) }
@@ -622,7 +626,7 @@ private fun AppScaffold(
                             address: suspend (String) -> String?
                         ) {
                             if (recognition.preview.state.value.videoId != key && isPlaying) viewModel.togglePlayPause()
-                            recognition.preview.toggle(key, label, found, address)
+                            recognition.preview.toggle(key, label, found, resolve = address)
                         }
 
                         DiscoverScreen(
@@ -1175,6 +1179,17 @@ private fun AppScaffold(
 
         bulk?.let { progress ->
             BulkImportDialog(progress = progress, onCancel = { viewModel.cancelBulkImport() })
+        }
+
+        trimming?.let { track ->
+            val trimmer = remember { TrackTrimmer(context.applicationContext) }
+            TrimScreen(
+                track = track,
+                preview = recognition.preview,
+                onPausePlayer = { if (isPlaying) viewModel.togglePlayPause() },
+                onSave = { start, end -> trimmer.save(track, start, end) },
+                onClose = { trimming = null }
+            )
         }
 
         editTarget?.let { track ->

@@ -1029,6 +1029,7 @@ private fun TrackRow(
                 ) { controller.toggleFavourite(track) },
                 ContextMenuItem("Add to playlist...") { onAddToPlaylist() },
                 ContextMenuItem("Edit details...") { controller.editTarget = track },
+                ContextMenuItem("Trim...") { controller.trimming = track },
                 ContextMenuItem("Identify this track") { onIdentify() },
                 ContextMenuItem("Rate ★★★★★") { controller.setRating(track, 5) },
                 ContextMenuItem("Rate ★★★★") { controller.setRating(track, 4) },

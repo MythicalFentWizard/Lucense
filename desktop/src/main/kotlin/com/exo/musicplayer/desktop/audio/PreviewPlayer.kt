@@ -78,6 +78,7 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
         key: String,
         label: PreviewLabel? = null,
         found: () -> PreviewLabel? = { null },
+        clip: LongRange? = null,
         resolve: suspend (String) -> String?
     ) {
         val current = _state.value
@@ -85,11 +86,27 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
             if (current.paused) pauseOrResume() else stop()
             return
         }
-        start(key, label, found, resolve)
+        start(key, label, found, clip, resolve)
     }
 
-    private fun start(key: String, label: PreviewLabel?, found: () -> PreviewLabel?, resolve: suspend (String) -> String?) {
-        again = { start(key, label, found, resolve) }
+    /**
+     * How far into what is playing the speakers are, in milliseconds: from
+     * the frames the line has actually played, so it trails what was written
+     * by the line's buffer, as the sound does.
+     */
+    fun playedMs(): Long {
+        val out = line ?: return 0L
+        return out.longFramePosition * 1000L / AudioDevices.FORMAT.sampleRate.toLong()
+    }
+
+    private fun start(
+        key: String,
+        label: PreviewLabel?,
+        found: () -> PreviewLabel?,
+        clip: LongRange?,
+        resolve: suspend (String) -> String?
+    ) {
+        again = { start(key, label, found, clip, resolve) }
         val previous = job
         // Announced at once, so the small player says what is coming while
         // the old preview is still being torn down.
@@ -131,7 +148,7 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
 
             _state.value = PreviewState(videoId = key, loading = false, playing = true, label = named)
             try {
-                stream(ffmpeg, url, key)
+                stream(ffmpeg, url, key, clip)
             } catch (stopped: CancellationException) {
                 // Being stopped is not a failure. Reporting it as one put an
                 // error back on screen a moment after the preview was closed.
@@ -144,23 +161,29 @@ class PreviewPlayer(private val ffmpegPath: () -> java.io.File) {
         }
     }
 
-    private suspend fun stream(ffmpeg: java.io.File, url: String, key: String) =
+    /** [clip] plays only that stretch of [url], in milliseconds: the trimmer's preview of a cut. */
+    private suspend fun stream(ffmpeg: java.io.File, url: String, key: String, clip: LongRange? = null) =
         withContext(Dispatchers.IO) {
             val format = AudioDevices.FORMAT
             // ffmpeg cannot speak SOCKS, and its own HTTP proxy option would be a
             // second setting to keep in step. So behind a proxy the stream is
             // fetched here, along the same route as everything else, and fed to
             // ffmpeg on stdin; without one ffmpeg reads the URL itself as before.
-            val proxied = NetworkProxy.urlFor(url) != null
+            val local = java.io.File(url).isFile
+            val proxied = !local && NetworkProxy.urlFor(url) != null
             val started = ProcessBuilder(
                 buildList {
                     add(ffmpeg.absolutePath)
                     addAll(listOf("-hide_banner", "-loglevel", "error"))
-                    if (proxied) {
-                        addAll(listOf("-i", "pipe:0"))
-                    } else {
+                    if (clip != null) addAll(listOf("-ss", "%.3f".format(java.util.Locale.ROOT, clip.first / 1000.0)))
+                    when {
+                        local -> addAll(listOf("-i", url))
+                        proxied -> addAll(listOf("-i", "pipe:0"))
                         // Keeps a stalled connection from hanging the preview forever.
-                        addAll(listOf("-rw_timeout", "15000000", "-i", url))
+                        else -> addAll(listOf("-rw_timeout", "15000000", "-i", url))
+                    }
+                    if (clip != null) {
+                        addAll(listOf("-t", "%.3f".format(java.util.Locale.ROOT, (clip.last - clip.first) / 1000.0)))
                     }
                     addAll(
                         listOf(

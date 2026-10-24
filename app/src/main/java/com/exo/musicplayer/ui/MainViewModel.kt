@@ -1021,7 +1021,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (currentTrackId.value != id) return@launch
             val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
             when {
-                result == null -> _lyricsTranslationNote.value = "The translator couldn't be reached."
+                result == null -> _lyricsTranslationNote.value = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
                 result.lines.map { it.trim() } == lines.map { it.trim() } ->
                     _lyricsTranslationNote.value = "These lyrics are already in $language."
                 else -> {

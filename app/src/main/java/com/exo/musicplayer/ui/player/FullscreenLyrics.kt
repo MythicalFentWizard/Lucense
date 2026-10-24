@@ -1,5 +1,10 @@
 package com.exo.musicplayer.ui.player
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
@@ -105,7 +110,7 @@ fun FullscreenLyrics(
                 IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close fullscreen lyrics", tint = Color.White) }
             }
 
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth().fadeEdges(), contentAlignment = Alignment.Center) {
                 when {
                     lines.isNotEmpty() -> BigSyncedLines(lines, positionMs, translation)
                     !plainText.isNullOrBlank() -> SelectionContainer {
@@ -185,3 +190,19 @@ private fun ImmersiveWhileShown() {
         onDispose { controller.show(WindowInsetsCompat.Type.systemBars()) }
     }
 }
+
+/** Fades the top and bottom edges, so lines leave the view softly rather than being sliced off. */
+private fun Modifier.fadeEdges(): Modifier = this
+    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            Brush.verticalGradient(
+                0f to Color.Transparent,
+                0.14f to Color.Black,
+                0.86f to Color.Black,
+                1f to Color.Transparent
+            ),
+            blendMode = BlendMode.DstIn
+        )
+    }

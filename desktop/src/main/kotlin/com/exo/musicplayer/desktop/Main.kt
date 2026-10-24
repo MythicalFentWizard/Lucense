@@ -48,6 +48,7 @@ import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.ui.DesktopApp
 import com.exo.musicplayer.desktop.ui.LyricsWindow
 import com.exo.musicplayer.desktop.ui.FullscreenLyrics
+import com.exo.musicplayer.desktop.ui.TrimWindow
 import com.exo.musicplayer.desktop.ui.MiniPlayer
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.LucenseDesktopTheme
@@ -202,6 +203,10 @@ fun main(args: Array<String>) = application {
             EveryIconSize()
             LucenseDesktopTheme { MiniPlayer(controller) }
         }
+    }
+
+    controller.trimming?.let { track ->
+        TrimWindow(controller, track) { controller.trimming = null }
     }
 
     if (controller.lyricsFullscreen) {

@@ -33,11 +33,15 @@ object LyricsTranslator {
      */
     suspend fun translate(lines: List<String>, to: String = deviceLanguage()): Translation? =
         withContext(Dispatchers.IO) {
-            if (lines.none { it.isNotBlank() }) return@withContext Translation(lines, null)
-            val out = ArrayList<String>(lines.size)
+            // Only the lines with words go. Google drops blank lines at the end
+            // of a text, which would throw every line after them out of step,
+            // so the blanks are put back afterwards instead.
+            val worded = lines.indices.filter { lines[it].isNotBlank() }
+            if (worded.isEmpty()) return@withContext Translation(lines.map { "" }, null)
+            val translated = HashMap<Int, String>(worded.size)
             var from: String? = null
-            for (chunk in chunks(lines)) {
-                val text = chunk.joinToString("\n")
+            for (chunk in chunks(worded) { lines[it].trim().length }) {
+                val text = chunk.joinToString("\n") { lines[it].trim() }
                 val url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t" +
                     "&tl=" + URLEncoder.encode(to, "UTF-8") + "&q=" + URLEncoder.encode(text, "UTF-8")
                 val json = Http.get(url) ?: return@withContext null
@@ -48,25 +52,27 @@ object LyricsTranslator {
                 }
                 from = from ?: parsed.optString(2).takeIf { it.isNotBlank() }
                 val back = joined.split('\n')
-                // Lined up by position, so a different count means it can't be trusted.
-                val fitted = if (back.size >= chunk.size) back.take(chunk.size) else return@withContext null
-                chunk.forEachIndexed { i, original -> out += if (original.isBlank()) "" else fitted[i].trim() }
+                // Lined up by position, so too few lines back means it can't be trusted.
+                if (back.size < chunk.size) return@withContext null
+                chunk.forEachIndexed { i, index -> translated[index] = back[i].trim() }
             }
-            Translation(out, from)
+            Translation(lines.indices.map { translated[it].orEmpty() }, from)
         }
 
-    private fun chunks(lines: List<String>): List<List<String>> {
-        val result = ArrayList<List<String>>()
-        var current = ArrayList<String>()
+    /** [items] in runs whose [length]s, plus a line break each, stay under [CHUNK_CHARS]. */
+    private fun <T> chunks(items: List<T>, length: (T) -> Int): List<List<T>> {
+        val result = ArrayList<List<T>>()
+        var current = ArrayList<T>()
         var size = 0
-        for (line in lines) {
-            if (size + line.length + 1 > CHUNK_CHARS && current.isNotEmpty()) {
+        for (item in items) {
+            val n = length(item) + 1
+            if (size + n > CHUNK_CHARS && current.isNotEmpty()) {
                 result += current
                 current = ArrayList()
                 size = 0
             }
-            current += line
-            size += line.length + 1
+            current += item
+            size += n
         }
         if (current.isNotEmpty()) result += current
         return result

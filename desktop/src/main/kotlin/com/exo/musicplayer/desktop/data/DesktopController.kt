@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.data.audio.Trim
 import androidx.compose.ui.graphics.toArgb
 import com.exo.musicplayer.data.art.CoverColour
 import com.exo.musicplayer.data.library.AudioPrint
@@ -1777,7 +1778,7 @@ class DesktopController(parent: CoroutineScope) {
             if (engine.status.value.track?.file != track.file) return@launch
             val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
             when {
-                result == null -> lyricsTranslationNote = "The translator couldn't be reached."
+                result == null -> lyricsTranslationNote = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
                 result.lines.map { it.trim() } == lines.map { it.trim() } ->
                     lyricsTranslationNote = "These lyrics are already in $language."
                 else -> {
@@ -2001,6 +2002,51 @@ class DesktopController(parent: CoroutineScope) {
 
     fun stopPreview() = preview.stop()
 
+    // ---- Trimming, after Riff (github.com/rootscripts/riff, MIT) -------------
+
+    /** The song open in the trimmer, or null. */
+    var trimming by mutableStateOf<DesktopTrack?>(null)
+
+    /** The preview key for a cut of [track], so the trimmer knows its own preview. */
+    fun trimKey(track: DesktopTrack): String = "trim:" + track.file.absolutePath
+
+    /** Plays [startMs] to [endMs] of [track] in the small player, without touching the queue. */
+    fun previewTrim(track: DesktopTrack, startMs: Long, endMs: Long) {
+        if (engine.status.value.playing) engine.togglePlay()
+        // A new key for every stretch, so asking for another one starts it rather than stopping this.
+        preview.toggle(
+            "${trimKey(track)}#$startMs-$endMs",
+            PreviewLabel("Trim: ${track.title}", track.displayArtist),
+            clip = startMs..endMs
+        ) { track.file.absolutePath }
+    }
+
+    /**
+     * Saves [startMs] to [endMs] of [track] as a new song beside it, cut rather
+     * than encoded again, and adds it to the library.
+     */
+    suspend fun saveTrim(track: DesktopTrack, startMs: Long, endMs: Long): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            val ffmpeg = ToolPaths.ffmpeg
+            check(ffmpeg.isFile) { "ffmpeg is missing, and it does the cutting. The Download page can fetch it." }
+            // Beside the original, unless that folder can't be written to.
+            val dir = track.file.parentFile?.takeIf { it.canWrite() } ?: File(settings.downloadDir).apply { mkdirs() }
+            val out = File(dir, Trim.outputName(track.file.name) { File(dir, it).exists() })
+            val process = ProcessBuilder(
+                listOf(ffmpeg.absolutePath) +
+                    Trim.ffmpegArgs(track.file.absolutePath, out.absolutePath, startMs, endMs, Trim.title(track.title))
+            ).redirectErrorStream(true).start()
+            val log = process.inputStream.bufferedReader().readText()
+            val code = process.waitFor()
+            if (code != 0 || !out.isFile || out.length() == 0L) {
+                out.delete()
+                error(log.lines().lastOrNull { it.isNotBlank() } ?: "ffmpeg stopped with code $code.")
+            }
+            addToLibrary(listOf(out))
+            out
+        }
+    }
+
     /** Hands the video to the existing downloader, as an mp3 at the set quality. */
     fun downloadYouTube(video: YouTubeVideo) {
         startDownload(video.watchUrl)
@@ -2046,7 +2092,7 @@ class DesktopController(parent: CoroutineScope) {
         address: suspend (String) -> String?
     ) {
         if (preview.state.value.videoId != key && engine.status.value.playing) engine.togglePlay()
-        preview.toggle(key, label, found, address)
+        preview.toggle(key, label, found, resolve = address)
     }
 
     /** Opens YouTube search in Identify with [text] already searched for. */
