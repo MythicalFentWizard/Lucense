@@ -6,7 +6,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Base64
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import java.util.UUID
 
 /**
@@ -19,6 +20,7 @@ import java.util.UUID
  *
  * Only frequency peaks leave the machine. The audio never does.
  */
+@OptIn(ExperimentalEncodingApi::class)
 class ShazamClient {
 
     suspend fun recognize(samples16k: FloatArray): RecognitionResult =
@@ -33,7 +35,7 @@ class ShazamClient {
                     return@withContext RecognitionResult.Error("Could not fingerprint the audio.")
                 }
 
-            val uri = DATA_URI_PREFIX + Base64.getEncoder().encodeToString(signature)
+            val uri = DATA_URI_PREFIX + Base64.Default.encode(signature)
             val timestamp = System.currentTimeMillis()
             val body = JSONObject().apply {
                 put("geolocation", JSONObject().apply {

@@ -2,7 +2,8 @@ package com.exo.musicplayer.data.library
 
 import com.exo.musicplayer.data.recognition.Dsp
 import java.nio.ByteBuffer
-import java.util.Base64
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.ln
@@ -30,6 +31,7 @@ import kotlin.math.min
  *
  * Shared, so the phone and the PC find the same duplicates by the same rule.
  */
+@OptIn(ExperimentalEncodingApi::class)
 object AudioPrint {
 
     /** Seconds of audio a print is taken from, centred on the middle of the song. */
@@ -98,11 +100,11 @@ object AudioPrint {
     fun encode(print: IntArray): String {
         val buffer = ByteBuffer.allocate(print.size * 4)
         print.forEach { buffer.putInt(it) }
-        return Base64.getEncoder().encodeToString(buffer.array())
+        return Base64.Default.encode(buffer.array())
     }
 
     fun decode(text: String?): IntArray? = runCatching {
-        val bytes = Base64.getDecoder().decode(text ?: return null)
+        val bytes = Base64.Default.decode(text ?: return null)
         val buffer = ByteBuffer.wrap(bytes)
         IntArray(bytes.size / 4) { buffer.getInt() }
     }.getOrNull()

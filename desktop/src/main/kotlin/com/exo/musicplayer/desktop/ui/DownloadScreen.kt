@@ -438,9 +438,9 @@ private fun SignInPanel(controller: DesktopController) {
         Spacer(Modifier.height(8.dp))
         when {
             chosen == YouTubeSignIn.Source.OWN -> Hint(
-                "Recommended. Opens a browser window of its own: sign in to YouTube there once, and Lucense " +
-                    "keeps that sign-in. No browser you use touches it, so YouTube doesn't cycle it out the way it " +
-                    "does a browser's - it lasts until you sign out."
+                "Recommended. Opens your default browser in a window of its own, apart from your usual one: " +
+                    "sign in to YouTube there once, and Lucense keeps that sign-in. Nothing you browse with touches " +
+                    "it, so YouTube doesn't cycle it out the way it does a browser's - it lasts until you sign out."
             )
             chosen.copied -> Hint(
                 "Lucense copies ${chosen.label}'s sign-in and keeps the copy, renewing it every few days and " +

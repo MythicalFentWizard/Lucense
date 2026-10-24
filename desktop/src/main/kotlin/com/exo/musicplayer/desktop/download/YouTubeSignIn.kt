@@ -16,8 +16,8 @@ import java.nio.file.StandardCopyOption
  * Lucense keeps its own copy of them ([kept]) and gives yt-dlp that, from
  * whichever source:
  *
- *  - **Sign in here** ([Source.OWN]): a browser window with a profile of its
- *    own, signed in to once ([OwnSignIn]). Nothing else ever uses that
+ *  - **Sign in here** ([Source.OWN]): the default browser, in a window with a
+ *    profile of its own, signed in to once ([OwnSignIn]). Nothing else ever uses that
  *    session, so YouTube never cycles it out the way it does a browser's
  *    in daily use; it lasts until signed out of.
  *  - **A browser**: its sign-in copied once and renewed every few days, or
