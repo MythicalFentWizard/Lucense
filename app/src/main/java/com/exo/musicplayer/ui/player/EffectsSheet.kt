@@ -42,6 +42,7 @@ import com.exo.musicplayer.playback.AudioOutput
 import com.exo.musicplayer.playback.ToneProcessor
 import com.exo.musicplayer.playback.FxPreset
 import com.exo.musicplayer.playback.ReverbRoom
+import com.exo.musicplayer.data.audio.Overdrive
 import kotlin.math.roundToInt
 
 @Composable
@@ -64,6 +65,7 @@ fun EffectsSheet(
     val onReverbEnabled = controls.onReverbEnabled
     val onReverbRoom = controls.onReverbRoom
     val onReverbAmount = controls.onReverbAmount
+    val onDrive = controls.onDrive
     val onReset = controls.onReset
     val onPickOutput = controls.onPickOutput
     val onMirrorOutputs = controls.onMirrorOutputs
@@ -102,7 +104,7 @@ fun EffectsSheet(
 
         Spacer(Modifier.height(4.dp))
         Text(
-            "Speed, pitch, reverb and the equalizer are independent — stack them however you like.",
+            "Speed, pitch, distortion, reverb and the equalizer are independent — stack them however you like.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -257,6 +259,20 @@ fun EffectsSheet(
             text = "Tempo only — pitch stays where you set it above.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Text("Distortion", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(6.dp))
+        LineSlider(value = state.drive, onValueChange = onDrive, description = "Distortion")
+        LabelRow(
+            "Drive",
+            when {
+                !Overdrive.active(state.drive) -> "off"
+                state.drive < 0.3f -> "warm · ${(state.drive * 100).roundToInt()}%"
+                state.drive < 0.7f -> "crunchy · ${(state.drive * 100).roundToInt()}%"
+                else -> "fuzz · ${(state.drive * 100).roundToInt()}%"
+            }
         )
 
         Spacer(Modifier.height(20.dp))

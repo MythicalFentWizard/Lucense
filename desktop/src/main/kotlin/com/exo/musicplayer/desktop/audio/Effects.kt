@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.audio
 
+import com.exo.musicplayer.data.audio.Overdrive
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -391,6 +392,10 @@ class EffectChain {
     @Volatile
     var volume: Float = 1f
 
+    /** Distortion, 0 (off) to 1; see Overdrive. */
+    @Volatile
+    var drive: Float = 0f
+
     fun reset() {
         stretcher.reset()
         reverb.reset()
@@ -417,6 +422,9 @@ class EffectChain {
         buffer = stretcher.process(buffer)
 
         equalizer.process(buffer)
+        // After the EQ, so a boosted band drives harder, and before the
+        // reverb, so the room is of the distorted sound, as with an amp.
+        Overdrive.process(buffer, drive)
         reverb.process(buffer)
 
         if (volume !in 0.999f..1.001f) {

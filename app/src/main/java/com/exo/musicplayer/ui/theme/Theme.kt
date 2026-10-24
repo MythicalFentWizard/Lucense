@@ -1,5 +1,16 @@
 package com.exo.musicplayer.ui.theme
 
+import com.exo.musicplayer.data.art.CoverColour
+import coil.request.SuccessResult
+import coil.request.ImageRequest
+import coil.imageLoader
+import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.material3.ColorScheme
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.compose.foundation.Image
@@ -65,6 +76,8 @@ fun MusicPlayerTheme(
     theme: ThemeState = ThemeState(),
     /** The song playing, for the Waves background; null draws its idle ribbon. */
     song: SongShape? = null,
+    /** The playing song's artwork, for colours from the cover. */
+    coverArt: String? = null,
     content: @Composable () -> Unit
 ) {
     // A published scheme is light or dark by design; the setting only steers
@@ -76,13 +89,26 @@ fun MusicPlayerTheme(
     }
     val context = LocalContext.current
 
-    val colorScheme = when {
+    val baseScheme = when {
         theme.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
 
         dark -> theme.palette.dark
         else -> theme.palette.light
     }
+
+    // Colours from the cover, after Riff (github.com/rootscripts/riff, MIT):
+    // the palette stays and its accent follows the artwork, easing between songs.
+    // The last song's colour holds while the next cover is read.
+    val coverAccent by produceState<Color?>(null, theme.coverColours, coverArt, baseScheme.background) {
+        value = if (theme.coverColours && coverArt != null) {
+            accentFromCover(context, coverArt, baseScheme.background)
+        } else {
+            null
+        }
+    }
+    val accent by animateColorAsState(coverAccent ?: baseScheme.primary, tween(500), label = "accent")
+    val colorScheme = if (theme.coverColours) baseScheme.withAccent(accent) else baseScheme
 
     // Stars only in dark mode: on a light background they read as smudges.
     // The other backgrounds are drawn in the accent, so they hold up on both.
@@ -209,3 +235,30 @@ private fun starTint(primary: Color): Color = Color(
     blue = (primary.blue * 0.35f + 0.68f).coerceIn(0f, 1f),
     alpha = 1f
 )
+
+/** The scheme with another accent, its container mixed from the raised surface as the palettes mix theirs. */
+private fun ColorScheme.withAccent(accent: Color): ColorScheme {
+    val on = if (accent.luminance() > 0.4f) Color(0xFF15131A) else Color.White
+    return copy(
+        primary = accent,
+        onPrimary = on,
+        primaryContainer = lerp(surfaceContainerHigh, accent, 0.28f),
+        tertiary = accent,
+        onTertiary = on,
+        inversePrimary = accent,
+        surfaceTint = accent
+    )
+}
+
+/** The cover's accent, read from a small copy of it; null when it has no colour worth taking. */
+private suspend fun accentFromCover(context: Context, art: String, background: Color): Color? =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val request = ImageRequest.Builder(context).data(art).size(64).allowHardware(false).build()
+            val drawable = (context.imageLoader.execute(request) as? SuccessResult)?.drawable ?: return@runCatching null
+            val bitmap = drawable.toBitmap(64, 64)
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            CoverColour.accentFrom(pixels, background.toArgb())?.let { Color(it) }
+        }.getOrNull()
+    }

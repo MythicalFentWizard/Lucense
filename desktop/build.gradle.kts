@@ -34,6 +34,7 @@ dependencies {
     // Room is Android-only; the desktop build talks to the same SQLite file
     // shape through JDBC so a library can be moved between the two.
     implementation(libs.sqlite.jdbc)
+    implementation(libs.haze)
     implementation(libs.jaudiotagger)
     implementation(libs.org.json)
 

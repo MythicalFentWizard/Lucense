@@ -43,6 +43,9 @@ library keeps up with new, renamed and deleted files on its own.
 | **A file** | audio *or video* — fingerprinted locally, only frequency peaks leave the machine |
 | **A link** | TikTok, Instagram, YouTube and a thousand more — the audio is fetched, fingerprinted, and thrown away |
 
+Each of Identify's tabs keeps its own box and results while the app is open,
+so switching between them never mixes one search's answers into another.
+
 **Discover** is for finding music you don't have yet: a map of genres to
 wander, in the manner of Every Noise at Once. It's a tab on Android and a page
 on Windows.
@@ -75,7 +78,11 @@ page says what it couldn't reach. See [why not Every Noise itself](#why-discover
 
 **Lyrics** come from four services in turn (LRCLIB, NetEase, lyrics.ovh, Genius),
 keeping timed LRC where it exists so they scroll in sync. If all four come up
-empty, you can paste them in yourself. You choose what gets searched for: the tags
+empty, you can paste them in yourself. Timed lyrics that run early or late can
+be moved a quarter-second at a time, and each song keeps its own setting.
+*Translate* puts the lyrics in your language under each line, the text can be
+selected and copied, and *Fullscreen* shows just the lyrics, big, over the
+song's blurred cover. You choose what gets searched for: the tags
 as they are, a tidied title with `(Official Video)`, `[HD]` and `feat. …`
 stripped, the title alone, the file name, or your own pattern.
 
@@ -84,7 +91,22 @@ which just returns your most-played songs, but what you play *disproportionately
 when it rains. See [`WeatherAffinity`](shared/src/main/kotlin/com/exo/musicplayer/data/weather/WeatherAffinity.kt).
 
 **Downloads** from YouTube, SoundCloud, Bandcamp, Spotify and anywhere else
-yt-dlp reaches, at your choice of quality.
+yt-dlp reaches, at your choice of quality, as MP3, M4A, Opus, OGG, FLAC or WAV.
+Covers come out square, an uploader's "Artist - Title" is split into proper
+tags, and the spoken intros and skits SponsorBlock's listeners have marked in
+music videos can be cut. The choices are remembered on both apps.
+
+**Playlists from other services.** Paste a Spotify, Apple Music, YouTube or
+SoundCloud playlist (or album) link on the Playlists page. Only the list is
+read, from what the service shows anyone with the link, so nothing signs in.
+Songs you already have are linked up into a new playlist, and the rest can be
+downloaded, each joining the playlist as it arrives.
+
+**Streaming.** *Stream all* on YouTube results, or *Stream it* on a playlist
+read from a link, plays the songs online one after another in the small player,
+which gains previous, next and a download button. Nothing joins the library or
+the queue. The next song is looked up while one plays, so there's no wait
+between them.
 
 **Playlists download song by song.** Paste a YouTube playlist link (on Windows,
 tick *Download the whole playlist* for a link to one video inside a list) and
@@ -99,6 +121,14 @@ behind. A playlist paces itself, backs off when a song is refused, and stops
 asking after several refusals running rather than making it worse. The message
 says so, and what helps: wait an hour, update yt-dlp, or try
 another server. Nothing is fetched from anywhere else instead.
+
+**Or sign in to YouTube.** When YouTube refuses your VPN's address with
+"confirm you're not a bot", downloads can go as your YouTube account instead.
+On Windows it uses the sign-in of a browser you're signed in to YouTube with
+(Firefox works best; Chrome and Edge lock theirs away), or a cookies.txt file;
+on Android, YouTube's own sign-in page inside the app, or a cookies.txt file.
+It's optional and stays on your device. YouTube can flag accounts that download
+a lot, so a spare account is safer.
 
 **Downloads can use their own proxy.** It's in Settings → Downloads on both
 apps. If your VPN app also runs a local proxy (v2rayNG and Hiddify listen on
@@ -127,13 +157,16 @@ go through it; on Windows the setting covers everything the app does online.
   killed the app, and headphone or lock-screen *play* picks up from there.
 - **Sleep timer:** 15 to 90 minutes, or *when this song ends*. It fades out over
   the last half minute instead of cutting off mid-bar.
-- **Effects:** speed, pitch, reverb and EQ, all combinable, with a spectrum meter.
+- **Effects:** speed, pitch, distortion, reverb and EQ, all combinable, with a spectrum meter.
   *Remember for this song* brings a setting back whenever that song plays.
 - **More than one output at once:** several devices play the same audio, exactly
   in step on Windows. Android has no real way to do this, so there it's marked
   experimental.
 - **Game ducking** (Windows): a global hotkey turns the music down while you're
   gaming.
+- **Trim** any song from its menu: drag the two handles over its waveform, hear
+  the cut, and save it as a new song. The cut is lossless, nothing is encoded
+  again, and the cover and tags come with it.
 - **Mini player** (Windows): a small always-on-top window. There's also a tray
   icon with play/pause, next, previous and quit.
 
@@ -241,6 +274,14 @@ file said before anything touched it.
   - Every scheme is checked for readable contrast.
   - Android has the same twelve schemes beside its own palettes and Material
     You. Building your own theme is Windows-only for now.
+- **Colours from the cover:** the theme stays and its accent follows the
+  artwork of the song playing, on both apps.
+- **Liquid glass** (Windows, in Appearance): the window as panes of frosted
+  glass over a slowly drifting glow of the theme's colours, or your wallpaper,
+  with rounder controls and lit edges.
+- **Its own window frame** (Windows): no Windows title bar or border. Drag the
+  strip along the top to move it, double-click to maximise; Windows 11 rounds
+  the corners.
 - **Backgrounds and wallpaper:** stars, aurora, fireflies, snow, a scrolling graph
   of the song, or visuals that move with the music, on both apps. You can set
   your own picture behind them.
@@ -268,6 +309,7 @@ Left out, because a phone either can't do them or has its own way:
 | Volume slider | the phone's volume keys |
 | Watching a folder, Names from folders | shared songs are copied into the app, so there's no folder of yours to watch |
 | Open with Lucense | sharing a file to Lucense does this |
+| Liquid glass, the window frame | a phone's app fills the screen; there's no window to frame |
 
 There's no splash screen on Android any more: the app opens straight to where
 you left it.
@@ -468,6 +510,23 @@ desktop/src/main/kotlin/com/exo/musicplayer/desktop/
 The Lucense cat — the logo and the app icon on both platforms — was drawn by
 **Stillinthedesert**: [@Stillinthedesert](https://t.me/Stillinthedesert) on
 Telegram, [@zeto0_2](https://www.tiktok.com/@zeto0_2) on TikTok.
+
+---
+
+## Credits
+
+**[Riff](https://github.com/rootscripts/riff)** by **rootscripts**, a free
+desktop music player, is where several of Lucense's features come from:
+distortion, the download formats, importing playlists from Spotify, Apple
+Music, YouTube Music and SoundCloud, fullscreen lyrics, lyrics timing and
+translation, colours from the cover, the trimmer and streaming. Lucense is
+written in Kotlin and Riff in JavaScript, so these are Lucense's own versions
+of Riff's ideas, with Riff's approach followed where it was the right one (how
+it reads a Spotify playlist without an account, for example). Riff is MIT
+licensed, copyright (c) 2026 rootscripts.
+
+The frosted-glass blur on Windows is drawn with
+[Haze](https://github.com/chrisbanes/haze) by Chris Banes, Apache 2.0 licensed.
 
 ---
 

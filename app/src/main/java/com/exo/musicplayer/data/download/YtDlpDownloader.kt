@@ -1,5 +1,6 @@
 package com.exo.musicplayer.data.download
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -154,15 +155,22 @@ class YtDlpDownloader(private val context: Context) {
 
         val workDir = File(context.cacheDir, "ytdlp/${UUID.randomUUID()}").apply { mkdirs() }
         return@withContext try {
+            val prefs = context.musicApp.prefs
+            val format = DownloadFormat.fromName(prefs.downloadFormat.value)
             val request = newRequest(url).apply {
                 addOption("-x")                              // audio only
-                addOption("--audio-format", "mp3")
-                addOption("--audio-quality", quality.audioQuality)
+                addOption("--audio-format", format.ytDlp)
+                if (format.lossy) addOption("--audio-quality", quality.audioQuality)
                 // Narrows what is fetched, not just what it is re-encoded to,
                 // which matters more on a phone than on a desktop.
                 addOption("-f", quality.formatSelector)
-                addOption("--embed-thumbnail")               // cover art
+                if (format.holdsCover) {
+                    addOption("--embed-thumbnail")           // cover art, square
+                    addCommands(YtDlpTidy.squareCover(windows = false))
+                }
                 addOption("--add-metadata")                  // title/artist tags
+                addCommands(YtDlpTidy.TAGS)
+                if (prefs.cutNonMusic.value) addCommands(YtDlpTidy.NON_MUSIC_CUT)
                 addOption("--no-playlist")                   // a link inside a playlist
                 addOption("--no-mtime")
                 addOption("-o", "${workDir.absolutePath}/%(title)s.%(ext)s")
@@ -184,6 +192,12 @@ class YtDlpDownloader(private val context: Context) {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "download failed", t)
+            // A song that downloaded and converted, with only a step after it
+            // failing - the cover, say - is still the song.
+            val saved = workDir.listFiles()
+                ?.filter { it.isFile && it.length() > 0 && it.extension.lowercase() in AUDIO_EXTENSIONS }
+                ?.maxByOrNull { it.length() }
+            if (saved != null) return@withContext DownloadOutcome.Done(saved, saved.nameWithoutExtension)
             workDir.deleteRecursively()
             // A 403 on the audio is what an out-of-date yt-dlp gets. Once a
             // run, that is answered by looking for a newer one and trying the
@@ -207,7 +221,26 @@ class YtDlpDownloader(private val context: Context) {
 
     /** Every yt-dlp call starts here, so a download proxy applies to all of them. */
     fun newRequest(target: String): YoutubeDLRequest =
-        YoutubeDLRequest(target).apply { proxy?.let { addOption("--proxy", it) } }
+        YoutubeDLRequest(target).apply {
+            proxy?.let { addOption("--proxy", it) }
+            // Signed in to YouTube, when the user chose to: YouTube then
+            // judges the account rather than the VPN's address.
+            context.musicApp.youtubeCookies.file.takeIf { it.isFile }?.let { addOption("--cookies", it.absolutePath) }
+        }
+
+    /**
+     * Every song of a list read in full, for a SoundCloud set whose flat
+     * listing names none of them: yt-dlp's printed lines, or why not.
+     */
+    suspend fun printedSongs(url: String): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        if (!ensureReady()) return@withContext null to lastInitError
+        runCatching {
+            val request = newRequest(url)
+            // In order: each --print goes with the template after it.
+            request.addCommands(PlaylistLinks.PRINT_ARGUMENTS)
+            YoutubeDL.getInstance().execute(request).out.takeIf { it.isNotBlank() } to null as String?
+        }.getOrElse { null to friendly(it.message) }
+    }
 
     /**
      * What a playlist link holds, without downloading any of it; with why
@@ -268,6 +301,9 @@ class YtDlpDownloader(private val context: Context) {
             "getaddrinfo failed", "Connection reset", "No route to host"
         )
         const val TAG = "YtDlpDownloader"
+
+        /** What a finished download can be, as opposed to what it leaves behind. */
+        val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "opus", "ogg", "flac", "wav")
 
         const val KEY_CHECKED = "checked_at"
 

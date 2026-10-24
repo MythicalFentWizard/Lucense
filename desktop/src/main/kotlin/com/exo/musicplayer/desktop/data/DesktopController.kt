@@ -1,5 +1,14 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.desktop.ui.Glass
+import com.exo.musicplayer.desktop.download.YouTubeSignIn
+import com.exo.musicplayer.data.playlist.ParsedPlaylist
+import com.exo.musicplayer.data.youtube.StreamResolver
+import com.exo.musicplayer.data.youtube.StreamQueue
+import com.exo.musicplayer.data.playlist.PlaylistLinks
+import com.exo.musicplayer.data.audio.Trim
+import androidx.compose.ui.graphics.toArgb
+import com.exo.musicplayer.data.art.CoverColour
 import com.exo.musicplayer.data.library.AudioPrint
 import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.library.SearchQuery
@@ -51,6 +60,7 @@ import com.exo.musicplayer.data.weather.WeatherAffinity
 import com.exo.musicplayer.data.weather.WeatherCondition
 import com.exo.musicplayer.data.weather.WeatherSnapshot
 import com.exo.musicplayer.data.download.YouTubeTrouble
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.desktop.AppVersion
 import com.exo.musicplayer.desktop.audio.AudioDevices
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
@@ -62,6 +72,8 @@ import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import com.exo.musicplayer.data.lyrics.LyricsTranslator
+import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.youtube.PreviewLabel
 import java.util.concurrent.atomic.AtomicInteger
 import com.exo.musicplayer.desktop.download.DownloadArchive
@@ -195,7 +207,7 @@ class DesktopController(parent: CoroutineScope) {
                 scanning = false
                 lyricsLoading = false
                 youtubeBusy = false
-                identifyBusy = false
+                identifyTabs.values.forEach { it.busy = false }
                 merging = false
                 System.err.println("Lucense: a background job failed: ${error.stackTraceToString()}")
             }
@@ -304,6 +316,7 @@ class DesktopController(parent: CoroutineScope) {
                 openListenEvent(started)
                 engine.trackGain = gainFor(started)
                 loadLyricsFor(started)
+                followCover(started)
                 applyFxFor(started)
                 tellDiscord()
                 refreshUpNext()
@@ -692,6 +705,7 @@ class DesktopController(parent: CoroutineScope) {
             engine.effects.reverb.decay = value.reverbDecay
             engine.effects.equalizer.enabled = value.eqEnabled
             engine.effects.equalizer.setGains(value.eqGains)
+            engine.effects.drive = value.drive
         }
 
     private val volumeState = mutableStateOf(settings.volume)
@@ -997,7 +1011,66 @@ class DesktopController(parent: CoroutineScope) {
         set(value) {
             Palette.use(value)
             settings.accentName = value.name
+            // Taken again against the new theme's background, which may be light.
+            if (coverColours) followCover(engine.status.value.track)
         }
+
+    /** The liquid glass look. */
+    var glass: Boolean
+        get() = Glass.on
+        set(value) {
+            Glass.on = value
+            settings.glass = value
+        }
+
+    init {
+        Glass.on = settings.glass
+    }
+
+    // Colours from the cover, after Riff (github.com/rootscripts/riff, MIT).
+
+    private val coverColoursState = mutableStateOf(settings.coverColours)
+
+    /** Whether the accent follows the cover of the song playing. */
+    var coverColours: Boolean
+        get() = coverColoursState.value
+        set(value) {
+            coverColoursState.value = value
+            settings.coverColours = value
+            followCover(engine.status.value.track)
+        }
+
+    private var coverJob: Job? = null
+
+    /** Eases the accent to [track]'s cover colour, or back to the theme's own. */
+    private fun followCover(track: DesktopTrack?) {
+        if (!coverColours && Palette.colors === Palette.themeColors) return
+        coverJob?.cancel()
+        coverJob = scope.launch {
+            val target = if (coverColours && track != null) {
+                val art = Covers.cached(track) ?: if (Covers.knownMissing(track)) null else Covers.load(track)
+                art?.let { accentOf(it) }
+            } else {
+                null
+            }
+            val from = Palette.Accent
+            val to = target ?: Palette.themeColors.accent
+            if (from != to) {
+                for (step in 1..COVER_STEPS) {
+                    Palette.setCoverAccent(androidx.compose.ui.graphics.lerp(from, to, step / COVER_STEPS.toFloat()))
+                    delay(24)
+                }
+            }
+            Palette.setCoverAccent(target)
+        }
+    }
+
+    private suspend fun accentOf(art: ImageBitmap): Color? = withContext(Dispatchers.Default) {
+        if (art.width == 0 || art.height == 0) return@withContext null
+        val pixels = IntArray(art.width * art.height)
+        art.readPixels(pixels)
+        CoverColour.accentFrom(pixels, Palette.Content.toArgb())?.let { Color(it) }
+    }
 
     private val backdropState = mutableStateOf(BackdropStyle.fromName(settings.backdrop))
 
@@ -1282,6 +1355,7 @@ class DesktopController(parent: CoroutineScope) {
         engine.play(track)
         openListenEvent(track)
         loadLyricsFor(track)
+        followCover(track)
         applyFxFor(track)
         tellDiscord()
         refreshUpNext()
@@ -1345,6 +1419,7 @@ class DesktopController(parent: CoroutineScope) {
         val track = tracks.firstOrNull { it.file.absolutePath == path } ?: return
         engine.prepare(track, settings.lastPosition)
         loadLyricsFor(track)
+        followCover(track)
     }
 
     // ---- Sleep timer ----------------------------------------------------------
@@ -1666,11 +1741,81 @@ class DesktopController(parent: CoroutineScope) {
     var lyricsNote by mutableStateOf<String?>(null)
         private set
 
+    // Timing and translation, after Riff (github.com/rootscripts/riff, MIT).
+
+    /** Each song's lyrics offset, by a hash of its path; only songs that have one are written. */
+    private val lyricsOffsets = java.util.prefs.Preferences.userRoot().node("com/exo/musicplayer/lyrics-offsets")
+
+    private fun offsetKey(track: DesktopTrack): String =
+        java.security.MessageDigest.getInstance("SHA-1")
+            .digest(track.file.absolutePath.lowercase().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    /** How far this song's lyrics are moved; positive shows each line sooner. */
+    var lyricsOffsetMs by mutableStateOf(0L)
+        private set
+
+    /** A translation, one line per line of the lyrics, or null when none is showing. */
+    var lyricsTranslation by mutableStateOf<List<String>?>(null)
+        private set
+    var lyricsTranslating by mutableStateOf(false)
+        private set
+    var lyricsTranslationNote by mutableStateOf<String?>(null)
+        private set
+
+    /** Whether the fullscreen lyrics window is open. */
+    var lyricsFullscreen by mutableStateOf(false)
+
+    fun nudgeLyrics(deltaMs: Long) {
+        val track = engine.status.value.track ?: return
+        val offset = (lyricsOffsetMs + deltaMs).coerceIn(-15_000L, 15_000L)
+        lyricsOffsetMs = offset
+        runCatching {
+            if (offset == 0L) lyricsOffsets.remove(offsetKey(track)) else lyricsOffsets.putLong(offsetKey(track), offset)
+        }
+    }
+
+    fun resetLyricsOffset() = nudgeLyrics(-lyricsOffsetMs)
+
+    /** Translates the lyrics into the computer's language, or hides the translation if one is showing. */
+    fun translateLyrics() {
+        if (lyricsTranslation != null) {
+            lyricsTranslation = null
+            lyricsTranslationNote = null
+            return
+        }
+        val track = engine.status.value.track ?: return
+        val lines = lyricsSynced?.let { LrcParser.parse(it).map { line -> line.text } }?.takeIf { it.isNotEmpty() }
+            ?: lyricsPlain?.lines()
+            ?: return
+        if (lyricsTranslating) return
+        lyricsTranslating = true
+        scope.launch {
+            val result = LyricsTranslator.translate(lines)
+            lyricsTranslating = false
+            if (engine.status.value.track?.file != track.file) return@launch
+            val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
+            when {
+                result == null -> lyricsTranslationNote = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
+                result.lines.map { it.trim() } == lines.map { it.trim() } ->
+                    lyricsTranslationNote = "These lyrics are already in $language."
+                else -> {
+                    lyricsTranslation = result.lines
+                    lyricsTranslationNote = LyricsTranslator.languageName(result.from)
+                        ?.let { "Translated from $it into $language" } ?: "Translated into $language"
+                }
+            }
+        }
+    }
+
     private fun loadLyricsFor(track: DesktopTrack) {
         lyricsPlain = null
         lyricsSynced = null
         lyricsSource = null
         lyricsNote = null
+        lyricsTranslation = null
+        lyricsTranslationNote = null
+        lyricsOffsetMs = runCatching { lyricsOffsets.getLong(offsetKey(track), 0L) }.getOrDefault(0L)
         scope.launch {
             val stored = io { store.lyricsFor(track.file.absolutePath) }
             if (stored != null) {
@@ -1785,13 +1930,39 @@ class DesktopController(parent: CoroutineScope) {
 
     // ---- Identify -----------------------------------------------------------
 
-    var identifyQuery by mutableStateOf("")
-    var identifyResults by mutableStateOf<List<MusicMatch>>(emptyList())
-        private set
-    var identifyBusy by mutableStateOf(false)
-        private set
-    var identifyStatus by mutableStateOf<String?>(null)
-        private set
+    /**
+     * One Identify tab's own box, results and word on how it went.
+     *
+     * The tabs used to share one box, one list and one status line, so a
+     * lyrics search's results showed under Name, and a search that finished
+     * after the tab was changed landed in whichever tab was open by then. Now
+     * each tab keeps its own for as long as the app is open (not from one
+     * launch to the next), and a search writes into the tab it was started
+     * from.
+     */
+    class IdentifyTab {
+        var query by mutableStateOf("")
+        var results by mutableStateOf<List<MusicMatch>>(emptyList())
+        var status by mutableStateOf<String?>(null)
+        var busy by mutableStateOf(false)
+        var needsFfmpeg by mutableStateOf(false)
+    }
+
+    private val identifyTabs = IdentifyMode.entries.associateWith { IdentifyTab() }
+
+    /** The tab [mode] keeps; the open one by default. */
+    fun identifyTab(mode: IdentifyMode = identifyMode): IdentifyTab = identifyTabs.getValue(mode)
+
+    /** The open tab's box. */
+    var identifyQuery: String
+        get() = identifyTab().query
+        set(value) {
+            identifyTab().query = value
+        }
+    val identifyResults: List<MusicMatch> get() = identifyTab().results
+    val identifyBusy: Boolean get() = identifyTab().busy
+    val identifyStatus: String? get() = identifyTab().status
+
     var identifyTarget by mutableStateOf<DesktopTrack?>(null)
     var identifyMode by mutableStateOf(IdentifyMode.NAME)
 
@@ -1875,7 +2046,137 @@ class DesktopController(parent: CoroutineScope) {
 
     fun stopPreview() = preview.stop()
 
-    /** Hands the video to the existing downloader, as an mp3 at the set quality. */
+    // ---- Streaming, after Riff (github.com/rootscripts/riff, MIT) ------------
+    //
+    // Songs played online one after another, through the preview player and
+    // its small player: nothing joins the library, the queue or the counts.
+
+    /** The list being streamed, or null. */
+    var streamQueue by mutableStateOf<StreamQueue?>(null)
+        private set
+
+    private val streamResolver by lazy {
+        StreamResolver({ page -> youtubeBackend.audioUrl(page, downloadQuality) }, linkFinder)
+    }
+
+    /** Songs in a row that wouldn't play; past a few, the list stops rather than asking YouTube for every one. */
+    private var streamFailures = 0
+
+    fun stream(queue: StreamQueue) {
+        if (queue.items.isEmpty()) return
+        if (!tools.ready) {
+            toolNote = "Install yt-dlp first; it finds what to stream."
+            return
+        }
+        streamFailures = 0
+        playStreamAt(queue, queue.index)
+    }
+
+    fun streamNext() {
+        val queue = streamQueue ?: return
+        if (queue.hasNext) playStreamAt(queue, queue.index + 1)
+    }
+
+    fun streamPrevious() {
+        val queue = streamQueue ?: return
+        if (queue.hasPrevious) playStreamAt(queue, queue.index - 1)
+    }
+
+    /** Downloads the song being streamed, to keep it. */
+    fun keepStreamed() {
+        val item = streamQueue?.current ?: return
+        item.link?.let { queueDownload(it, song = null) } ?: downloadSong(item.artist.orEmpty(), item.title, item.durationMs)
+    }
+
+    private fun playStreamAt(queue: StreamQueue, at: Int) {
+        val moved = queue.copy(index = at)
+        streamQueue = moved
+        // One thing playing at a time.
+        if (engine.status.value.playing) engine.togglePlay()
+        val item = moved.items[at]
+        preview.toggle(moved.key(at), moved.label(at)) { streamResolver.resolve(item) }
+        // The next one is looked up meanwhile, so it starts as soon as this ends.
+        moved.items.getOrNull(at + 1)?.let { next -> scope.launch { runCatching { streamResolver.resolve(next) } } }
+    }
+
+    init {
+        // On to the next song when one ends; gone when something else is
+        // previewed or the small player is closed.
+        scope.launch {
+            preview.state.collect { state ->
+                val queue = streamQueue ?: return@collect
+                when {
+                    !queue.owns(state.videoId) -> streamQueue = null
+                    state.videoId != queue.key() -> Unit
+                    state.ended && queue.hasNext -> {
+                        streamFailures = 0
+                        playStreamAt(queue, queue.index + 1)
+                    }
+                    state.playing -> streamFailures = 0
+                    state.error != null && queue.hasNext && ++streamFailures < STREAM_FAILURES_TO_STOP -> {
+                        delay(1_500)
+                        if (streamQueue?.key() == state.videoId) playStreamAt(queue, queue.index + 1)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Streams a list read from a link, in its own order. */
+    fun streamImport() {
+        val playlist = linkPlaylist ?: return
+        stream(StreamQueue.ofPlaylist(playlist))
+    }
+
+    /** The list behind the import under review, when it came from a link. */
+    private var linkPlaylist: ParsedPlaylist? = null
+
+    // ---- Trimming, after Riff (github.com/rootscripts/riff, MIT) -------------
+
+    /** The song open in the trimmer, or null. */
+    var trimming by mutableStateOf<DesktopTrack?>(null)
+
+    /** The preview key for a cut of [track], so the trimmer knows its own preview. */
+    fun trimKey(track: DesktopTrack): String = "trim:" + track.file.absolutePath
+
+    /** Plays [startMs] to [endMs] of [track] in the small player, without touching the queue. */
+    fun previewTrim(track: DesktopTrack, startMs: Long, endMs: Long) {
+        if (engine.status.value.playing) engine.togglePlay()
+        // A new key for every stretch, so asking for another one starts it rather than stopping this.
+        preview.toggle(
+            "${trimKey(track)}#$startMs-$endMs",
+            PreviewLabel("Trim: ${track.title}", track.displayArtist),
+            clip = startMs..endMs
+        ) { track.file.absolutePath }
+    }
+
+    /**
+     * Saves [startMs] to [endMs] of [track] as a new song beside it, cut rather
+     * than encoded again, and adds it to the library.
+     */
+    suspend fun saveTrim(track: DesktopTrack, startMs: Long, endMs: Long): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            val ffmpeg = ToolPaths.ffmpeg
+            check(ffmpeg.isFile) { "ffmpeg is missing, and it does the cutting. The Download page can fetch it." }
+            // Beside the original, unless that folder can't be written to.
+            val dir = track.file.parentFile?.takeIf { it.canWrite() } ?: File(settings.downloadDir).apply { mkdirs() }
+            val out = File(dir, Trim.outputName(track.file.name) { File(dir, it).exists() })
+            val process = ProcessBuilder(
+                listOf(ffmpeg.absolutePath) +
+                    Trim.ffmpegArgs(track.file.absolutePath, out.absolutePath, startMs, endMs, Trim.title(track.title))
+            ).redirectErrorStream(true).start()
+            val log = process.inputStream.bufferedReader().readText()
+            val code = process.waitFor()
+            if (code != 0 || !out.isFile || out.length() == 0L) {
+                out.delete()
+                error(log.lines().lastOrNull { it.isNotBlank() } ?: "ffmpeg stopped with code $code.")
+            }
+            addToLibrary(listOf(out))
+            out
+        }
+    }
+
+    /** Hands the video to the existing downloader, in the chosen format at the set quality. */
     fun downloadYouTube(video: YouTubeVideo) {
         startDownload(video.watchUrl)
     }
@@ -1920,7 +2221,7 @@ class DesktopController(parent: CoroutineScope) {
         address: suspend (String) -> String?
     ) {
         if (preview.state.value.videoId != key && engine.status.value.playing) engine.togglePlay()
-        preview.toggle(key, label, found, address)
+        preview.toggle(key, label, found, resolve = address)
     }
 
     /** Opens YouTube search in Identify with [text] already searched for. */
@@ -1931,9 +2232,8 @@ class DesktopController(parent: CoroutineScope) {
         searchYouTube(text)
     }
 
-    /** Set when the last attempt failed only because ffmpeg is missing. */
-    var identifyNeedsFfmpeg by mutableStateOf(false)
-        private set
+    /** Set when the open tab's last attempt failed only because ffmpeg is missing. */
+    val identifyNeedsFfmpeg: Boolean get() = identifyTab().needsFfmpeg
 
     /**
      * Finds a song from a line of its lyrics.
@@ -1942,20 +2242,21 @@ class DesktopController(parent: CoroutineScope) {
      * and NetEase both search lyric text, where the seven catalogues only match
      * titles and artists and would return nothing at all for a remembered line.
      */
-    fun searchByLyrics(text: String = identifyQuery) {
+    fun searchByLyrics(text: String = identifyTab(IdentifyMode.LYRICS).query) {
         if (text.isBlank()) return
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Searching lyrics..."
+        val tab = identifyTab(IdentifyMode.LYRICS)
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Searching lyrics..."
         scope.launch {
             val results = lyricSearch.searchAll(text, limitPer = 8)
-            identifyResults = results
-            identifyStatus = if (results.isEmpty()) {
+            tab.results = results
+            tab.status = if (results.isEmpty()) {
                 "No song matched those words. Try a longer or more distinctive line."
             } else {
                 "${results.size} songs contain those words"
             }
-            identifyBusy = false
+            tab.busy = false
         }
     }
 
@@ -1967,10 +2268,11 @@ class DesktopController(parent: CoroutineScope) {
      */
     fun identifyMediaFile(file: File) {
         identifyTarget = null
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Reading ${file.name}..."
-        scope.launch { fingerprint(file, file.nameWithoutExtension, markPath = null) }
+        val tab = identifyTab()
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Reading ${file.name}..."
+        scope.launch { fingerprint(file, file.nameWithoutExtension, markPath = null, tab = tab) }
     }
 
     /**
@@ -1980,17 +2282,18 @@ class DesktopController(parent: CoroutineScope) {
      * stopping at a temporary file rather than the library - yt-dlp handles well
      * over a thousand sites, so this is not limited to the obvious three.
      */
-    fun identifyLink(url: String = identifyQuery) {
+    fun identifyLink(url: String = identifyTab(IdentifyMode.LINK).query) {
         val target = url.trim()
+        val tab = identifyTab(IdentifyMode.LINK)
         if (target.isBlank()) return
         if (!tools.ready) {
-            identifyStatus = "yt-dlp is missing from this installation - try reinstalling."
+            tab.status = "yt-dlp is missing from this installation - try reinstalling."
             return
         }
         identifyTarget = null
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Fetching audio from that link..."
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Fetching audio from that link..."
 
         scope.launch {
             val staging = io {
@@ -2001,19 +2304,19 @@ class DesktopController(parent: CoroutineScope) {
                 val fetchTarget = when (resolved) {
                     is ResolvedLink.Direct -> resolved.url
                     is ResolvedLink.Search -> {
-                        identifyStatus = "Finding that track on YouTube..."
+                        tab.status = "Finding that track on YouTube..."
                         when (val found = linkFinder.find(YouTubeLinkFinder.Wanted(title = resolved.query))) {
                             is YouTubeLinkFinder.Outcome.Found -> found.pick.video.watchUrl
                             is YouTubeLinkFinder.Outcome.NothingSuitable -> {
-                                identifyStatus = found.message
-                                identifyBusy = false
+                                tab.status = found.message
+                                tab.busy = false
                                 return@launch
                             }
                         }
                     }
                     is ResolvedLink.Unsupported -> {
-                        identifyStatus = resolved.reason
-                        identifyBusy = false
+                        tab.status = resolved.reason
+                        tab.busy = false
                         return@launch
                     }
                 }
@@ -2023,24 +2326,24 @@ class DesktopController(parent: CoroutineScope) {
                     destination = staging,
                     // No conversion: the fingerprinter only needs samples, and
                     // ffmpeg may not be installed.
-                    toMp3 = false,
+                    format = null,
                     embedThumbnail = false,
                     wholePlaylist = false,
                     onProgress = { progress ->
                         progress.percent?.let {
-                            identifyStatus = "Fetching audio... ${(it * 100).toInt()}%"
+                            tab.status = "Fetching audio... ${(it * 100).toInt()}%"
                         }
                     }
                 )
 
                 val file = result.getOrNull()?.firstOrNull()
                 if (file == null) {
-                    identifyStatus = result.exceptionOrNull()?.message
+                    tab.status = result.exceptionOrNull()?.message
                         ?: "Couldn't get any audio from that link."
-                    identifyBusy = false
+                    tab.busy = false
                     return@launch
                 }
-                fingerprint(file, file.nameWithoutExtension, markPath = null)
+                fingerprint(file, file.nameWithoutExtension, markPath = null, tab = tab)
             } finally {
                 io { staging.deleteRecursively() }
             }
@@ -2048,41 +2351,40 @@ class DesktopController(parent: CoroutineScope) {
     }
 
     /** Shared tail of every fingerprint route. */
-    private suspend fun fingerprint(file: File, fallbackName: String, markPath: String?) {
+    private suspend fun fingerprint(file: File, fallbackName: String, markPath: String?, tab: IdentifyTab) {
         when (val outcome = MediaAudio.sample(file)) {
             SampleOutcome.NeedsFfmpeg -> {
-                identifyNeedsFfmpeg = true
-                identifyStatus = "That format needs ffmpeg - one click in the Download tab."
-                identifyBusy = false
+                tab.needsFfmpeg = true
+                tab.status = "That format needs ffmpeg - one click in the Download tab."
+                tab.busy = false
             }
 
             is SampleOutcome.Failed -> {
-                identifyStatus = outcome.message
-                identifyBusy = false
+                tab.status = outcome.message
+                tab.busy = false
             }
 
             is SampleOutcome.Ok -> {
-                identifyStatus = "Matching against Shazam..."
+                tab.status = "Matching against Shazam..."
                 when (val result = shazam.recognize(outcome.samples)) {
                     is RecognitionResult.Found -> {
-                        identifyResults = result.matches
+                        tab.results = result.matches
                         val best = result.matches.firstOrNull()
-                        identifyStatus = "Identified: ${best?.display ?: fallbackName}"
-                        identifyQuery = best?.display ?: fallbackName
+                        tab.status = "Identified: ${best?.display ?: fallbackName}"
                     }
                     RecognitionResult.NoMatch -> {
-                        identifyStatus = "No fingerprint match. Searching by name instead..."
-                        identifyMode = IdentifyMode.NAME
-                        identifyQuery = fallbackName
-                        identifyBusy = false
+                        // Searched by name in this same tab, rather than moving
+                        // to Name and writing over what was typed there.
+                        tab.status = "No fingerprint match. Searching by name instead..."
+                        tab.busy = false
                         markPath?.let { io { store.mark(it, "fingerprintedAt") } }
-                        searchCatalogues(fallbackName)
+                        searchCatalogues(fallbackName, tab)
                         return
                     }
-                    is RecognitionResult.Error -> identifyStatus = result.message
+                    is RecognitionResult.Error -> tab.status = result.message
                 }
                 markPath?.let { io { store.mark(it, "fingerprintedAt") } }
-                identifyBusy = false
+                tab.busy = false
             }
         }
     }
@@ -2099,22 +2401,22 @@ class DesktopController(parent: CoroutineScope) {
         val artist = identifyArtist.trim()
         val title = identifyTitle.trim()
         if (artist.isBlank() && title.isBlank()) return
+        val tab = identifyTab(IdentifyMode.NAME)
 
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Searching seven catalogues..."
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Searching seven catalogues..."
         scope.launch {
             // Providers take a single string, so the halves are joined for the
             // lookup and separated again only for scoring.
             val combined = listOf(artist, title).filter { it.isNotBlank() }.joinToString(" ")
             val found = catalogue.searchAll(combined, limitPer = 8)
             val results = MatchRanker.rankSplit(artist, title, found)
-            identifyResults = results
-            identifyQuery = combined
+            tab.results = results
 
             val dropped = found.size - results.size
             val services = results.map { it.provider }.distinct().size
-            identifyStatus = when {
+            tab.status = when {
                 results.isEmpty() ->
                     "Nothing came back. Try fewer words, or just the artist."
                 dropped > 0 ->
@@ -2123,24 +2425,24 @@ class DesktopController(parent: CoroutineScope) {
                 else ->
                     "${results.size} matches from $services services"
             }
-            identifyBusy = false
+            tab.busy = false
         }
     }
 
-    fun searchCatalogues(text: String = identifyQuery) {
+    fun searchCatalogues(text: String = identifyQuery, tab: IdentifyTab = identifyTab()) {
         if (text.isBlank()) return
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Searching seven catalogues…"
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Searching seven catalogues…"
         scope.launch {
             val found = catalogue.searchAll(text, limitPer = 8)
             // Providers each answer loosely and none of them can see the others,
             // so relevance is decided here rather than trusting whatever order
             // they came back in.
             val results = MatchRanker.rank(text, found)
-            identifyResults = results
+            tab.results = results
             val dropped = found.size - results.size
-            identifyStatus = when {
+            tab.status = when {
                 results.isEmpty() -> "Nothing came back. Try fewer words, or just the artist."
                 dropped > 0 ->
                     "${results.size} matches from " +
@@ -2150,24 +2452,26 @@ class DesktopController(parent: CoroutineScope) {
                     "${results.size} matches from " +
                         "${results.map { it.provider }.distinct().size} services"
             }
-            identifyBusy = false
+            tab.busy = false
         }
     }
 
     /** Fingerprints a track in the library and asks Shazam what it is. */
     fun identifyFile(track: DesktopTrack) {
         identifyTarget = track
-        identifyBusy = true
-        identifyNeedsFfmpeg = false
-        identifyStatus = "Fingerprinting ${track.title}..."
+        val tab = identifyTab()
+        tab.busy = true
+        tab.needsFfmpeg = false
+        tab.status = "Fingerprinting ${track.title}..."
         scope.launch {
-            fingerprint(track.file, track.title, markPath = track.file.absolutePath)
+            fingerprint(track.file, track.title, markPath = track.file.absolutePath, tab = tab)
         }
     }
 
     /** Writes a chosen match onto a track: tags, and art if the match has any. */
     fun applyMatch(track: DesktopTrack, match: MusicMatch) {
-        identifyBusy = true
+        val tab = identifyTab()
+        tab.busy = true
         scope.launch {
             if (writeTags) {
                 io {
@@ -2182,8 +2486,8 @@ class DesktopController(parent: CoroutineScope) {
             }
             match.artworkUrl?.let { Covers.fetchAndStore(track, it, writeTags) }
             io { store.mark(track.file.absolutePath, "identifiedAt") }
-            identifyStatus = "Applied \"${match.display}\" to ${track.file.name}."
-            identifyBusy = false
+            tab.status = "Applied \"${match.display}\" to ${track.file.name}."
+            tab.busy = false
             rescan()
         }
     }
@@ -2853,25 +3157,139 @@ class DesktopController(parent: CoroutineScope) {
         }
     }
 
-    /** Creates the playlist from a reviewed import. */
-    fun confirmImport(result: ImportResult<DesktopTrack>) {
+    // ---- Playlists from other services, after Riff (github.com/rootscripts/riff, MIT)
+
+    /** Set while a playlist link is being read: what the note says meanwhile. */
+    var readingLink by mutableStateOf(false)
+        private set
+
+    /**
+     * Reads a Spotify, Apple Music, YouTube or SoundCloud playlist (or album)
+     * by its link and matches it against this library, for the same review a
+     * playlist file gets.
+     */
+    fun importPlaylistLink(link: String) {
+        val url = link.trim()
+        val service = PlaylistLinks.serviceOf(url)
+        if (service == null) {
+            playlistNote = "That isn't a link. Copy the playlist's share link and paste it here."
+            return
+        }
+        if (readingLink) return
+        readingLink = true
+        importResult = null
+        playlistNote = "Reading the ${service.label} list" + if (PlaylistLinks.needsFullListing(service)) {
+            " - a second or so a song…"
+        } else {
+            "…"
+        }
+        scope.launch {
+            val outcome: PlaylistLinks.Outcome = when {
+                PlaylistLinks.readsDirectly(service) -> PlaylistLinks.read(url)
+                !tools.ready -> PlaylistLinks.Outcome.Problem("Install yt-dlp first; it reads ${service.label} lists.")
+                PlaylistLinks.needsFullListing(service) -> {
+                    val (printed, problem) = youtubeBackend.printedSongs(url)
+                    val parsed = printed?.let { PlaylistLinks.fromPrinted(it, "${service.label} playlist") }
+                    if (parsed != null && parsed.entries.isNotEmpty()) {
+                        PlaylistLinks.Outcome.Read(parsed)
+                    } else {
+                        PlaylistLinks.Outcome.Problem(problem?.let(YouTubeTrouble::reason) ?: "That list couldn't be read.")
+                    }
+                }
+                else -> {
+                    val (playlist, problem) = youtubeBackend.playlist(url)
+                    if (playlist != null && playlist.songs.isNotEmpty()) {
+                        PlaylistLinks.Outcome.Read(
+                            PlaylistLinks.fromVideos(playlist.title, playlist.songs),
+                            if (playlist.gone > 0) "${playlist.gone} of its videos are private or deleted." else null
+                        )
+                    } else {
+                        PlaylistLinks.Outcome.Problem(
+                            problem?.let(YouTubeTrouble::reason)?.takeIf { it.isNotBlank() }
+                                ?: "That playlist couldn't be read. A private one has to be made public or unlisted first."
+                        )
+                    }
+                }
+            }
+            readingLink = false
+            when (outcome) {
+                is PlaylistLinks.Outcome.Problem -> playlistNote = outcome.message
+                is PlaylistLinks.Outcome.Read -> {
+                    linkPlaylist = outcome.playlist
+                    importResult = PlaylistFile.matchAgainst(
+                        playlist = outcome.playlist,
+                        library = tracks,
+                        artistOf = { it.artist },
+                        titleOf = { it.title },
+                        durationOf = { it.durationMs }
+                    )
+                    importFromLink = true
+                    playlistNote = outcome.note
+                }
+            }
+        }
+    }
+
+    /** Whether the import under review came from a link rather than a file. */
+    var importFromLink by mutableStateOf(false)
+        private set
+
+    /**
+     * Creates the playlist from a reviewed import. With [downloadMissing], the
+     * songs that aren't here are downloaded too, and each joins the playlist
+     * as it arrives.
+     */
+    fun confirmImport(result: ImportResult<DesktopTrack>, downloadMissing: Boolean = false) {
         scope.launch {
             val id = io { store.createPlaylist(result.name) }
             io { store.addToPlaylist(id, result.matched.map { it.second.file.absolutePath }) }
             playlists = io { store.playlists() }
             importResult = null
+            val queued = if (downloadMissing) {
+                result.missing.mapNotNull { downloadSong(it.artist.orEmpty(), it.title, it.durationMs) }
+            } else {
+                emptyList()
+            }
             playlistNote = buildString {
                 append("Added ${result.matched.size} tracks as \"${result.name}\"")
-                if (result.missing.isNotEmpty()) {
-                    append("; ${result.missing.size} not in your library")
+                when {
+                    queued.isNotEmpty() ->
+                        append("; downloading the other ${queued.size}, which join it as they arrive (the Download page shows how it's going)")
+                    result.missing.isNotEmpty() -> append("; ${result.missing.size} not in your library")
                 }
                 append(".")
+            }
+            if (queued.isNotEmpty()) followIntoPlaylist(id, queued)
+        }
+    }
+
+    /** Adds each of [downloadIds]' songs to the playlist as its download finishes. */
+    private fun followIntoPlaylist(playlistId: Long, downloadIds: List<Long>) {
+        scope.launch {
+            val pending = downloadIds.toMutableSet()
+            while (pending.isNotEmpty()) {
+                delay(2_000)
+                val finished = downloads.filter { it.id in pending && it.done }
+                for (entry in finished) {
+                    pending -= entry.id
+                    if (!entry.failed && entry.files.isNotEmpty()) {
+                        io { store.addToPlaylist(playlistId, entry.files.map { it.absolutePath }) }
+                    }
+                }
+                if (finished.any { !it.failed }) {
+                    playlists = io { store.playlists() }
+                    openPlaylist?.takeIf { it.id == playlistId }?.let { show(it) }
+                }
+                // A download cleared from the list is one there's nothing more to wait for.
+                val listed = downloads.map { it.id }.toSet()
+                pending.retainAll(listed)
             }
         }
     }
 
     fun dismissImport() {
         importResult = null
+        importFromLink = false
         playlistNote = null
     }
 
@@ -3005,9 +3423,119 @@ class DesktopController(parent: CoroutineScope) {
     var toolProgress by mutableStateOf<Float?>(null)
         private set
     var downloadUrl by mutableStateOf("")
-    var downloadToMp3 by mutableStateOf(true)
-    var downloadEmbedArt by mutableStateOf(true)
-    var downloadPlaylist by mutableStateOf(false)
+    private val formatState = mutableStateOf(
+        settings.downloadFormatName.takeIf { it != ORIGINAL_FORMAT }?.let(DownloadFormat::fromName)
+    )
+
+    /** What downloads are converted to; null keeps whatever the site served. */
+    var downloadFormat: DownloadFormat?
+        get() = formatState.value
+        set(value) {
+            formatState.value = value
+            settings.downloadFormatName = value?.name ?: ORIGINAL_FORMAT
+        }
+
+    private val cutNonMusicState = mutableStateOf(settings.downloadCutNonMusic)
+
+    /** Whether SponsorBlock's non-music parts of music videos are cut out. */
+    var downloadCutNonMusic: Boolean
+        get() = cutNonMusicState.value
+        set(value) {
+            cutNonMusicState.value = value
+            settings.downloadCutNonMusic = value
+        }
+    // ---- YouTube sign-in, for VPN addresses YouTube refuses -----------------
+
+    private val signInState = mutableStateOf(YouTubeSignIn.Source.of(settings.youtubeSignIn))
+    private val cookieFileState = mutableStateOf(settings.youtubeCookieFile)
+
+    init {
+        YouTubeSignIn.source = signInState.value
+        YouTubeSignIn.cookieFile = cookieFileState.value.takeIf { it.isNotBlank() }?.let(::File)
+    }
+
+    /** Which sign-in yt-dlp downloads with. */
+    var youtubeSignIn: YouTubeSignIn.Source
+        get() = signInState.value
+        set(value) {
+            signInState.value = value
+            settings.youtubeSignIn = value.name
+            YouTubeSignIn.source = value
+            signInNote = null
+        }
+
+    /** The cookies.txt file, when that is the sign-in. */
+    var youtubeCookieFile: String
+        get() = cookieFileState.value
+        set(value) {
+            cookieFileState.value = value
+            settings.youtubeCookieFile = value
+            YouTubeSignIn.cookieFile = value.takeIf { it.isNotBlank() }?.let(::File)
+            signInNote = null
+        }
+
+    /** What the last check of the sign-in found. */
+    var signInNote by mutableStateOf<String?>(null)
+        private set
+    var checkingSignIn by mutableStateOf(false)
+        private set
+
+    /** Asks YouTube for a page only a signed-in account sees, with the sign-in as it is set. */
+    fun checkYouTubeSignIn() {
+        if (checkingSignIn) return
+        val chosen = youtubeSignIn
+        if (chosen == YouTubeSignIn.Source.OFF) {
+            signInNote = "Choose where the sign-in comes from first."
+            return
+        }
+        if (chosen == YouTubeSignIn.Source.FILE && !YouTubeSignIn.active) {
+            signInNote = "Choose the cookies.txt file first."
+            return
+        }
+        val exe = ToolPaths.ytDlp
+        if (!exe.isFile) {
+            signInNote = "Install yt-dlp first."
+            return
+        }
+        checkingSignIn = true
+        signInNote = "Checking with YouTube…"
+        scope.launch {
+            val error = io {
+                runCatching {
+                    val process = ProcessBuilder(
+                        listOf(exe.absolutePath) + YouTubeSignIn.CHECK_ARGUMENTS +
+                            NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs()
+                    ).redirectErrorStream(false).also(NetworkProxy::configure).start()
+                    val drain = Thread { process.inputStream.use { it.readBytes() } }.apply { isDaemon = true; start() }
+                    val err = process.errorStream.bufferedReader().use { it.readText() }
+                    process.waitFor()
+                    drain.join(2_000)
+                    err.lineSequence().filter { it.trim().startsWith("ERROR") }.joinToString("\n")
+                }.getOrElse { "ERROR: ${it.message}" }
+            }
+            signInNote = YouTubeSignIn.explain(error, chosen)
+            checkingSignIn = false
+        }
+    }
+
+    private val embedArtState = mutableStateOf(settings.downloadEmbedArt)
+
+    /** Kept, like the rest of the download choices, so they are as left next time. */
+    var downloadEmbedArt: Boolean
+        get() = embedArtState.value
+        set(value) {
+            embedArtState.value = value
+            settings.downloadEmbedArt = value
+        }
+
+    private val wholePlaylistState = mutableStateOf(settings.downloadPlaylist)
+
+    var downloadPlaylist: Boolean
+        get() = wholePlaylistState.value
+        set(value) {
+            wholePlaylistState.value = value
+            settings.downloadPlaylist = value
+        }
 
     private val qualityState = mutableStateOf(
         DownloadQuality.fromName(settings.downloadQualityName)
@@ -3108,6 +3636,12 @@ class DesktopController(parent: CoroutineScope) {
         /** How long a yt-dlp is trusted before it is checked for a newer one. */
         const val YT_DLP_STALE_AFTER_MS = 2L * 24 * 60 * 60 * 1000
 
+        /** What the format setting holds for "keep what the site served". */
+        const val ORIGINAL_FORMAT = "ORIGINAL"
+
+        /** Songs in a row that wouldn't stream before a list stops trying. */
+        const val STREAM_FAILURES_TO_STOP = 3
+
         /** Songs of a playlist downloading at once. */
         const val PLAYLIST_WORKERS = 4
 
@@ -3169,10 +3703,11 @@ class DesktopController(parent: CoroutineScope) {
         val result = YtDlp.download(
             target = target,
             destination = File(settings.downloadDir),
-            toMp3 = downloadToMp3 && tools.ffmpeg,
+            format = downloadFormat?.takeIf { tools.ffmpeg },
             embedThumbnail = downloadEmbedArt,
             wholePlaylist = wholePlaylist,
             quality = downloadQuality,
+            cutNonMusic = downloadCutNonMusic,
             onProgress = { progress ->
                 if (YouTubeTrouble.refused(progress.line)) refused = true
                 if (progress.line.startsWith("ERROR")) said = progress.line
@@ -3500,7 +4035,7 @@ class DesktopController(parent: CoroutineScope) {
             val result = YtDlp.download(
                 target = link,
                 destination = File(settings.downloadDir),
-                toMp3 = downloadToMp3 && tools.ffmpeg,
+                format = downloadFormat?.takeIf { tools.ffmpeg },
                 embedThumbnail = downloadEmbedArt,
                 wholePlaylist = false,
                 quality = downloadQuality,
@@ -3551,7 +4086,7 @@ class DesktopController(parent: CoroutineScope) {
         val result = YtDlp.downloadSpotify(
             url = url,
             destination = File(settings.downloadDir),
-            toMp3 = downloadToMp3,
+            format = downloadFormat,
             quality = downloadQuality,
             onProgress = { progress -> onDownloadProgress(id, progress) }
         )
@@ -4545,16 +5080,20 @@ private fun encodeFx(fx: DesktopFxState): String =
         if (fx.reverbEnabled) 1f else 0f,
         fx.reverbMix,
         fx.reverbDecay,
-        if (fx.eqEnabled) 1f else 0f
+        if (fx.eqEnabled) 1f else 0f,
+        fx.drive
     ).joinToString(",") + "|" + fx.eqGains.joinToString(",")
 
-/** Null for anything that isn't the six numbers and ten bands written above. */
+/**
+ * Null for anything that isn't the numbers and ten bands written above: six
+ * before distortion was added, seven since.
+ */
 private fun decodeFx(text: String): DesktopFxState? {
     val halves = text.split('|')
     if (halves.size != 2) return null
     val head = halves[0].split(',').mapNotNull { it.toFloatOrNull() }
     val gains = halves[1].split(',').mapNotNull { it.toFloatOrNull() }
-    if (head.size != 6 || gains.size != 10) return null
+    if (head.size !in 6..7 || gains.size != 10) return null
     return DesktopFxState(
         speed = head[0],
         pitchSemitones = head[1],
@@ -4562,7 +5101,8 @@ private fun decodeFx(text: String): DesktopFxState? {
         reverbMix = head[3],
         reverbDecay = head[4],
         eqEnabled = head[5] > 0.5f,
-        eqGains = gains
+        eqGains = gains,
+        drive = head.getOrElse(6) { 0f }.coerceIn(0f, 1f)
     )
 }
 
@@ -4604,3 +5144,6 @@ enum class RepeatMode(val label: String) {
 /** What to send a catalogue when looking a track up. */
 private val DesktopTrack.searchQuery: String
     get() = listOfNotNull(artist?.takeIf { it.isNotBlank() }, title).joinToString(" ")
+
+/** Steps in the accent's ease from one cover to the next, about 0.4 s. */
+private const val COVER_STEPS = 16

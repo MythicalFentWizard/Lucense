@@ -1,5 +1,10 @@
 package com.exo.musicplayer
 
+import com.exo.musicplayer.ui.settings.YouTubeSignInScreen
+import com.exo.musicplayer.data.youtube.StreamQueue
+import androidx.compose.material3.OutlinedTextField
+import com.exo.musicplayer.ui.trim.TrimScreen
+import com.exo.musicplayer.data.trim.TrackTrimmer
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -67,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.discover.DiscoverBrowser
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.youtube.PreviewLabel
 import com.exo.musicplayer.data.library.AutoPlaylist
 import com.exo.musicplayer.data.prefs.LibraryView
@@ -97,6 +103,7 @@ import com.exo.musicplayer.ui.library.LibraryScreen
 import com.exo.musicplayer.ui.library.SelectionActions
 import com.exo.musicplayer.ui.moods.MoodsScreen
 import com.exo.musicplayer.ui.player.FxControls
+import com.exo.musicplayer.ui.player.LyricsExtras
 import com.exo.musicplayer.ui.player.MiniPlayer
 import com.exo.musicplayer.ui.player.PlayerScreen
 import com.exo.musicplayer.ui.player.QueueControls
@@ -167,7 +174,7 @@ class MainActivity : ComponentActivity() {
                 song?.positionMs = { musicApp.playback.state.value.positionNow().toDouble() }
                 song?.load(path)
             }
-            MusicPlayerTheme(theme = theme, song = song) {
+            MusicPlayerTheme(theme = theme, song = song, coverArt = current?.artPath) {
                 NotificationPermissionGate()
                 AppScaffold(
                     viewModel = viewModel,
@@ -233,6 +240,17 @@ private fun AppScaffold(
 
     var playerOpen by rememberSaveable { mutableStateOf(openPlayerOnLaunch) }
     var addingToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var trimming by remember { mutableStateOf<Track?>(null) }
+    var linkingPlaylist by remember { mutableStateOf(false) }
+    var signingInToYouTube by remember { mutableStateOf(false) }
+    val youtubeSignedIn by context.musicApp.youtubeCookies.signedIn.collectAsStateWithLifecycle()
+    // A cookies.txt exported from a browser, for when Google won't sign in inside the app.
+    val cookieFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val problem = context.musicApp.youtubeCookies.saveFromFile(uri)
+            Toast.makeText(context, problem ?: "Signed in to YouTube from that file.", Toast.LENGTH_LONG).show()
+        }
+    }
     var pendingDelete by remember { mutableStateOf<List<Track>>(emptyList()) }
     var deleteSelection by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
@@ -293,6 +311,10 @@ private fun AppScaffold(
     val lyricLines by viewModel.currentLyricLines.collectAsStateWithLifecycle()
     val lyricsBusy by viewModel.lyricsBusy.collectAsStateWithLifecycle()
     val lyricsMessage by viewModel.lyricsMessage.collectAsStateWithLifecycle()
+    val lyricsOffset by viewModel.lyricsOffsetMs.collectAsStateWithLifecycle()
+    val lyricsTranslation by viewModel.lyricsTranslation.collectAsStateWithLifecycle()
+    val lyricsTranslating by viewModel.lyricsTranslating.collectAsStateWithLifecycle()
+    val lyricsTranslationNote by viewModel.lyricsTranslationNote.collectAsStateWithLifecycle()
     val sleep by viewModel.sleep.collectAsStateWithLifecycle()
     val crossfade by viewModel.crossfadeSeconds.collectAsStateWithLifecycle()
     val levelling by viewModel.levelling.collectAsStateWithLifecycle()
@@ -304,6 +326,7 @@ private fun AppScaffold(
     val update by viewModel.update.collectAsStateWithLifecycle()
     val discoverStack by discover.browser.stack.collectAsStateWithLifecycle()
     val previewNow by recognition.preview.state.collectAsStateWithLifecycle()
+    val streaming by recognition.streamQueue.collectAsStateWithLifecycle()
     val queueFailure by download.queueFailure.collectAsStateWithLifecycle()
 
     // Selection actions work on what is on screen: an open album's songs, the
@@ -406,6 +429,7 @@ private fun AppScaffold(
             fix = { viewModel.fixOne(it) },
             identify = { viewModel.startFixTags(it) },
             edit = { viewModel.editTrack(it) },
+            trim = { trimming = it },
             revert = { viewModel.revertTrackToFile(it) },
             share = { share(listOf(it)) },
             delete = { pendingDelete = listOf(it) }
@@ -426,7 +450,15 @@ private fun AppScaffold(
                     PreviewBar(
                         state = previewNow,
                         onPauseResume = { recognition.preview.pauseOrResume() },
-                        onClose = recognition::stopPreview
+                        onClose = recognition::stopPreview,
+                        stream = streaming?.takeIf { it.owns(previewNow.videoId) },
+                        onPrevious = recognition::streamPrevious,
+                        onNext = recognition::streamNext,
+                        onKeep = {
+                            streaming?.current?.let { item ->
+                                download.downloadMatch(item.link, item.artist, item.title, item.durationMs.takeIf { it > 0 })
+                            }
+                        }
                     )
                     MiniPlayer(
                         track = currentTrack,
@@ -589,6 +621,7 @@ private fun AppScaffold(
                                     },
                                     zip = { viewModel.zipPlaylist(it) },
                                     import = { playlistImportLauncher.launchOrExplain(arrayOf("text/*"), context) },
+                                    importLink = { linkingPlaylist = true },
                                     setPrompt = viewModel::setGenrePrompt,
                                     playPrompt = viewModel::playPrompt,
                                     savePrompt = viewModel::savePromptAsPlaylist,
@@ -616,7 +649,7 @@ private fun AppScaffold(
                             address: suspend (String) -> String?
                         ) {
                             if (recognition.preview.state.value.videoId != key && isPlaying) viewModel.togglePlayPause()
-                            recognition.preview.toggle(key, label, found, address)
+                            recognition.preview.toggle(key, label, found, resolve = address)
                         }
 
                         DiscoverScreen(
@@ -678,11 +711,13 @@ private fun AppScaffold(
                     }
 
                     Tab.IDENTIFY -> {
-                        val stage by recognition.stage.collectAsStateWithLifecycle()
-                        val result by recognition.result.collectAsStateWithLifecycle()
-                        val rquery by recognition.query.collectAsStateWithLifecycle()
-                        val label by recognition.sourceLabel.collectAsStateWithLifecycle()
                         val rmode by recognition.mode.collectAsStateWithLifecycle()
+                        // The open tab's own box, result and progress; each tab keeps its own.
+                        val openTab = recognition.tab(rmode)
+                        val stage by openTab.stage.collectAsStateWithLifecycle()
+                        val result by openTab.result.collectAsStateWithLifecycle()
+                        val rquery by openTab.query.collectAsStateWithLifecycle()
+                        val label by openTab.sourceLabel.collectAsStateWithLifecycle()
                         val rartist by recognition.artist.collectAsStateWithLifecycle()
                         val rtitle by recognition.title.collectAsStateWithLifecycle()
                         val youtubeResults by recognition.youtubeResults.collectAsStateWithLifecycle()
@@ -725,6 +760,7 @@ private fun AppScaffold(
                             youtubeStatus = youtubeStatus,
                             preview = preview,
                             onPreviewYouTube = recognition::previewYouTube,
+                            onStreamAll = { recognition.streamResults { if (isPlaying) viewModel.togglePlayPause() } },
                             onDownloadYouTube = { video ->
                                 // A real watch URL, so this takes the direct path
                                 // rather than the search-by-name fallback.
@@ -829,6 +865,15 @@ private fun AppScaffold(
                 onFetchLyrics = { viewModel.fetchLyrics(force = true) },
                 onSaveLyrics = { viewModel.saveLyrics(it) },
                 onDeleteLyrics = { viewModel.deleteLyrics() },
+                lyricsExtras = LyricsExtras(
+                    offsetMs = lyricsOffset,
+                    translation = lyricsTranslation,
+                    translating = lyricsTranslating,
+                    note = lyricsTranslationNote,
+                    onNudge = viewModel::nudgeLyrics,
+                    onResetOffset = viewModel::resetLyricsOffset,
+                    onTranslate = viewModel::translateLyrics
+                ),
                 fxControls = FxControls(
                     onPreset = viewModel::applyFxPreset,
                     onSpeed = viewModel::setFxSpeed,
@@ -836,6 +881,7 @@ private fun AppScaffold(
                     onReverbEnabled = viewModel::setReverbEnabled,
                     onReverbRoom = viewModel::setReverbRoom,
                     onReverbAmount = viewModel::setReverbAmount,
+                    onDrive = viewModel::setFxDrive,
                     onEqEnabled = viewModel::setEqEnabled,
                     onEqBand = viewModel::setEqBand,
                     onEqFlat = viewModel::flattenEq,
@@ -862,6 +908,8 @@ private fun AppScaffold(
             val dlState by download.state.collectAsStateWithLifecycle()
             val dlUrl by download.url.collectAsStateWithLifecycle()
             val dlQuality by download.quality.collectAsStateWithLifecycle()
+            val dlFormat by context.musicApp.prefs.downloadFormat.collectAsStateWithLifecycle()
+            val dlCutNonMusic by context.musicApp.prefs.cutNonMusic.collectAsStateWithLifecycle()
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 contentColor = MaterialTheme.colorScheme.onBackground,
@@ -877,6 +925,10 @@ private fun AppScaffold(
                             onDownload = download::download,
                             quality = dlQuality,
                             onQualityChange = download::setQuality,
+                            format = DownloadFormat.fromName(dlFormat),
+                            onFormatChange = { context.musicApp.prefs.setDownloadFormat(it.name) },
+                            cutNonMusic = dlCutNonMusic,
+                            onCutNonMusicChange = context.musicApp.prefs::setCutNonMusic,
                             onCancel = download::cancel,
                             onUpdate = download::update,
                             onBack = { showDownload = false }
@@ -906,6 +958,7 @@ private fun AppScaffold(
                                 onPalette = themeSettings::setPalette,
                                 onMode = themeSettings::setMode,
                                 onDynamic = themeSettings::setDynamicColor,
+                                onCoverColours = themeSettings::setCoverColours,
                                 onBackdrop = themeSettings::setBackdrop,
                                 onReactiveMode = themeSettings::setReactiveMode,
                                 onWallpaper = themeSettings::setWallpaper,
@@ -932,6 +985,7 @@ private fun AppScaffold(
                                     coverProvider = coverProvider,
                                     coverProviders = viewModel.coverProviders,
                                     downloadProxy = downloadProxy,
+                                    youtubeSignedIn = youtubeSignedIn,
                                     update = update
                                 ),
                                 actions = SettingsActions(
@@ -939,6 +993,7 @@ private fun AppScaffold(
                                     onAppearance = { settingsRoute = SettingsRoute.APPEARANCE },
                                     onSound = { settingsRoute = SettingsRoute.SOUND },
                                     onContact = { openTelegram(context) },
+                                    onRiff = { openUrl(context, "https://github.com/rootscripts/riff") },
                                     onCrossfade = viewModel::setCrossfadeSeconds,
                                     onLevelling = viewModel::setLevelling,
                                     onSleepFade = viewModel::setSleepFade,
@@ -946,6 +1001,9 @@ private fun AppScaffold(
                                     onLyricsPattern = viewModel::setLyricsPattern,
                                     onCoverProvider = viewModel::setCoverProvider,
                                     onDownloadProxy = viewModel::setDownloadProxy,
+                                    onYouTubeSignIn = { signingInToYouTube = true },
+                                    onYouTubeCookieFile = { cookieFileLauncher.launchOrExplain(arrayOf("text/*", "*/*"), context) },
+                                    onYouTubeSignOut = { context.musicApp.youtubeCookies.signOut() },
                                     onBackUp = {
                                         viewModel.backUp { text ->
                                             pendingText = text
@@ -966,6 +1024,54 @@ private fun AppScaffold(
 
         // ---- Dialogs ----------------------------------------------------------
 
+        // Riff's playlist migration: a list from another service, by its link.
+        if (linkingPlaylist) {
+            val reading by viewModel.readingLink.collectAsStateWithLifecycle()
+            var link by remember { mutableStateOf("") }
+            var asked by remember { mutableStateOf(false) }
+            // Once it has been read, the review (or the reason it couldn't be) takes over.
+            LaunchedEffect(reading) { if (asked && !reading) linkingPlaylist = false }
+            AlertDialog(
+                onDismissRequest = { if (!reading) linkingPlaylist = false },
+                title = { Text("Playlist from a link") },
+                text = {
+                    Column {
+                        Text(
+                            "A Spotify, Apple Music, YouTube or SoundCloud playlist or album. Only the list " +
+                                "is read; songs you have are linked up and the rest can be downloaded.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = link,
+                            onValueChange = { link = it },
+                            placeholder = { Text("Paste the share link") },
+                            singleLine = true,
+                            enabled = !reading,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (reading) {
+                            Spacer(Modifier.height(12.dp))
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text("Reading the list…", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            asked = true
+                            viewModel.importPlaylistLink(link) { download.readPlaylistLink(it) }
+                        },
+                        enabled = link.isNotBlank() && !reading
+                    ) { Text("Read it") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { linkingPlaylist = false }, enabled = !reading) { Text("Cancel") }
+                }
+            )
+        }
+
         playlistImport?.let { pending ->
             AlertDialog(
                 onDismissRequest = { viewModel.dismissImport() },
@@ -974,8 +1080,9 @@ private fun AppScaffold(
                     Column {
                         Text(
                             "${pending.matched.size} of ${counted(pending.total, "track")} are already " +
-                                "on this device. Nothing is downloaded — the playlist just " +
-                                "links up what you have."
+                                "on this device, and are linked up. The missing ones can be downloaded: " +
+                                "each is found on YouTube by its name, artist and length, and joins the " +
+                                "playlist as it arrives."
                         )
                         if (pending.missing.isNotEmpty()) {
                             Spacer(Modifier.height(12.dp))
@@ -990,10 +1097,31 @@ private fun AppScaffold(
                     }
                 },
                 confirmButton = {
-                    TextButton(
-                        onClick = { viewModel.confirmImport(pending) },
-                        enabled = pending.matched.isNotEmpty()
-                    ) { Text("Add ${pending.matched.size} ${if (pending.matched.size == 1) "track" else "tracks"}") }
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                        if (pending.missing.isNotEmpty()) {
+                            TextButton(onClick = {
+                                viewModel.confirmImport(pending) { playlistId ->
+                                    download.downloadAll(
+                                        pending.missing.map {
+                                            DownloadRequest(null, it.artist, it.title, it.durationMs.takeIf { ms -> ms > 0 })
+                                        },
+                                        intoPlaylist = playlistId
+                                    )
+                                }
+                            }) { Text("Add, and download the ${pending.missing.size} missing") }
+                        }
+                        TextButton(
+                            onClick = { viewModel.confirmImport(pending) },
+                            enabled = pending.matched.isNotEmpty()
+                        ) { Text("Add ${pending.matched.size} ${if (pending.matched.size == 1) "track" else "tracks"}") }
+                        // A list from a link can be played online as it is, without keeping anything.
+                        viewModel.linkPlaylistFor(pending)?.let { playlist ->
+                            TextButton(onClick = {
+                                recognition.stream(StreamQueue.ofPlaylist(playlist)) { if (isPlaying) viewModel.togglePlayPause() }
+                                viewModel.dismissImport()
+                            }) { Text("Stream it") }
+                        }
+                    }
                 },
                 dismissButton = { TextButton(onClick = { viewModel.dismissImport() }) { Text("Cancel") } }
             )
@@ -1151,6 +1279,26 @@ private fun AppScaffold(
 
         bulk?.let { progress ->
             BulkImportDialog(progress = progress, onCancel = { viewModel.cancelBulkImport() })
+        }
+
+        if (signingInToYouTube) {
+            YouTubeSignInScreen(context.musicApp.youtubeCookies) {
+                signingInToYouTube = false
+                if (context.musicApp.youtubeCookies.signedIn.value) {
+                    Toast.makeText(context, "Signed in: downloads go as your YouTube account.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+        trimming?.let { track ->
+            val trimmer = remember { TrackTrimmer(context.applicationContext) }
+            TrimScreen(
+                track = track,
+                preview = recognition.preview,
+                onPausePlayer = { if (isPlaying) viewModel.togglePlayPause() },
+                onSave = { start, end -> trimmer.save(track, start, end) },
+                onClose = { trimming = null }
+            )
         }
 
         editTarget?.let { track ->

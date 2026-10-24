@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.download
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
 import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.data.youtube.YouTubeBackend
 import com.exo.musicplayer.data.youtube.YouTubeVideo
@@ -30,6 +31,33 @@ class DesktopYouTubeBackend : YouTubeBackend {
         flatSearch(YtDlpFlatSearch.target(query, limit), label)
 
     /**
+     * Every song of a list read in full, for a SoundCloud set whose flat
+     * listing names none of them: yt-dlp's printed lines, or why not.
+     */
+    suspend fun printedSongs(url: String): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        val exe = ToolPaths.ytDlp
+        if (!exe.isFile) return@withContext null to "yt-dlp is missing from this installation."
+        runCatching {
+            val process = ProcessBuilder(
+                buildList {
+                    add(exe.absolutePath)
+                    add(url)
+                    addAll(PlaylistLinks.PRINT_ARGUMENTS)
+                    addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
+                    addAll(YT_DLP_NETWORK)
+                }
+            ).redirectErrorStream(false).also(NetworkProxy::configure).start()
+            var errors = ""
+            val drain = Thread { errors = runCatching { process.errorStream.bufferedReader().readText() }.getOrDefault("") }
+                .apply { isDaemon = true; start() }
+            val out = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            process.waitFor()
+            drain.join(2_000)
+            out.takeIf { it.isNotBlank() } to errors.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("ERROR") }
+        }.getOrElse { null to it.message }
+    }
+
+    /**
      * What a playlist link holds, without downloading any of it; with yt-dlp's
      * own error when it can't be read (a private playlist, a dead link).
      */
@@ -43,7 +71,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                     add(exe.absolutePath)
                     add(url)
                     addAll(YtDlpFlatSearch.PLAYLIST_ARGUMENTS)
-                    addAll(NetworkProxy.ytDlpArgs())
+                    addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
                     addAll(YT_DLP_NETWORK)
                 }
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
@@ -72,7 +100,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                         add(exe.absolutePath)
                         add(target)
                         addAll(YtDlpFlatSearch.ARGUMENTS)
-                        addAll(NetworkProxy.ytDlpArgs())
+                        addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
                         addAll(YT_DLP_NETWORK)
                     }
                 )
@@ -100,6 +128,12 @@ class DesktopYouTubeBackend : YouTubeBackend {
     suspend fun audioStreamUrl(
         videoId: String,
         quality: DownloadQuality = DownloadQuality.LOW
+    ): String? = audioUrl("https://www.youtube.com/watch?v=$videoId", quality)
+
+    /** The audio's own address on any page yt-dlp reads: a YouTube video, a SoundCloud track. */
+    suspend fun audioUrl(
+        page: String,
+        quality: DownloadQuality = DownloadQuality.LOW
     ): String? = withContext(Dispatchers.IO) {
         val exe = ToolPaths.ytDlp
         if (!exe.isFile) return@withContext null
@@ -107,7 +141,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
         runCatching {
             val process = ProcessBuilder(
                 exe.absolutePath,
-                "https://www.youtube.com/watch?v=$videoId",
+                page,
                 // The preview only has to be recognisable, so the smallest
                 // rendition is the right one - it starts sooner.
                 "-f", quality.formatSelector,
@@ -115,7 +149,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                 "--no-warnings",
                 "--no-playlist",
                 "--ignore-config",
-                *(ytDlpJsEngine() + NetworkProxy.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
+                *(ytDlpJsEngine() + NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
 
             val out = process.inputStream.bufferedReader().use { it.readText() }

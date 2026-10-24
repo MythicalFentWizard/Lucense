@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Palette
@@ -63,7 +64,8 @@ class SettingsValues(
     val coverProvider: String,
     val coverProviders: List<String>,
     val downloadProxy: String,
-    val update: UpdateState
+    val update: UpdateState,
+    val youtubeSignedIn: Boolean = false
 )
 
 /** What the settings page can change. */
@@ -72,6 +74,8 @@ class SettingsActions(
     val onAppearance: () -> Unit,
     val onSound: () -> Unit,
     val onContact: () -> Unit,
+    /** Opens Riff's page, credited for the features adapted from it. */
+    val onRiff: () -> Unit,
     val onCrossfade: (Int) -> Unit,
     val onLevelling: (Boolean) -> Unit,
     val onSleepFade: (Boolean) -> Unit,
@@ -82,7 +86,10 @@ class SettingsActions(
     val onBackUp: () -> Unit,
     val onRestore: () -> Unit,
     val onCheckUpdate: () -> Unit,
-    val onOpenUpdate: (String) -> Unit
+    val onOpenUpdate: (String) -> Unit,
+    val onYouTubeSignIn: () -> Unit = {},
+    val onYouTubeCookieFile: () -> Unit = {},
+    val onYouTubeSignOut: () -> Unit = {}
 )
 
 @Composable
@@ -196,6 +203,27 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
             )
         }
 
+        Setting(
+            "YouTube account",
+            if (values.youtubeSignedIn) {
+                "Signed in: downloads go as your YouTube account, which gets past \"confirm you're not a bot\" " +
+                    "on VPN addresses YouTube refuses."
+            } else {
+                "Optional. If YouTube refuses downloads with \"confirm you're not a bot\", sign in and yt-dlp " +
+                    "downloads as your account instead of as the VPN's address. The sign-in stays on this phone. " +
+                    "YouTube can flag accounts that download a lot, so a spare account is safer."
+            }
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (values.youtubeSignedIn) {
+                    OutlinedButton(onClick = actions.onYouTubeSignOut) { Text("Sign out") }
+                } else {
+                    Button(onClick = actions.onYouTubeSignIn) { Text("Sign in to YouTube") }
+                    OutlinedButton(onClick = actions.onYouTubeCookieFile) { Text("cookies.txt…") }
+                }
+            }
+        }
+
         Section("Backups")
         Setting(
             "Favourites, ratings, plays and playlists",
@@ -243,6 +271,12 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
 
         Section("About")
         LinkRow(Icons.AutoMirrored.Filled.Send, "Contact me", "t.me/Eth4wn — bugs, requests, or to say it broke", actions.onContact)
+        LinkRow(
+            Icons.Default.Favorite,
+            "Thanks to Riff",
+            "Several features are adapted from Riff by rootscripts, a free desktop music player (MIT)",
+            actions.onRiff
+        )
 
         Spacer(Modifier.height(28.dp))
         Text(

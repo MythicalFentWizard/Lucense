@@ -110,6 +110,42 @@ class DesktopSettings {
         get() = prefs.get(KEY_DOWNLOAD_QUALITY, "MEDIUM")
         set(value) = prefs.put(KEY_DOWNLOAD_QUALITY, value)
 
+    var downloadFormatName: String
+        get() = prefs.get(KEY_DOWNLOAD_FORMAT, "MP3")
+        set(value) = prefs.put(KEY_DOWNLOAD_FORMAT, value)
+
+    var downloadCutNonMusic: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, true)
+        set(value) = prefs.putBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, value)
+
+    /** Which sign-in yt-dlp downloads with: a browser's, a cookies file's, or none. */
+    var youtubeSignIn: String
+        get() = prefs.get(KEY_YOUTUBE_SIGN_IN, "OFF")
+        set(value) = prefs.put(KEY_YOUTUBE_SIGN_IN, value)
+
+    var youtubeCookieFile: String
+        get() = prefs.get(KEY_YOUTUBE_COOKIE_FILE, "")
+        set(value) = prefs.put(KEY_YOUTUBE_COOKIE_FILE, value)
+
+    var downloadEmbedArt: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_EMBED_ART, true)
+        set(value) = prefs.putBoolean(KEY_DOWNLOAD_EMBED_ART, value)
+
+    /** Whether a video link that is part of a playlist downloads the whole playlist. */
+    var downloadPlaylist: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_PLAYLIST, false)
+        set(value) = prefs.putBoolean(KEY_DOWNLOAD_PLAYLIST, value)
+
+    /** Whether the window is drawn as liquid glass. */
+    var glass: Boolean
+        get() = prefs.getBoolean(KEY_GLASS, false)
+        set(value) = prefs.putBoolean(KEY_GLASS, value)
+
+    /** Whether the accent follows the cover of the song playing. */
+    var coverColours: Boolean
+        get() = prefs.getBoolean(KEY_COVER_COLOURS, false)
+        set(value) = prefs.putBoolean(KEY_COVER_COLOURS, value)
+
     var duckEnabled: Boolean
         get() = prefs.getBoolean(KEY_DUCK_ENABLED, false)
         set(value) = prefs.putBoolean(KEY_DUCK_ENABLED, value)
@@ -296,6 +332,14 @@ class DesktopSettings {
         const val KEY_WEATHER_LON = "weather_lon"
         const val KEY_WRITE_TAGS = "write_tags_on_identify"
         const val KEY_DOWNLOAD_QUALITY = "download_quality"
+        const val KEY_DOWNLOAD_FORMAT = "download_format"
+        const val KEY_DOWNLOAD_CUT_NON_MUSIC = "download_cut_non_music"
+        const val KEY_DOWNLOAD_EMBED_ART = "download_embed_art"
+        const val KEY_YOUTUBE_SIGN_IN = "youtube_sign_in"
+        const val KEY_YOUTUBE_COOKIE_FILE = "youtube_cookie_file"
+        const val KEY_DOWNLOAD_PLAYLIST = "download_whole_playlist"
+        const val KEY_COVER_COLOURS = "cover_colours"
+        const val KEY_GLASS = "glass_ui"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"

@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.common
 
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -74,6 +75,8 @@ class TrackActions(
     /** Listen to it and choose from what comes back. */
     val identify: (Track) -> Unit = {},
     val edit: (Track) -> Unit = {},
+    /** Cut it down and keep the piece as a new song. */
+    val trim: (Track) -> Unit = {},
     val revert: (Track) -> Unit = {},
     val share: (Track) -> Unit = {},
     val delete: (Track) -> Unit = {}
@@ -238,6 +241,7 @@ fun TrackRow(
                 MenuItem("Fix…", Icons.Default.AutoFixHigh) { menuOpen = false; actions.fix(track) }
                 MenuItem("Identify by listening…", Icons.Default.Fingerprint) { menuOpen = false; actions.identify(track) }
                 MenuItem("Edit details…", Icons.Default.Edit) { menuOpen = false; actions.edit(track) }
+                MenuItem("Trim…", Icons.Default.ContentCut) { menuOpen = false; actions.trim(track) }
                 MenuItem("Revert to the file's own details", Icons.Default.Undo) { menuOpen = false; actions.revert(track) }
                 HorizontalDivider()
                 MenuItem("Share", Icons.Default.Share) { menuOpen = false; actions.share(track) }

@@ -52,11 +52,17 @@ class AndroidYouTubeBackend(
     suspend fun audioStreamUrl(
         videoId: String,
         quality: DownloadQuality = DownloadQuality.LOW
+    ): String? = audioUrl("https://www.youtube.com/watch?v=$videoId", quality)
+
+    /** The audio's own address on any page yt-dlp reads: a YouTube video, a SoundCloud track. */
+    suspend fun audioUrl(
+        page: String,
+        quality: DownloadQuality = DownloadQuality.LOW
     ): String? = withContext(Dispatchers.IO) {
         if (!downloader.ensureReady()) return@withContext null
 
         runCatching {
-            val request = downloader.newRequest("https://www.youtube.com/watch?v=$videoId").apply {
+            val request = downloader.newRequest(page).apply {
                 addOption("-f", quality.formatSelector)
                 addOption("-g")
                 addOption("--no-warnings")

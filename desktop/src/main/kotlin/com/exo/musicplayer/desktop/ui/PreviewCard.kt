@@ -1,5 +1,8 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,15 +58,17 @@ fun PreviewCard(controller: DesktopController, modifier: Modifier = Modifier) {
     val state by controller.preview.state.collectAsState()
     if (!state.active) return
     val label = state.label
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(if (Glass.on) 20.dp else 12.dp)
+    // A list being streamed gets a previous, a next and a download.
+    val stream = controller.streamQueue?.takeIf { it.owns(state.videoId) }
 
     Box(
         modifier
-            .width(330.dp)
-            .shadow(10.dp, shape)
+            .width(if (stream != null) 400.dp else 330.dp)
+            .shadow(if (Glass.on) 22.dp else 10.dp, shape)
             .clip(shape)
-            .background(Palette.Raised)
-            .border(1.dp, Palette.AccentSoft, shape)
+            .background(if (Glass.on) Palette.Raised.copy(alpha = 0.86f) else Palette.Raised)
+            .border(1.dp, if (Glass.on) glassEdge(1.2f) else androidx.compose.ui.graphics.SolidColor(Palette.AccentSoft), shape)
     ) {
         Row(
             // Room on the right for the X, so a long title never runs under it.
@@ -80,7 +85,7 @@ fun PreviewCard(controller: DesktopController, modifier: Modifier = Modifier) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "PREVIEW",
+                    if (stream != null) "STREAMING" else "PREVIEW",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = Palette.Accent
@@ -101,6 +106,12 @@ fun PreviewCard(controller: DesktopController, modifier: Modifier = Modifier) {
                 )
             }
             Spacer(Modifier.width(8.dp))
+            if (stream != null) {
+                SmallRoundButton(Icons.Default.Download, "Download this one") { controller.keepStreamed() }
+                Spacer(Modifier.width(2.dp))
+                SmallRoundButton(Icons.Default.SkipPrevious, "Previous", enabled = stream.hasPrevious) { controller.streamPrevious() }
+                Spacer(Modifier.width(2.dp))
+            }
             when {
                 state.loading -> Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.size(18.dp), color = Palette.Accent, strokeWidth = 2.dp)
@@ -135,6 +146,10 @@ fun PreviewCard(controller: DesktopController, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            if (stream != null) {
+                Spacer(Modifier.width(2.dp))
+                SmallRoundButton(Icons.Default.SkipNext, "Next", enabled = stream.hasNext) { controller.streamNext() }
+            }
         }
 
         val interaction = remember { MutableInteractionSource() }
@@ -152,5 +167,23 @@ fun PreviewCard(controller: DesktopController, modifier: Modifier = Modifier) {
         ) {
             Icon(Icons.Default.Close, "Close the preview", Modifier.size(13.dp), tint = if (hovered) Palette.Text else Palette.TextDim)
         }
+    }
+}
+
+
+@Composable
+private fun SmallRoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Box(
+        Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(if (hovered && enabled) Palette.Hover else Color.Transparent)
+            .hoverable(interaction)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, description, Modifier.size(17.dp), tint = if (enabled) Palette.Text else Palette.TextFaint)
     }
 }

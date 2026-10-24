@@ -1,5 +1,7 @@
 package com.exo.musicplayer.ui.download
 
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Update
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.download.DownloadQuality
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
@@ -40,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun DownloadScreen(
     state: DownloadUiState,
@@ -48,6 +52,10 @@ fun DownloadScreen(
     onDownload: () -> Unit,
     quality: DownloadQuality,
     onQualityChange: (DownloadQuality) -> Unit,
+    format: DownloadFormat,
+    onFormatChange: (DownloadFormat) -> Unit,
+    cutNonMusic: Boolean,
+    onCutNonMusicChange: (Boolean) -> Unit,
     onCancel: () -> Unit,
     onUpdate: () -> Unit,
     onBack: () -> Unit,
@@ -83,7 +91,7 @@ fun DownloadScreen(
         Text(
             text = "Paste a YouTube, SoundCloud or Bandcamp link, or just type an artist " +
                 "and song name and Lucense finds the song on YouTube first. Either way " +
-                "the audio arrives as an mp3, tagged and added to your library. Spotify " +
+                "the audio arrives in the format picked below, tagged and added to your library. Spotify " +
                 "links work too, by finding the same track.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -140,10 +148,50 @@ fun DownloadScreen(
                 }
             }
             Text(
-                quality.description,
+                if (format.lossy) quality.description else "Doesn't apply to ${format.label}, which keeps everything",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // Wrapped rather than scrolled, so every format is in sight.
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                Text(
+                    "Format",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+                DownloadFormat.entries.forEach { option ->
+                    FilterChip(
+                        selected = option == format,
+                        onClick = { onFormatChange(option) },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+            Text(
+                format.note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Cut the non-music parts of music videos", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Spoken intros and skits that SponsorBlock's listeners have marked",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = cutNonMusic, onCheckedChange = onCutNonMusicChange)
+            }
             Spacer(Modifier.height(10.dp))
             Row(
                 Modifier.fillMaxWidth(),

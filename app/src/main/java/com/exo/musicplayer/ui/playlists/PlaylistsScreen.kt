@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.playlists
 
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -97,7 +98,9 @@ class PlaylistActions(
     /** How many songs a rule picks out, for the count shown while one is typed. */
     val countRule: suspend (rule: String) -> Int,
     val playSmart: (SmartPlaylist) -> Unit,
-    val deleteSmart: (SmartPlaylist) -> Unit
+    val deleteSmart: (SmartPlaylist) -> Unit,
+    /** Bring a list over from Spotify, Apple Music, YouTube or SoundCloud by its link. */
+    val importLink: () -> Unit = {}
 )
 
 private fun AutoPlaylist.icon(): ImageVector = when (this) {
@@ -154,6 +157,9 @@ fun PlaylistsScreen(
                 )
                 // Playlists travel as plain text, so two people can end up with
                 // the same list without either uploading anything anywhere.
+                IconButton(onClick = actions.importLink) {
+                    Icon(Icons.Default.Link, contentDescription = "Bring in a playlist from a link")
+                }
                 IconButton(onClick = actions.import) {
                     Icon(Icons.Default.FileDownload, contentDescription = "Import a playlist file")
                 }

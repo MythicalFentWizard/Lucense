@@ -62,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.exo.musicplayer.data.audio.EffectPreset
+import com.exo.musicplayer.data.audio.Overdrive
 import com.exo.musicplayer.desktop.audio.DesktopAudioOutput
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.data.RepeatMode
@@ -81,10 +82,13 @@ data class DesktopFxState(
     val reverbMix: Float = 0.35f,
     val reverbDecay: Float = 0.82f,
     val eqEnabled: Boolean = false,
-    val eqGains: List<Float> = List(10) { 0f }
+    val eqGains: List<Float> = List(10) { 0f },
+    /** Distortion, 0 (off) to 1. */
+    val drive: Float = 0f
 ) {
     val isDefault: Boolean
-        get() = abs(speed - 1f) < 0.005f && abs(pitchSemitones) < 0.05f && !reverbEnabled && !eqEnabled
+        get() = abs(speed - 1f) < 0.005f && abs(pitchSemitones) < 0.05f && !reverbEnabled && !eqEnabled &&
+            !Overdrive.active(drive)
 
     /**
      * Maps a shared preset onto this platform's reverb model.
@@ -132,7 +136,13 @@ fun SidePanel(
         Modifier
             .width(if (kind == SidePanelKind.OUTPUT) 288.dp else 348.dp)
             .fillMaxHeight()
-            .background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.75f else 1f))
+            .then(
+                if (Glass.on) {
+                    Modifier.glassPane(LocalGlass.current, RoundedCornerShape(Glass.PANE), Palette.Sidebar, 0.4f)
+                } else {
+                    Modifier.background(Palette.Sidebar.copy(alpha = if (controller.wallpaper != null) 0.75f else 1f))
+                }
+            )
     ) {
     if (kind == SidePanelKind.LYRICS) {
         Backdrop(
@@ -295,6 +305,25 @@ private fun EffectsControls(
     )
 
     Spacer(Modifier.height(20.dp))
+    Text("Distortion", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+    Readout(
+        "Drive",
+        if (Overdrive.active(fx.drive)) "${(fx.drive * 100).roundToInt()}%" else "off",
+        when {
+            !Overdrive.active(fx.drive) -> "clean"
+            fx.drive < 0.3f -> "warm"
+            fx.drive < 0.7f -> "crunchy"
+            else -> "fuzz"
+        }
+    )
+    Slider(
+        value = fx.drive,
+        onValueChange = { onFx(fx.copy(drive = it)) },
+        valueRange = 0f..1f,
+        colors = sliderColours()
+    )
+
+    Spacer(Modifier.height(20.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             "Reverb",
@@ -436,7 +465,7 @@ private fun Spectrum(spectrum: SpectrumAnalyser, playing: Boolean) {
                 .fillMaxWidth()
                 .height(84.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Palette.Content)
+                .background(Palette.Well)
                 .padding(horizontal = 8.dp, vertical = 7.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(3.dp)
@@ -502,7 +531,7 @@ private fun DecayCurve(decay: Float, mix: Float) {
             .fillMaxWidth()
             .height(34.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(Palette.Content)
+            .background(Palette.Well)
             .padding(horizontal = 6.dp, vertical = 5.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(2.dp)

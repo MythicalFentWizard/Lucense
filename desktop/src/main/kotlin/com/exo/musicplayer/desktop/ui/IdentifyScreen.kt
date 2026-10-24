@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.ui
 
+import com.exo.musicplayer.data.youtube.StreamQueue
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -103,7 +105,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                     IdentifyMode.YOUTUBE ->
                         "The whole of YouTube, not just YouTube Music, because the music " +
                             "filter reports no view counts, dates or descriptions at all. " +
-                            "Preview a result to hear it, then take it as an mp3."
+                            "Preview a result to hear it, then download it."
                 }
             )
             Spacer(Modifier.height(12.dp))
@@ -156,7 +158,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                 Spacer(Modifier.width(10.dp))
                 AccentButton(
                     if (mode == IdentifyMode.LINK) "Identify" else "Search",
-                    enabled = !controller.identifyBusy && !controller.youtubeBusy && canRun
+                    enabled = canRun && !(if (mode == IdentifyMode.YOUTUBE) controller.youtubeBusy else controller.identifyBusy)
                 ) { run() }
             }
 
@@ -222,7 +224,7 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                     color = Palette.TextDim
                 )
             }
-            if (controller.identifyBusy || controller.youtubeBusy) {
+            if (if (mode == IdentifyMode.YOUTUBE) controller.youtubeBusy else controller.identifyBusy) {
                 Spacer(Modifier.height(10.dp))
                 ThinProgress(null)
             }
@@ -240,6 +242,15 @@ fun IdentifyScreen(controller: DesktopController, onChooseMedia: () -> File?) {
                         "before you take it, and downloads land as tagged mp3 files."
                 )
             } else {
+                // Riff's streaming: the whole list, online, one after another.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GhostButton("Stream all ${controller.youtubeResults.size}", icon = Icons.Default.PlayCircle) {
+                        controller.stream(StreamQueue.ofVideos("YouTube: ${controller.youtubeQuery}", controller.youtubeResults))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Hint("Plays them online in the small player, one after another, without downloading.")
+                }
+                Spacer(Modifier.height(10.dp))
                 YouTubeResultList(
                     videos = controller.youtubeResults,
                     preview = preview,
@@ -391,9 +402,7 @@ private fun MatchRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (hovered) Palette.Hover else Palette.Raised)
-            .border(1.dp, Palette.Line, RoundedCornerShape(8.dp))
+            .card(8.dp, hovered)
             .hoverable(interaction)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically

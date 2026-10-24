@@ -1,5 +1,6 @@
 package com.exo.musicplayer.data.youtube
 
+import androidx.media3.common.MimeTypes
 import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -64,6 +65,8 @@ class YouTubePreviewPlayer(
         key: String,
         label: PreviewLabel? = null,
         found: () -> PreviewLabel? = { null },
+        /** Only this stretch, in milliseconds: the trimmer's preview of a cut. */
+        clip: LongRange? = null,
         resolve: suspend (String) -> String?
     ) {
         val current = _state.value
@@ -71,10 +74,19 @@ class YouTubePreviewPlayer(
             if (current.paused) pauseOrResume() else stop()
             return
         }
-        start(key, label, found, resolve)
+        start(key, label, found, clip, resolve)
     }
 
-    private fun start(key: String, label: PreviewLabel?, found: () -> PreviewLabel?, resolve: suspend (String) -> String?) {
+    /** How far into what is playing it is, in milliseconds; from the start of the clip when there is one. */
+    fun positionMs(): Long = player?.currentPosition ?: 0L
+
+    private fun start(
+        key: String,
+        label: PreviewLabel?,
+        found: () -> PreviewLabel?,
+        clip: LongRange?,
+        resolve: suspend (String) -> String?
+    ) {
         job?.cancel()
         ticker?.cancel()
         releasePlayback()
@@ -127,7 +139,23 @@ class YouTubePreviewPlayer(
                 player = built
             }
 
-            active.setMediaItem(MediaItem.fromUri(url))
+            active.setMediaItem(
+                MediaItem.Builder()
+                    .setUri(url)
+                    .apply {
+                        // SoundCloud hands out HLS playlists, which aren't always named for it.
+                        if (".m3u8" in url) setMimeType(MimeTypes.APPLICATION_M3U8)
+                        if (clip != null) {
+                            setClippingConfiguration(
+                                MediaItem.ClippingConfiguration.Builder()
+                                    .setStartPositionMs(clip.first)
+                                    .setEndPositionMs(clip.last)
+                                    .build()
+                            )
+                        }
+                    }
+                    .build()
+            )
             active.prepare()
             active.play()
 

@@ -20,7 +20,9 @@ data class ThemeState(
     val wallpaperDim: Float = 0.45f,
     /** ARGB colours for the lyric line being sung and the others; null follows the theme. */
     val lyricsActive: Int? = null,
-    val lyricsInactive: Int? = null
+    val lyricsInactive: Int? = null,
+    /** The accent follows the cover of the song playing. */
+    val coverColours: Boolean = false
 )
 
 /**
@@ -61,7 +63,8 @@ class ThemeSettings(context: Context) {
             wallpaper = prefs.getLong(KEY_WALLPAPER, 0L),
             wallpaperDim = prefs.getFloat(KEY_WALLPAPER_DIM, 0.45f),
             lyricsActive = if (prefs.contains(KEY_LYRICS_ACTIVE)) prefs.getInt(KEY_LYRICS_ACTIVE, 0) else null,
-            lyricsInactive = if (prefs.contains(KEY_LYRICS_INACTIVE)) prefs.getInt(KEY_LYRICS_INACTIVE, 0) else null
+            lyricsInactive = if (prefs.contains(KEY_LYRICS_INACTIVE)) prefs.getInt(KEY_LYRICS_INACTIVE, 0) else null,
+            coverColours = prefs.getBoolean(KEY_COVER, false)
         )
     )
     val state: StateFlow<ThemeState> = _state.asStateFlow()
@@ -84,6 +87,11 @@ class ThemeSettings(context: Context) {
     fun setDynamicColor(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DYNAMIC, enabled).apply()
         _state.value = _state.value.copy(dynamicColor = enabled)
+    }
+
+    fun setCoverColours(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_COVER, enabled).apply()
+        _state.value = _state.value.copy(coverColours = enabled)
     }
 
     fun setBackdrop(style: BackdropStyle) {
@@ -147,6 +155,7 @@ class ThemeSettings(context: Context) {
         const val KEY_PALETTE = "palette"
         const val KEY_MODE = "mode"
         const val KEY_DYNAMIC = "dynamic"
+        const val KEY_COVER = "cover_colours"
         const val KEY_STARS = "stars"
         const val KEY_BACKDROP = "backdrop"
         const val KEY_REACTIVE = "reactive_mode"

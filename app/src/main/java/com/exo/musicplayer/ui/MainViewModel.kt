@@ -1,5 +1,7 @@
 package com.exo.musicplayer.ui
 
+import com.exo.musicplayer.data.playlist.PlaylistLinks
+import android.content.Context
 import android.app.Application
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -30,6 +32,7 @@ import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.lyrics.LyricLine
 import com.exo.musicplayer.data.lyrics.LyricsFetch
 import com.exo.musicplayer.data.lyrics.LyricsTerm
+import com.exo.musicplayer.data.lyrics.LyricsTranslator
 import com.exo.musicplayer.data.lyrics.tidyLyrics
 import com.exo.musicplayer.data.playlist.PlaylistEntry
 import com.exo.musicplayer.data.playlist.PlaylistFile
@@ -920,6 +923,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setReverbRoom(room: ReverbRoom) = app.audioFx.setReverbRoom(room)
     fun setReverbAmount(amount: Float) = app.audioFx.setReverbAmount(amount)
     fun setEqEnabled(enabled: Boolean) = app.audioFx.setEqEnabled(enabled)
+    fun setFxDrive(amount: Float) = app.audioFx.setDrive(amount)
     fun setEqBand(band: Int, db: Float) = app.audioFx.setEqBand(band, db)
     fun flattenEq() = app.audioFx.flattenEq()
     fun resetFx() = app.audioFx.reset()
@@ -956,6 +960,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // A message about one song's lyrics means nothing on the next song.
         viewModelScope.launch { currentTrackId.collect { _lyricsMessage.value = null } }
+    }
+
+    // ---- Lyrics timing and translation, after Riff ---------------------------------
+
+    /** Each song's lyrics offset, by track id; only songs that have one are written. */
+    private val lyricsOffsets by lazy { app.getSharedPreferences("lyrics_offsets", Context.MODE_PRIVATE) }
+
+    private val _lyricsOffsetMs = MutableStateFlow(0L)
+
+    /** How far this song's lyrics are moved; positive shows each line sooner. */
+    val lyricsOffsetMs: StateFlow<Long> = _lyricsOffsetMs.asStateFlow()
+
+    private val _lyricsTranslation = MutableStateFlow<List<String>?>(null)
+    val lyricsTranslation: StateFlow<List<String>?> = _lyricsTranslation.asStateFlow()
+
+    private val _lyricsTranslating = MutableStateFlow(false)
+    val lyricsTranslating: StateFlow<Boolean> = _lyricsTranslating.asStateFlow()
+
+    private val _lyricsTranslationNote = MutableStateFlow<String?>(null)
+    val lyricsTranslationNote: StateFlow<String?> = _lyricsTranslationNote.asStateFlow()
+
+    init {
+        // A translation and an offset belong to one song.
+        viewModelScope.launch {
+            currentTrackId.collect { id ->
+                _lyricsOffsetMs.value = id?.let { lyricsOffsets.getLong(it.toString(), 0L) } ?: 0L
+                _lyricsTranslation.value = null
+                _lyricsTranslationNote.value = null
+            }
+        }
+    }
+
+    fun nudgeLyrics(deltaMs: Long) {
+        val id = currentTrackId.value ?: return
+        val offset = (_lyricsOffsetMs.value + deltaMs).coerceIn(-15_000L, 15_000L)
+        _lyricsOffsetMs.value = offset
+        lyricsOffsets.edit().apply {
+            if (offset == 0L) remove(id.toString()) else putLong(id.toString(), offset)
+        }.apply()
+    }
+
+    fun resetLyricsOffset() = nudgeLyrics(-_lyricsOffsetMs.value)
+
+    /** Translates the lyrics into the phone's language, or hides the translation if one is showing. */
+    fun translateLyrics() {
+        if (_lyricsTranslation.value != null) {
+            _lyricsTranslation.value = null
+            _lyricsTranslationNote.value = null
+            return
+        }
+        val lyrics = currentLyrics.value ?: return
+        val lines = currentLyricLines.value.map { it.text }
+            .ifEmpty { lyrics.plainText.orEmpty().lines() }
+        if (lines.isEmpty() || _lyricsTranslating.value) return
+        val id = currentTrackId.value
+        viewModelScope.launch {
+            _lyricsTranslating.value = true
+            val result = LyricsTranslator.translate(lines)
+            _lyricsTranslating.value = false
+            if (currentTrackId.value != id) return@launch
+            val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
+            when {
+                result == null -> _lyricsTranslationNote.value = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
+                result.lines.map { it.trim() } == lines.map { it.trim() } ->
+                    _lyricsTranslationNote.value = "These lyrics are already in $language."
+                else -> {
+                    _lyricsTranslation.value = result.lines
+                    _lyricsTranslationNote.value = LyricsTranslator.languageName(result.from)
+                        ?.let { "Translated from $it into $language" } ?: "Translated into $language"
+                }
+            }
+        }
     }
 
     fun fetchLyrics(force: Boolean = false) {
@@ -1497,6 +1573,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun importPlaylist(text: String, fallbackName: String) {
+        linkPlaylist = null
         viewModelScope.launch {
             val parsed = PlaylistFile.parse(text, fallbackName)
             if (parsed.entries.isEmpty()) {
@@ -1513,19 +1590,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun confirmImport(result: com.exo.musicplayer.data.playlist.ImportResult<Track>) {
+    /**
+     * Creates the playlist from a reviewed import. [downloadMissing] is handed
+     * the new playlist's id, to download the songs that aren't here into it.
+     */
+    fun confirmImport(
+        result: com.exo.musicplayer.data.playlist.ImportResult<Track>,
+        downloadMissing: ((Long) -> Unit)? = null
+    ) {
         viewModelScope.launch {
             val id = runCatching { library.createPlaylist(result.name) }.getOrNull()
                 ?: return@launch
-            library.addToPlaylist(id, result.matched.map { it.second.id })
+            if (result.matched.isNotEmpty()) library.addToPlaylist(id, result.matched.map { it.second.id })
             _importResult.value = null
+            val downloading = downloadMissing != null && result.missing.isNotEmpty()
+            if (downloading) downloadMissing?.invoke(id)
             _notice.value = buildString {
                 append("Added ${counted(result.matched.size, "track")} as \"${result.name}\"")
-                if (result.missing.isNotEmpty()) {
-                    append("; ${result.missing.size} not on this device")
+                when {
+                    downloading -> append("; downloading the other ${result.missing.size}, which join it as they arrive")
+                    result.missing.isNotEmpty() -> append("; ${result.missing.size} not on this device")
                 }
                 append(".")
             }
+        }
+    }
+
+    // ---- Playlists from other services, after Riff (github.com/rootscripts/riff, MIT)
+
+    private val _readingLink = MutableStateFlow(false)
+
+    /** The list behind the import under review, when it came from a link: for streaming it. */
+    private var linkPlaylist: com.exo.musicplayer.data.playlist.ParsedPlaylist? = null
+
+    /** [result]'s list as read from its link, or null when it came from a file. */
+    fun linkPlaylistFor(result: com.exo.musicplayer.data.playlist.ImportResult<Track>) =
+        linkPlaylist?.takeIf { it.name == result.name && it.entries.size == result.total }
+
+    /** True while a playlist link is being read. */
+    val readingLink: StateFlow<Boolean> = _readingLink.asStateFlow()
+
+    /** Reads a playlist link with [read] and matches it against the library, for review. */
+    fun importPlaylistLink(link: String, read: suspend (String) -> PlaylistLinks.Outcome) {
+        if (_readingLink.value) return
+        _readingLink.value = true
+        viewModelScope.launch {
+            val outcome = runCatching { read(link) }
+                .getOrElse { PlaylistLinks.Outcome.Problem("Couldn't read that link: ${it.message}") }
+            when (outcome) {
+                is PlaylistLinks.Outcome.Problem -> _notice.value = outcome.message
+                is PlaylistLinks.Outcome.Read -> {
+                    linkPlaylist = outcome.playlist
+                    _importResult.value = PlaylistFile.matchAgainst(
+                        playlist = outcome.playlist,
+                        library = library.allTracks(),
+                        artistOf = { it.artist },
+                        titleOf = { it.title },
+                        durationOf = { it.durationMs }
+                    )
+                    outcome.note?.let { _notice.value = it }
+                }
+            }
+            _readingLink.value = false
         }
     }
 

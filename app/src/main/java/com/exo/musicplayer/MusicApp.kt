@@ -50,6 +50,11 @@ class MusicApp : Application() {
     val audioOutputs: AudioOutputRepository by lazy { AudioOutputRepository(this) }
     val interruption: InterruptionSettings by lazy { InterruptionSettings(this) }
     val prefs: AppPrefs by lazy { AppPrefs(this) }
+
+    /** YouTube's sign-in for yt-dlp, when the user has given one. */
+    val youtubeCookies: com.exo.musicplayer.data.download.YouTubeCookies by lazy {
+        com.exo.musicplayer.data.download.YouTubeCookies(this)
+    }
     val sleep: SleepTimer by lazy { SleepTimer() }
 
     /** The running player service, while there is one. */

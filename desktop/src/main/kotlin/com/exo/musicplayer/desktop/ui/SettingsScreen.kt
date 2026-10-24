@@ -90,7 +90,7 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                             .fillMaxWidth()
                             .padding(vertical = 3.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Palette.Content)
+                            .background(Palette.Well)
                             .padding(horizontal = 11.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -188,6 +188,20 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             }
             Spacer(Modifier.height(8.dp))
             Hint(controller.accent.credit)
+            Spacer(Modifier.height(10.dp))
+            CheckRow(
+                "Liquid glass",
+                controller.glass,
+                note = "The window as panes of frosted glass over a soft field of the theme's colours, " +
+                    "or over your wallpaper. Rounder controls, lit edges. Uses a little more of the graphics card."
+            ) { controller.glass = it }
+            Spacer(Modifier.height(6.dp))
+            CheckRow(
+                "Take the accent from the song's cover",
+                controller.coverColours,
+                note = "The theme stays and its accent follows the artwork of what's playing. " +
+                    "Black-and-white covers keep the theme's own."
+            ) { controller.coverColours = it }
             Spacer(Modifier.height(12.dp))
             GhostButton("Edit colours", icon = Icons.Default.ColorLens) { editingColours = true }
             Spacer(Modifier.height(6.dp))
@@ -500,6 +514,19 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
+                    Text("Thanks to Riff", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+                    Hint(
+                        "Several features are adapted from Riff by rootscripts, a free desktop music " +
+                            "player: distortion, download formats, playlist import, fullscreen lyrics, " +
+                            "lyrics timing and translation, colours from the cover, the trimmer and " +
+                            "streaming. Riff is MIT licensed."
+                    )
+                }
+                GhostButton("Riff on GitHub") { openLink("https://github.com/rootscripts/riff") }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
                     Text("Updates", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
                     Hint(controller.updateNote ?: "Looked up when Lucense starts.")
                 }
@@ -624,7 +651,7 @@ private fun WeatherSettings(controller: DesktopController) {
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(7.dp))
-                    .background(Palette.Content)
+                    .background(Palette.Well)
                     .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
@@ -664,7 +691,7 @@ private fun WeatherSettings(controller: DesktopController) {
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Palette.Content)
+                            .background(Palette.Well)
                             .clickable {
                                 controller.usePlace(place)
                                 search = ""

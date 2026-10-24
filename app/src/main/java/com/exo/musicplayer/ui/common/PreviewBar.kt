@@ -1,5 +1,9 @@
 package com.exo.musicplayer.ui.common
 
+import com.exo.musicplayer.data.youtube.StreamQueue
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +53,12 @@ fun PreviewBar(
     state: PreviewState,
     onPauseResume: () -> Unit,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** The list being streamed, when this is one of its songs: adds previous, next and download. */
+    stream: StreamQueue? = null,
+    onPrevious: () -> Unit = {},
+    onNext: () -> Unit = {},
+    onKeep: () -> Unit = {}
 ) {
     if (!state.active) return
     val label = state.label
@@ -99,13 +108,17 @@ fun PreviewBar(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "Preview · ${state.status}",
+                    "${if (stream != null) "Streaming" else "Preview"} · ${state.status}",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (state.error != null) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSecondaryContainer,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+            if (stream != null) {
+                IconButton(onClick = onKeep) { Icon(Icons.Default.Download, "Download this one") }
+                IconButton(onClick = onPrevious, enabled = stream.hasPrevious) { Icon(Icons.Default.SkipPrevious, "Previous") }
             }
             when {
                 state.loading -> Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
@@ -119,6 +132,9 @@ fun PreviewBar(
                         else -> Icon(Icons.Default.Pause, "Pause the preview")
                     }
                 }
+            }
+            if (stream != null) {
+                IconButton(onClick = onNext, enabled = stream.hasNext) { Icon(Icons.Default.SkipNext, "Next") }
             }
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close the preview") }
         }

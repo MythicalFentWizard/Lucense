@@ -1,5 +1,8 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,6 +74,8 @@ fun PlaylistsScreen(
         controller.refreshSmartPlaylists()
     }
     var creating by remember { mutableStateOf(false) }
+    var linking by remember { mutableStateOf(false) }
+    var link by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
     var creatingSmart by remember { mutableStateOf(false) }
@@ -265,12 +270,42 @@ fun PlaylistsScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionTitle("Your playlists") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    GhostButton("From a link…", icon = Icons.Default.Link) { linking = !linking }
+                    Spacer(Modifier.width(8.dp))
                     GhostButton("Import…", icon = Icons.Default.FileOpen) {
                         onPickPlaylistFile(false, "")?.let { controller.importPlaylist(it) }
                     }
                     Spacer(Modifier.width(8.dp))
                     AccentButton("New playlist", icon = Icons.Default.Add) { creating = true }
                 }
+            }
+        }
+
+        // Riff's playlist migration: a list from another service, by its link.
+        if (linking) {
+            Spacer(Modifier.height(12.dp))
+            Panel(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextInput(
+                        value = link,
+                        onValueChange = { link = it },
+                        placeholder = "A Spotify, Apple Music, YouTube or SoundCloud playlist or album link",
+                        modifier = Modifier.weight(1f),
+                        onSubmit = { controller.importPlaylistLink(link) }
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    AccentButton(
+                        if (controller.readingLink) "Reading…" else "Read it",
+                        enabled = link.isNotBlank() && !controller.readingLink
+                    ) { controller.importPlaylistLink(link) }
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton("Close") { linking = false; link = "" }
+                }
+                Spacer(Modifier.height(6.dp))
+                Hint(
+                    "Only the list is read - names, artists and lengths - from what the service shows anyone " +
+                        "with the link. Songs you already have are linked up; the rest can be downloaded."
+                )
             }
         }
 
@@ -311,6 +346,8 @@ fun PlaylistsScreen(
             ImportReview(
                 result = result,
                 onConfirm = { controller.confirmImport(result) },
+                onDownloadMissing = { controller.confirmImport(result, downloadMissing = true) },
+                onStream = if (controller.importFromLink) ({ controller.streamImport() }) else null,
                 onCancel = { controller.dismissImport() }
             )
         }
@@ -353,9 +390,7 @@ private fun PlaylistCard(
 
     Column(
         Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered) Palette.Hover else Palette.Raised)
-            .border(1.dp, Palette.Line, RoundedCornerShape(10.dp))
+            .card(10.dp, hovered)
             .hoverable(interaction)
             .clickable(onClick = onOpen)
             .padding(14.dp)
@@ -365,7 +400,7 @@ private fun PlaylistCard(
                 .fillMaxWidth()
                 .height(112.dp)
                 .clip(RoundedCornerShape(7.dp))
-                .background(Palette.Content),
+                .background(Palette.Well),
             contentAlignment = Alignment.Center
         ) {
             Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(30.dp), tint = Palette.TextFaint)
@@ -409,6 +444,9 @@ private fun PlaylistCard(
 private fun ImportReview(
     result: ImportResult<DesktopTrack>,
     onConfirm: () -> Unit,
+    onDownloadMissing: () -> Unit,
+    /** Plays the list online without keeping anything; null for a playlist file. */
+    onStream: (() -> Unit)?,
     onCancel: () -> Unit
 ) {
     Panel(Modifier.fillMaxWidth()) {
@@ -416,6 +454,18 @@ private fun ImportReview(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GhostButton("Cancel", onClick = onCancel)
                 Spacer(Modifier.width(8.dp))
+                if (onStream != null) {
+                    GhostButton("Stream it", icon = Icons.Default.PlayCircle, onClick = onStream)
+                    Spacer(Modifier.width(8.dp))
+                }
+                if (result.missing.isNotEmpty()) {
+                    GhostButton(
+                        "Add, and download the ${result.missing.size} missing",
+                        icon = Icons.Default.Download,
+                        onClick = onDownloadMissing
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 AccentButton(
                     "Add ${result.matched.size} tracks",
                     enabled = result.matched.isNotEmpty(),
@@ -425,8 +475,8 @@ private fun ImportReview(
         }
         Spacer(Modifier.height(4.dp))
         Hint(
-            "Nothing is downloaded — this links up songs you already have. " +
-                "Anything missing is listed so you can go and find it."
+            "Songs you already have are linked up. The ones that aren't can be downloaded: each is found on " +
+                "YouTube by its name, artist and length, and joins the playlist as it arrives."
         )
 
         if (result.missing.isNotEmpty()) {
@@ -640,7 +690,7 @@ private fun AutoCard(kind: AutoPlaylist, songs: Int, onPlay: () -> Unit) {
         Modifier
             .width(196.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Well)
             .hoverable(interaction)
             .clickable(enabled = songs > 0, onClick = onPlay)
             .padding(14.dp)
@@ -683,7 +733,7 @@ private fun SmartCard(
         Modifier
             .width(196.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (hovered && songs > 0) Palette.Hover else Palette.Content)
+            .background(if (hovered && songs > 0) Palette.Hover else Palette.Well)
             .hoverable(interaction)
             .clickable(enabled = songs > 0, onClick = onPlay)
             .padding(14.dp)

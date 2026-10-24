@@ -1,6 +1,8 @@
 package com.exo.musicplayer.desktop.download
 
+import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.download.DownloadQuality
+import com.exo.musicplayer.data.download.YtDlpTidy
 import com.exo.musicplayer.desktop.data.AppDirs
 import com.exo.musicplayer.desktop.data.NetworkProxy
 import com.exo.musicplayer.desktop.data.ToolPaths
@@ -125,10 +127,13 @@ object YtDlp {
     suspend fun download(
         target: String,
         destination: File,
-        toMp3: Boolean,
+        /** What to convert to; null keeps whatever the site served. */
+        format: DownloadFormat?,
         embedThumbnail: Boolean,
         wholePlaylist: Boolean,
         quality: DownloadQuality = DownloadQuality.DEFAULT,
+        /** Cut what SponsorBlock marks as not music in a music video. */
+        cutNonMusic: Boolean = false,
         onProgress: (DownloadProgress) -> Unit,
         registerProcess: (Process) -> Unit = {}
     ): Result<List<File>> = withContext(Dispatchers.IO) {
@@ -150,21 +155,26 @@ object YtDlp {
                     "-o", File(staging, "%(title).180B.%(ext)s").absolutePath
                 )
                 if (!wholePlaylist) command += "--no-playlist"
-                if (toMp3) {
-                    check(ffmpeg.isFile) { "Converting to MP3 needs ffmpeg." }
-                    command += listOf(
-                        "-x", "--audio-format", "mp3", "--audio-quality", quality.audioQuality
-                    )
+                if (format != null) {
+                    check(ffmpeg.isFile) { "Converting to ${format.label} needs ffmpeg." }
+                    command += listOf("-x", "--audio-format", format.ytDlp)
+                    if (format.lossy) command += listOf("--audio-quality", quality.audioQuality)
                 }
                 if (ffmpeg.isFile) {
                     command += listOf("--ffmpeg-location", ffmpeg.absolutePath)
                     // Metadata and cover art only survive the container with
                     // ffmpeg available to rewrite it.
                     command += "--embed-metadata"
-                    if (embedThumbnail) command += "--embed-thumbnail"
+                    command += YtDlpTidy.TAGS
+                    if (embedThumbnail && format?.holdsCover != false) {
+                        command += "--embed-thumbnail"
+                        command += YtDlpTidy.squareCover(windows = true)
+                    }
+                    if (cutNonMusic) command += YtDlpTidy.NON_MUSIC_CUT
                 }
                 command += ytDlpJsEngine()
                 command += NetworkProxy.ytDlpArgs()
+                command += YouTubeSignIn.ytDlpArgs()
                 command += YT_DLP_NETWORK
                 command += YT_DLP_RETRIES
                 command += target
@@ -195,7 +205,7 @@ object YtDlp {
     suspend fun downloadSpotify(
         url: String,
         destination: File,
-        toMp3: Boolean,
+        format: DownloadFormat?,
         quality: DownloadQuality = DownloadQuality.DEFAULT,
         onProgress: (DownloadProgress) -> Unit,
         registerProcess: (Process) -> Unit = {}
@@ -211,8 +221,9 @@ object YtDlp {
                     "download", url,
                     "--output", File(staging, "{artists} - {title}.{output-ext}").absolutePath
                 )
-                if (toMp3) command += listOf("--format", "mp3")
+                if (format != null) command += listOf("--format", format.spotdl)
                 command += listOf("--bitrate", quality.spotdlBitrate)
+                command += YouTubeSignIn.spotdlArgs()
                 if (ToolPaths.ffmpeg.isFile) {
                     command += listOf("--ffmpeg", ToolPaths.ffmpeg.absolutePath)
                 }
