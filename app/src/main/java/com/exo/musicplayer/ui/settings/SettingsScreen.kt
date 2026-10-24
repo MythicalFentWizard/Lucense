@@ -64,7 +64,8 @@ class SettingsValues(
     val coverProvider: String,
     val coverProviders: List<String>,
     val downloadProxy: String,
-    val update: UpdateState
+    val update: UpdateState,
+    val youtubeSignedIn: Boolean = false
 )
 
 /** What the settings page can change. */
@@ -85,7 +86,10 @@ class SettingsActions(
     val onBackUp: () -> Unit,
     val onRestore: () -> Unit,
     val onCheckUpdate: () -> Unit,
-    val onOpenUpdate: (String) -> Unit
+    val onOpenUpdate: (String) -> Unit,
+    val onYouTubeSignIn: () -> Unit = {},
+    val onYouTubeCookieFile: () -> Unit = {},
+    val onYouTubeSignOut: () -> Unit = {}
 )
 
 @Composable
@@ -197,6 +201,27 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+        }
+
+        Setting(
+            "YouTube account",
+            if (values.youtubeSignedIn) {
+                "Signed in: downloads go as your YouTube account, which gets past \"confirm you're not a bot\" " +
+                    "on VPN addresses YouTube refuses."
+            } else {
+                "Optional. If YouTube refuses downloads with \"confirm you're not a bot\", sign in and yt-dlp " +
+                    "downloads as your account instead of as the VPN's address. The sign-in stays on this phone. " +
+                    "YouTube can flag accounts that download a lot, so a spare account is safer."
+            }
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (values.youtubeSignedIn) {
+                    OutlinedButton(onClick = actions.onYouTubeSignOut) { Text("Sign out") }
+                } else {
+                    Button(onClick = actions.onYouTubeSignIn) { Text("Sign in to YouTube") }
+                    OutlinedButton(onClick = actions.onYouTubeCookieFile) { Text("cookies.txt…") }
+                }
+            }
         }
 
         Section("Backups")

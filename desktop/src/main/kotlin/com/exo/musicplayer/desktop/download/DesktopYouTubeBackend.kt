@@ -43,7 +43,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                     add(exe.absolutePath)
                     add(url)
                     addAll(PlaylistLinks.PRINT_ARGUMENTS)
-                    addAll(NetworkProxy.ytDlpArgs())
+                    addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
                     addAll(YT_DLP_NETWORK)
                 }
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
@@ -71,7 +71,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                     add(exe.absolutePath)
                     add(url)
                     addAll(YtDlpFlatSearch.PLAYLIST_ARGUMENTS)
-                    addAll(NetworkProxy.ytDlpArgs())
+                    addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
                     addAll(YT_DLP_NETWORK)
                 }
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
@@ -100,7 +100,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                         add(exe.absolutePath)
                         add(target)
                         addAll(YtDlpFlatSearch.ARGUMENTS)
-                        addAll(NetworkProxy.ytDlpArgs())
+                        addAll(NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs())
                         addAll(YT_DLP_NETWORK)
                     }
                 )
@@ -149,7 +149,7 @@ class DesktopYouTubeBackend : YouTubeBackend {
                 "--no-warnings",
                 "--no-playlist",
                 "--ignore-config",
-                *(ytDlpJsEngine() + NetworkProxy.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
+                *(ytDlpJsEngine() + NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs() + YT_DLP_NETWORK).toTypedArray()
             ).redirectErrorStream(false).also(NetworkProxy::configure).start()
 
             val out = process.inputStream.bufferedReader().use { it.readText() }

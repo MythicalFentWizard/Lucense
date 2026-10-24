@@ -21,8 +21,8 @@ object YouTubeTrouble {
     /** Why YouTube refuses a connection, and what helps. */
     const val WHY_REFUSED =
         "YouTube does that after a lot of downloads in a row, to VPN addresses it has flagged, and " +
-            "when yt-dlp is out of date. Wait an hour, update yt-dlp, or try without the VPN or on " +
-            "another server."
+            "when yt-dlp is out of date. Wait an hour, update yt-dlp, try without the VPN or on " +
+            "another server, or sign in to YouTube in Lucense so downloads go as your account."
 
     /** What to tell someone whose YouTube download failed, from yt-dlp's error line. */
     fun explain(said: String?): String {

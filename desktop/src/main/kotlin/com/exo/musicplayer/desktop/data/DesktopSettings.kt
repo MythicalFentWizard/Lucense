@@ -118,6 +118,15 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, true)
         set(value) = prefs.putBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, value)
 
+    /** Which sign-in yt-dlp downloads with: a browser's, a cookies file's, or none. */
+    var youtubeSignIn: String
+        get() = prefs.get(KEY_YOUTUBE_SIGN_IN, "OFF")
+        set(value) = prefs.put(KEY_YOUTUBE_SIGN_IN, value)
+
+    var youtubeCookieFile: String
+        get() = prefs.get(KEY_YOUTUBE_COOKIE_FILE, "")
+        set(value) = prefs.put(KEY_YOUTUBE_COOKIE_FILE, value)
+
     var downloadEmbedArt: Boolean
         get() = prefs.getBoolean(KEY_DOWNLOAD_EMBED_ART, true)
         set(value) = prefs.putBoolean(KEY_DOWNLOAD_EMBED_ART, value)
@@ -321,6 +330,8 @@ class DesktopSettings {
         const val KEY_DOWNLOAD_FORMAT = "download_format"
         const val KEY_DOWNLOAD_CUT_NON_MUSIC = "download_cut_non_music"
         const val KEY_DOWNLOAD_EMBED_ART = "download_embed_art"
+        const val KEY_YOUTUBE_SIGN_IN = "youtube_sign_in"
+        const val KEY_YOUTUBE_COOKIE_FILE = "youtube_cookie_file"
         const val KEY_DOWNLOAD_PLAYLIST = "download_whole_playlist"
         const val KEY_COVER_COLOURS = "cover_colours"
         const val KEY_DUCK_ENABLED = "duck_enabled"

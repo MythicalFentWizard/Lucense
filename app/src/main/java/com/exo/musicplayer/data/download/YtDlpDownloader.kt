@@ -221,7 +221,12 @@ class YtDlpDownloader(private val context: Context) {
 
     /** Every yt-dlp call starts here, so a download proxy applies to all of them. */
     fun newRequest(target: String): YoutubeDLRequest =
-        YoutubeDLRequest(target).apply { proxy?.let { addOption("--proxy", it) } }
+        YoutubeDLRequest(target).apply {
+            proxy?.let { addOption("--proxy", it) }
+            // Signed in to YouTube, when the user chose to: YouTube then
+            // judges the account rather than the VPN's address.
+            context.musicApp.youtubeCookies.file.takeIf { it.isFile }?.let { addOption("--cookies", it.absolutePath) }
+        }
 
     /**
      * Every song of a list read in full, for a SoundCloud set whose flat

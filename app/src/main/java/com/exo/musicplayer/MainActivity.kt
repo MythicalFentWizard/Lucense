@@ -1,5 +1,6 @@
 package com.exo.musicplayer
 
+import com.exo.musicplayer.ui.settings.YouTubeSignInScreen
 import com.exo.musicplayer.data.youtube.StreamQueue
 import androidx.compose.material3.OutlinedTextField
 import com.exo.musicplayer.ui.trim.TrimScreen
@@ -241,6 +242,15 @@ private fun AppScaffold(
     var addingToPlaylist by remember { mutableStateOf<List<Track>>(emptyList()) }
     var trimming by remember { mutableStateOf<Track?>(null) }
     var linkingPlaylist by remember { mutableStateOf(false) }
+    var signingInToYouTube by remember { mutableStateOf(false) }
+    val youtubeSignedIn by context.musicApp.youtubeCookies.signedIn.collectAsStateWithLifecycle()
+    // A cookies.txt exported from a browser, for when Google won't sign in inside the app.
+    val cookieFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val problem = context.musicApp.youtubeCookies.saveFromFile(uri)
+            Toast.makeText(context, problem ?: "Signed in to YouTube from that file.", Toast.LENGTH_LONG).show()
+        }
+    }
     var pendingDelete by remember { mutableStateOf<List<Track>>(emptyList()) }
     var deleteSelection by remember { mutableStateOf(false) }
     var showTools by remember { mutableStateOf(false) }
@@ -973,6 +983,7 @@ private fun AppScaffold(
                                     coverProvider = coverProvider,
                                     coverProviders = viewModel.coverProviders,
                                     downloadProxy = downloadProxy,
+                                    youtubeSignedIn = youtubeSignedIn,
                                     update = update
                                 ),
                                 actions = SettingsActions(
@@ -988,6 +999,9 @@ private fun AppScaffold(
                                     onLyricsPattern = viewModel::setLyricsPattern,
                                     onCoverProvider = viewModel::setCoverProvider,
                                     onDownloadProxy = viewModel::setDownloadProxy,
+                                    onYouTubeSignIn = { signingInToYouTube = true },
+                                    onYouTubeCookieFile = { cookieFileLauncher.launchOrExplain(arrayOf("text/*", "*/*"), context) },
+                                    onYouTubeSignOut = { context.musicApp.youtubeCookies.signOut() },
                                     onBackUp = {
                                         viewModel.backUp { text ->
                                             pendingText = text
@@ -1263,6 +1277,15 @@ private fun AppScaffold(
 
         bulk?.let { progress ->
             BulkImportDialog(progress = progress, onCancel = { viewModel.cancelBulkImport() })
+        }
+
+        if (signingInToYouTube) {
+            YouTubeSignInScreen(context.musicApp.youtubeCookies) {
+                signingInToYouTube = false
+                if (context.musicApp.youtubeCookies.signedIn.value) {
+                    Toast.makeText(context, "Signed in: downloads go as your YouTube account.", Toast.LENGTH_LONG).show()
+                }
+            }
         }
 
         trimming?.let { track ->

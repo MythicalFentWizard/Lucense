@@ -174,6 +174,7 @@ object YtDlp {
                 }
                 command += ytDlpJsEngine()
                 command += NetworkProxy.ytDlpArgs()
+                command += YouTubeSignIn.ytDlpArgs()
                 command += YT_DLP_NETWORK
                 command += YT_DLP_RETRIES
                 command += target
@@ -222,6 +223,7 @@ object YtDlp {
                 )
                 if (format != null) command += listOf("--format", format.spotdl)
                 command += listOf("--bitrate", quality.spotdlBitrate)
+                command += YouTubeSignIn.spotdlArgs()
                 if (ToolPaths.ffmpeg.isFile) {
                     command += listOf("--ffmpeg", ToolPaths.ffmpeg.absolutePath)
                 }

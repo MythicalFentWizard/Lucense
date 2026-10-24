@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import com.exo.musicplayer.data.playlist.ParsedPlaylist
 import com.exo.musicplayer.data.youtube.StreamResolver
 import com.exo.musicplayer.data.youtube.StreamQueue
@@ -3401,6 +3402,80 @@ class DesktopController(parent: CoroutineScope) {
             cutNonMusicState.value = value
             settings.downloadCutNonMusic = value
         }
+    // ---- YouTube sign-in, for VPN addresses YouTube refuses -----------------
+
+    private val signInState = mutableStateOf(YouTubeSignIn.Source.of(settings.youtubeSignIn))
+    private val cookieFileState = mutableStateOf(settings.youtubeCookieFile)
+
+    init {
+        YouTubeSignIn.source = signInState.value
+        YouTubeSignIn.cookieFile = cookieFileState.value.takeIf { it.isNotBlank() }?.let(::File)
+    }
+
+    /** Which sign-in yt-dlp downloads with. */
+    var youtubeSignIn: YouTubeSignIn.Source
+        get() = signInState.value
+        set(value) {
+            signInState.value = value
+            settings.youtubeSignIn = value.name
+            YouTubeSignIn.source = value
+            signInNote = null
+        }
+
+    /** The cookies.txt file, when that is the sign-in. */
+    var youtubeCookieFile: String
+        get() = cookieFileState.value
+        set(value) {
+            cookieFileState.value = value
+            settings.youtubeCookieFile = value
+            YouTubeSignIn.cookieFile = value.takeIf { it.isNotBlank() }?.let(::File)
+            signInNote = null
+        }
+
+    /** What the last check of the sign-in found. */
+    var signInNote by mutableStateOf<String?>(null)
+        private set
+    var checkingSignIn by mutableStateOf(false)
+        private set
+
+    /** Asks YouTube for a page only a signed-in account sees, with the sign-in as it is set. */
+    fun checkYouTubeSignIn() {
+        if (checkingSignIn) return
+        val chosen = youtubeSignIn
+        if (chosen == YouTubeSignIn.Source.OFF) {
+            signInNote = "Choose where the sign-in comes from first."
+            return
+        }
+        if (chosen == YouTubeSignIn.Source.FILE && !YouTubeSignIn.active) {
+            signInNote = "Choose the cookies.txt file first."
+            return
+        }
+        val exe = ToolPaths.ytDlp
+        if (!exe.isFile) {
+            signInNote = "Install yt-dlp first."
+            return
+        }
+        checkingSignIn = true
+        signInNote = "Checking with YouTube…"
+        scope.launch {
+            val error = io {
+                runCatching {
+                    val process = ProcessBuilder(
+                        listOf(exe.absolutePath) + YouTubeSignIn.CHECK_ARGUMENTS +
+                            NetworkProxy.ytDlpArgs() + YouTubeSignIn.ytDlpArgs()
+                    ).redirectErrorStream(false).also(NetworkProxy::configure).start()
+                    val drain = Thread { process.inputStream.use { it.readBytes() } }.apply { isDaemon = true; start() }
+                    val err = process.errorStream.bufferedReader().use { it.readText() }
+                    process.waitFor()
+                    drain.join(2_000)
+                    err.lineSequence().filter { it.trim().startsWith("ERROR") }.joinToString("\n")
+                }.getOrElse { "ERROR: ${it.message}" }
+            }
+            signInNote = YouTubeSignIn.explain(error, chosen)
+            checkingSignIn = false
+        }
+    }
+
     private val embedArtState = mutableStateOf(settings.downloadEmbedArt)
 
     /** Kept, like the rest of the download choices, so they are as left next time. */

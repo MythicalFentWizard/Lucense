@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -179,6 +180,8 @@ fun DownloadScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             }
         }
 
+        Spacer(Modifier.height(14.dp))
+        SignInPanel(controller)
         Spacer(Modifier.height(14.dp))
 
         if (controller.downloads.isEmpty()) {
@@ -396,4 +399,66 @@ private fun LogPanel(lines: List<String>) {
             }
         }
     }
+}
+
+/**
+ * Downloads as the user's YouTube account, for when YouTube refuses the VPN's
+ * address: the sign-in cookies of a browser, or of a cookies.txt file.
+ */
+@Composable
+private fun SignInPanel(controller: DesktopController) {
+    Panel(Modifier.fillMaxWidth()) {
+        SectionTitle("YouTube account (optional)")
+        Spacer(Modifier.height(4.dp))
+        Hint(
+            "If YouTube refuses downloads with \"confirm you're not a bot\", usually because of the VPN's " +
+                "address, yt-dlp can download as your YouTube account instead. It uses the sign-in of a " +
+                "browser you're signed in to YouTube with - Firefox works best, since Chrome and Edge lock " +
+                "their cookies away - or a cookies.txt file exported from one. Nothing leaves this PC except " +
+                "to YouTube. YouTube can flag accounts that download a lot, so a spare account is safer."
+        )
+        Spacer(Modifier.height(10.dp))
+        SegmentedRow(
+            options = YouTubeSignIn.Source.entries,
+            selected = controller.youtubeSignIn,
+            label = { it.label },
+            onSelect = { controller.youtubeSignIn = it }
+        )
+        if (controller.youtubeSignIn == YouTubeSignIn.Source.FILE) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    controller.youtubeCookieFile.ifBlank { "No file chosen" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Palette.TextDim,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(10.dp))
+                GhostButton("Choose file…") { chooseCookieFile()?.let { controller.youtubeCookieFile = it.absolutePath } }
+            }
+        }
+        if (controller.youtubeSignIn != YouTubeSignIn.Source.OFF) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GhostButton(if (controller.checkingSignIn) "Checking…" else "Check sign-in", enabled = !controller.checkingSignIn) {
+                    controller.checkYouTubeSignIn()
+                }
+                controller.signInNote?.let {
+                    Spacer(Modifier.width(10.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.TextDim)
+                }
+            }
+        }
+    }
+}
+
+/** Windows' own open dialog, for a cookies.txt file. */
+private fun chooseCookieFile(): File? {
+    val dialog = java.awt.FileDialog(null as java.awt.Frame?, "Choose a cookies.txt file", java.awt.FileDialog.LOAD)
+    dialog.file = "*.txt"
+    dialog.isVisible = true
+    val name = dialog.file ?: return null
+    return File(dialog.directory, name)
 }
