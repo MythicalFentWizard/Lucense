@@ -136,6 +136,11 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_DOWNLOAD_PLAYLIST, false)
         set(value) = prefs.putBoolean(KEY_DOWNLOAD_PLAYLIST, value)
 
+    /** Whether fullscreen lyrics are shown over your own background rather than the song's cover. */
+    var lyricsOwnBackground: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS_OWN_BACKGROUND, false)
+        set(value) = prefs.putBoolean(KEY_LYRICS_OWN_BACKGROUND, value)
+
     /** Whether the window is drawn as liquid glass. */
     var glass: Boolean
         get() = prefs.getBoolean(KEY_GLASS, false)
@@ -340,6 +345,7 @@ class DesktopSettings {
         const val KEY_DOWNLOAD_PLAYLIST = "download_whole_playlist"
         const val KEY_COVER_COLOURS = "cover_colours"
         const val KEY_GLASS = "glass_ui"
+        const val KEY_LYRICS_OWN_BACKGROUND = "lyrics_own_background"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"

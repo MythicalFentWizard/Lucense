@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Brush
@@ -73,10 +74,26 @@ fun FullscreenLyrics(controller: DesktopController) {
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        cover?.let {
-            Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(60.dp))
+        if (controller.lyricsOwnBackground) {
+            // Your own background: the wallpaper, or the theme's glow, with the
+            // background effect over it, as behind the library.
+            GlassBackground(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
+            Backdrop(
+                style = controller.backdrop,
+                color = Palette.Stars,
+                spectrum = controller.engine.spectrum,
+                graph = controller.songGraph,
+                beat = controller.engine.beat,
+                reactiveMode = controller.reactiveMode,
+                modifier = Modifier.matchParentSize()
+            )
+            Box(Modifier.fillMaxSize().background(Color(0x80000000)))
+        } else {
+            cover?.let {
+                Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(60.dp))
+            }
+            Box(Modifier.fillMaxSize().background(Color(0xB8000000)))
         }
-        Box(Modifier.fillMaxSize().background(Color(0xB8000000)))
 
         Column(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 36.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -94,6 +111,18 @@ fun FullscreenLyrics(controller: DesktopController) {
                         color = Color.White.copy(alpha = 0.7f)
                     )
                 }
+                // Behind the words: the song's cover, or your own background.
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BackgroundChoice("Cover", !controller.lyricsOwnBackground) { controller.lyricsOwnBackground = false }
+                    BackgroundChoice("My background", controller.lyricsOwnBackground) { controller.lyricsOwnBackground = true }
+                }
+                Spacer(Modifier.width(16.dp))
                 Text("Esc to close", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.5f))
                 Spacer(Modifier.width(12.dp))
                 RoundButton(Icons.Default.Close, "Close fullscreen lyrics") { controller.lyricsFullscreen = false }
@@ -199,3 +228,17 @@ private fun Modifier.fadeEdges(): Modifier = this
             blendMode = BlendMode.DstIn
         )
     }
+
+@Composable
+private fun BackgroundChoice(label: String, chosen: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (chosen) Color.Black else Color.White.copy(alpha = 0.8f),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (chosen) Color.White.copy(alpha = 0.9f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+    )
+}

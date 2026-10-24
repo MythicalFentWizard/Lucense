@@ -1,5 +1,9 @@
 package com.exo.musicplayer.desktop
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.border
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.runtime.CompositionLocalProvider
 import com.exo.musicplayer.desktop.ui.ResizeEdges
 import com.exo.musicplayer.desktop.ui.LocalWindowFrame
@@ -79,6 +83,8 @@ import javax.swing.filechooser.FileNameExtensionFilter
  * a hand-drawn title bar loses all three.
  */
 fun main(args: Array<String>) = application {
+    // The main window's frame, so the snap outline can be drawn as a window of its own.
+    var mainFrame by remember { mutableStateOf<WindowFrame?>(null) }
     // The folder picker is Swing; matching the OS look keeps it from standing out.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
 
@@ -193,11 +199,15 @@ fun main(args: Array<String>) = application {
         // Anything Windows handed over: a double-clicked file, or "Open with".
         LaunchedEffect(Unit) { controller.openExternal(args.toList()) }
         val frame = remember { WindowFrame(window, ::exitApplication) }
+        LaunchedEffect(frame) { mainFrame = frame }
         LaunchedEffect(Unit) { WindowCorners.round(window) }
         CompositionLocalProvider(LocalWindowFrame provides frame) {
             LucenseDesktopTheme {
                 Box(Modifier.fillMaxSize()) {
-                    ScaledToWindow(designWidth = 1180.dp, designHeight = 640.dp) {
+                    // The layout adapts down to about 920 wide (a narrower
+                    // sidebar and panel, buttons as icons); only below that is
+                    // it drawn smaller, and never under 80 %.
+                    ScaledToWindow(designWidth = 920.dp, designHeight = 600.dp, minScale = 0.8f) {
                         AppHost(controller)
                     }
                     ResizeEdges()
@@ -205,6 +215,9 @@ fun main(args: Array<String>) = application {
             }
         }
     }
+
+    // Where a dragged window would snap to: an outline, as Windows draws for its own.
+    mainFrame?.snapPreview?.let { area -> SnapOutline(area) { mainFrame?.window?.toFront() } }
 
     if (controller.miniPlayer) {
         Window(
@@ -229,8 +242,15 @@ fun main(args: Array<String>) = application {
             onCloseRequest = { controller.lyricsFullscreen = false },
             title = "Lyrics · Lucense",
             icon = painterResource(FALLBACK_ICON),
-            state = rememberWindowState(placement = WindowPlacement.Fullscreen),
+            // A borderless window the size of the screen rather than Windows'
+            // exclusive full screen, which screenshots and recordings can't see.
+            state = rememberWindowState(
+                placement = WindowPlacement.Floating,
+                position = WindowPosition(screenUnderPointer().x.dp, screenUnderPointer().y.dp),
+                size = DpSize(screenUnderPointer().width.dp, screenUnderPointer().height.dp)
+            ),
             undecorated = true,
+            alwaysOnTop = true,
             onKeyEvent = { event ->
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                     controller.lyricsFullscreen = false
@@ -426,5 +446,51 @@ private fun chooseFolder(): File? {
         chooser.selectedFile
     } else {
         null
+    }
+}
+
+/** The bounds of the screen the pointer is on: where the button for fullscreen lyrics was pressed. */
+private fun screenUnderPointer(): java.awt.Rectangle {
+    val at = java.awt.MouseInfo.getPointerInfo()?.location
+    val screens = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { it.defaultConfiguration.bounds }
+    return screens.firstOrNull { at != null && it.contains(at) } ?: screens.first()
+}
+
+/**
+ * The outline of where a dragged window will snap: a see-through window of
+ * its own, so it can sit over the desktop. It never takes focus, and the
+ * window being dragged is kept in front of it.
+ */
+@Composable
+private fun SnapOutline(area: java.awt.Rectangle, keepInFront: () -> Unit) {
+    val state = rememberWindowState(
+        placement = WindowPlacement.Floating,
+        position = WindowPosition(area.x.dp, area.y.dp),
+        size = DpSize(area.width.dp, area.height.dp)
+    )
+    LaunchedEffect(area) {
+        state.position = WindowPosition(area.x.dp, area.y.dp)
+        state.size = DpSize(area.width.dp, area.height.dp)
+    }
+    Window(
+        onCloseRequest = {},
+        state = state,
+        title = "",
+        undecorated = true,
+        transparent = true,
+        focusable = false,
+        resizable = false
+    ) {
+        LaunchedEffect(Unit) { keepInFront() }
+        LucenseDesktopTheme {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .background(Palette.Accent.copy(alpha = 0.16f))
+                    .border(2.dp, Palette.Accent.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            )
+        }
     }
 }

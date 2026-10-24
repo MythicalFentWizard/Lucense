@@ -1,5 +1,8 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.TooltipArea
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -132,6 +135,57 @@ fun AccentButton(
             fontWeight = FontWeight.SemiBold,
             color = tint
         )
+    }
+}
+
+/**
+ * The width the page has to work with, so its parts can give way on a small
+ * window: buttons down to their icons, a table down to fewer columns.
+ */
+val LocalPaneWidth = staticCompositionLocalOf { 10_000.dp }
+
+/** The whole window's width, for the parts that span it: the playback bar. */
+val LocalWindowWidth = staticCompositionLocalOf { 10_000.dp }
+
+/** A ghost button showing only its [icon], its words in a tooltip: for a page with no room. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun IconGhostButton(label: String, icon: ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
+    TooltipArea(
+        tooltip = {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = Palette.Text,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Palette.Raised)
+                    .border(1.dp, Palette.Line, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    ) {
+        val interaction = remember { MutableInteractionSource() }
+        val hovered by interaction.collectIsHoveredAsState()
+        Box(
+            Modifier
+                .size(CONTROL_HEIGHT)
+                .then(
+                    if (Glass.on) {
+                        Modifier.glassChip(RoundedCornerShape(50), fill = if (hovered && enabled) 0.13f else 0.05f)
+                    } else {
+                        Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(if (hovered && enabled) Palette.Hover else Color.Transparent)
+                            .border(1.dp, Palette.Line, RoundedCornerShape(7.dp))
+                    }
+                )
+                .hoverable(interaction)
+                .clickable(enabled = enabled) { onClick() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, label, Modifier.size(15.dp), tint = if (enabled) Palette.TextDim else Palette.TextFaint)
+        }
     }
 }
 

@@ -67,7 +67,21 @@ class WindowFrame(val window: Window, private val onClose: () -> Unit) {
     var maximized by mutableStateOf(false)
         private set
 
+    /** Snapped to half or a quarter of the screen, by dragging it to an edge or a corner. */
+    var snapped by mutableStateOf(false)
+        private set
+
+    /**
+     * Where the window would snap to if let go now, for the outline drawn
+     * there while it is dragged; null when nowhere.
+     */
+    var snapPreview by mutableStateOf<Rectangle?>(null)
+        private set
+
     private var restore: Rectangle? = null
+
+    /** The window's size and place when a drag began, to go back to after a snap. */
+    internal var dragStart: Rectangle? = null
 
     fun minimize() {
         (window as? Frame)?.extendedState = Frame.ICONIFIED
@@ -76,6 +90,13 @@ class WindowFrame(val window: Window, private val onClose: () -> Unit) {
     fun close() = onClose()
 
     fun toggleMaximize() {
+        if (snapped && !maximized) {
+            snapped = false
+            window.bounds = workingArea()
+            maximized = true
+            WindowCorners.round(window, false)
+            return
+        }
         if (maximized) {
             restore?.let { window.bounds = it }
             maximized = false
@@ -88,18 +109,86 @@ class WindowFrame(val window: Window, private val onClose: () -> Unit) {
         }
     }
 
-    /** Dragged off the top while maximised: back to its own size, under the pointer. */
+    /** Dragged while maximised or snapped: back to its own size, under the pointer, as Windows does. */
     fun unmaximizeUnder(pointer: Point) {
-        if (!maximized) return
+        if (!maximized && !snapped) return
         val size = restore ?: return
         val across = (pointer.x - window.x).toDouble() / window.width.coerceAtLeast(1)
-        window.bounds = Rectangle(pointer.x - (size.width * across).toInt(), pointer.y - 16, size.width, size.height)
+        // Kept on the screen: grabbed near the very top, it would otherwise start above it.
+        val top = (pointer.y - 16).coerceAtLeast(window.graphicsConfiguration.bounds.y)
+        window.bounds = Rectangle(pointer.x - (size.width * across).toInt(), top, size.width, size.height)
         maximized = false
+        snapped = false
         WindowCorners.round(window, true)
     }
 
-    private fun workingArea(): Rectangle {
-        val config = window.graphicsConfiguration
+    // ---- Snapping, which Windows does only for windows with its own title bar ----
+
+    enum class Snap { LEFT, RIGHT, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, MAXIMIZE }
+
+    /**
+     * Where a window let go of at [pointer] goes: half the screen at the left
+     * or right edge, a quarter near a corner, the whole of it at the top -
+     * Windows 11's own zones. Null anywhere else.
+     */
+    fun snapTarget(pointer: Point): Pair<Snap, Rectangle>? {
+        val config = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices
+            .map { it.defaultConfiguration }
+            .firstOrNull { it.bounds.contains(pointer) } ?: return null
+        val screen = config.bounds
+        val area = workingArea(config)
+        val left = pointer.x <= screen.x + EDGE
+        val right = pointer.x >= screen.x + screen.width - 1 - EDGE
+        val top = pointer.y <= screen.y + EDGE
+        val nearTop = pointer.y < area.y + CORNER
+        val nearBottom = pointer.y > area.y + area.height - CORNER
+        val halfW = area.width / 2
+        val halfH = area.height / 2
+        val snap = when {
+            left && nearTop -> Snap.TOP_LEFT
+            left && nearBottom -> Snap.BOTTOM_LEFT
+            left -> Snap.LEFT
+            right && nearTop -> Snap.TOP_RIGHT
+            right && nearBottom -> Snap.BOTTOM_RIGHT
+            right -> Snap.RIGHT
+            top -> Snap.MAXIMIZE
+            else -> return null
+        }
+        val rect = when (snap) {
+            Snap.LEFT -> Rectangle(area.x, area.y, halfW, area.height)
+            Snap.RIGHT -> Rectangle(area.x + halfW, area.y, area.width - halfW, area.height)
+            Snap.TOP_LEFT -> Rectangle(area.x, area.y, halfW, halfH)
+            Snap.TOP_RIGHT -> Rectangle(area.x + halfW, area.y, area.width - halfW, halfH)
+            Snap.BOTTOM_LEFT -> Rectangle(area.x, area.y + halfH, halfW, area.height - halfH)
+            Snap.BOTTOM_RIGHT -> Rectangle(area.x + halfW, area.y + halfH, area.width - halfW, area.height - halfH)
+            Snap.MAXIMIZE -> area
+        }
+        return snap to rect
+    }
+
+    /** While dragging: the outline of where it would go. */
+    fun dragMovedTo(pointer: Point) {
+        snapPreview = snapTarget(pointer)?.second
+    }
+
+    /** Let go at [pointer]: snapped there if that's an edge or a corner. */
+    fun dragEndedAt(pointer: Point) {
+        snapPreview = null
+        val (snap, rect) = snapTarget(pointer) ?: return
+        if (!maximized && !snapped) restore = dragStart ?: window.bounds
+        window.bounds = rect
+        if (snap == Snap.MAXIMIZE) {
+            maximized = true
+            snapped = false
+            WindowCorners.round(window, false)
+        } else {
+            snapped = true
+            maximized = false
+            WindowCorners.round(window, true)
+        }
+    }
+
+    private fun workingArea(config: java.awt.GraphicsConfiguration = window.graphicsConfiguration): Rectangle {
         val screen = config.bounds
         val insets = Toolkit.getDefaultToolkit().getScreenInsets(config)
         return Rectangle(
@@ -113,6 +202,12 @@ class WindowFrame(val window: Window, private val onClose: () -> Unit) {
 
 /** The frame of the window being drawn in, or null where there isn't one (a picture drawn offscreen). */
 val LocalWindowFrame = staticCompositionLocalOf<WindowFrame?> { null }
+
+/** How near a screen's edge the pointer has to be for a snap. */
+private const val EDGE = 2
+
+/** How near the top or bottom of an edge counts as its corner, for a quarter. */
+private const val CORNER = 120
 
 /** Height of the strip along the top. */
 val TITLE_BAR = 34.dp
@@ -197,21 +292,29 @@ private fun Modifier.dragsWindow(frame: WindowFrame): Modifier = pointerInput(fr
         val start = MouseInfo.getPointerInfo()?.location ?: return@awaitEachGesture
         var from = frame.window.location
         var moved = false
+        var last = start
+        frame.dragStart = frame.window.bounds
         while (true) {
             val event = awaitPointerEvent()
             if (event.changes.none { it.pressed }) break
             val at = MouseInfo.getPointerInfo()?.location ?: break
+            last = at
             if (!moved && (kotlin.math.abs(at.x - start.x) > 3 || kotlin.math.abs(at.y - start.y) > 3)) {
                 moved = true
-                if (frame.maximized) {
+                if (frame.maximized || frame.snapped) {
                     frame.unmaximizeUnder(at)
                     from = frame.window.location
                     start.setLocation(at)
+                    frame.dragStart = frame.window.bounds
                 }
             }
-            if (moved) frame.window.setLocation(from.x + at.x - start.x, from.y + at.y - start.y)
+            if (moved) {
+                frame.window.setLocation(from.x + at.x - start.x, from.y + at.y - start.y)
+                frame.dragMovedTo(at)
+            }
             event.changes.forEach { it.consume() }
         }
+        if (moved) frame.dragEndedAt(last)
     }
 }
 

@@ -71,6 +71,9 @@ class AudioFxSettings(context: Context) {
     fun setEqEnabled(enabled: Boolean) = update { it.copy(eqEnabled = enabled) }
     fun setDrive(amount: Float) = update { it.copy(drive = amount.coerceIn(0f, 1f)) }
 
+    fun setCharacter(effect: com.exo.musicplayer.data.audio.CharacterEffect, amount: Float) =
+        update { it.with(effect, amount.coerceIn(0f, 1f)) }
+
     fun setEqBand(band: Int, db: Float) = update {
         it.copy(eqGains = it.eqGains.toMutableList().also { gains ->
             if (band in gains.indices) gains[band] = db.coerceIn(-12f, 12f)

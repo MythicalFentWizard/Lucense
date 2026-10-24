@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.CompositionLocalProvider
 import dev.chrisbanes.haze.hazeSource
@@ -212,6 +214,10 @@ fun DesktopApp(
             Wallpaper(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
         }
         CompositionLocalProvider(LocalGlass provides glassState.takeIf { glass }) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Below this the sidebar goes down to its icons and the side panel narrows.
+        val roomy = maxWidth >= 1100.dp
+        CompositionLocalProvider(LocalWindowWidth provides maxWidth) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -223,6 +229,7 @@ fun DesktopApp(
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 NavigationRail(
                     controller = controller,
+                    compact = !roomy,
                     current = if (showSettings) null else destination,
                     settingsOpen = showSettings,
                     onSelect = { destination = it; showSettings = false },
@@ -251,6 +258,8 @@ fun DesktopApp(
                         reactiveMode = controller.reactiveMode,
                         modifier = Modifier.matchParentSize()
                     )
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalPaneWidth provides maxWidth) {
                     Column(Modifier.fillMaxSize()) {
                         ContentHeader(
                             controller = controller,
@@ -321,6 +330,8 @@ fun DesktopApp(
                                 DownloadScreen(controller, onChooseFolder)
                         }
                     }
+                    }
+                    }
                     // Whatever is being previewed, from Identify or Discover,
                     // with its pause and its X, in the corner of every page.
                     PreviewCard(controller, Modifier.align(Alignment.BottomEnd).padding(16.dp))
@@ -335,6 +346,7 @@ fun DesktopApp(
                     }
                     SidePanel(
                         kind = panel,
+                        narrow = !roomy,
                         controller = controller,
                         track = status.track,
                         positionMs = status.positionMs,
@@ -351,6 +363,7 @@ fun DesktopApp(
                 positionMs = status.positionMs,
                 durationMs = status.durationMs
             )
+        }
         }
         }
 
@@ -424,11 +437,13 @@ fun DesktopApp(
             }
         }
     }
+        }
 }
 
 @Composable
 private fun NavigationRail(
     controller: DesktopController,
+    compact: Boolean,
     current: Destination?,
     settingsOpen: Boolean,
     onSelect: (Destination) -> Unit,
@@ -436,7 +451,7 @@ private fun NavigationRail(
 ) {
     Box(
         Modifier
-            .width(212.dp)
+            .width(if (compact) 60.dp else 212.dp)
             .fillMaxHeight()
             .then(
                 if (Glass.on) {
@@ -459,12 +474,14 @@ private fun NavigationRail(
         )
         Column(Modifier.fillMaxSize().padding(vertical = 14.dp)) {
             Row(
-                Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                Modifier.padding(horizontal = if (compact) 25.dp else 18.dp, vertical = 8.dp).height(28.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(Modifier.size(9.dp).clip(CircleShape).background(Palette.Accent))
-                Spacer(Modifier.width(10.dp))
-                Text("Lucense", style = MaterialTheme.typography.titleLarge, color = Palette.Text)
+                if (!compact) {
+                    Spacer(Modifier.width(10.dp))
+                    Text("Lucense", style = MaterialTheme.typography.titleLarge, color = Palette.Text)
+                }
             }
 
             Spacer(Modifier.height(14.dp))
@@ -476,21 +493,23 @@ private fun NavigationRail(
                         icon = entry.icon,
                         selected = entry == current,
                         badge = downloads.count { !it.done },
-                        shine = controller.unseenFinishedDownloads > 0
+                        shine = controller.unseenFinishedDownloads > 0,
+                        compact = compact
                     ) { onSelect(entry) }
-                    RailDownloads(downloads) { onSelect(Destination.DOWNLOAD) }
+                    if (!compact) RailDownloads(downloads) { onSelect(Destination.DOWNLOAD) }
                 } else {
-                    RailItem(entry.label, entry.icon, entry == current) { onSelect(entry) }
+                    RailItem(entry.label, entry.icon, entry == current, compact = compact) { onSelect(entry) }
                 }
             }
 
             Spacer(Modifier.weight(1f))
-            RailItem("Settings", Icons.Default.Settings, settingsOpen, onClick = onSettings)
+            RailItem("Settings", Icons.Default.Settings, settingsOpen, compact = compact, onClick = onSettings)
             Spacer(Modifier.height(10.dp))
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RailItem(
     label: String,
@@ -500,6 +519,8 @@ private fun RailItem(
     badge: Int = 0,
     /** A band of light sweeping across, while there is something new to look at. */
     shine: Boolean = false,
+    /** Just the icon, centred, its name in a tooltip: the sidebar of a narrow window. */
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -559,19 +580,45 @@ private fun RailItem(
                 .padding(horizontal = 10.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = if (selected || shine) Palette.Accent else Palette.TextDim,
-                modifier = Modifier.size(17.dp)
-            )
-            Spacer(Modifier.width(11.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) Palette.Text else Palette.TextDim
-            )
+            if (compact) {
+                Spacer(Modifier.weight(1f))
+                TooltipArea(
+                    tooltip = {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Palette.Text,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Palette.Raised)
+                                .border(1.dp, Palette.Line, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = label,
+                        tint = if (selected || shine) Palette.Accent else Palette.TextDim,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+            } else {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = if (selected || shine) Palette.Accent else Palette.TextDim,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(Modifier.width(11.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) Palette.Text else Palette.TextDim
+                )
+            }
         }
         if (badge > 0) {
             Box(
@@ -702,6 +749,8 @@ private fun ContentHeader(
                 }
         else -> "${controller.tracks.size} tracks"
     }
+    // A page narrower than this has its header's buttons as icons.
+    val narrowHeader = LocalPaneWidth.current < 860.dp
 
     Column {
         Row(
@@ -711,7 +760,14 @@ private fun ContentHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.headlineMedium, color = Palette.Text)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = Palette.Text,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
@@ -725,9 +781,9 @@ private fun ContentHeader(
                 TextInput(
                     value = controller.query,
                     onValueChange = { controller.query = it },
-                    placeholder = "Search · artist: album: fav:",
+                    placeholder = if (narrowHeader) "Search" else "Search · artist: album: fav:",
                     leading = Icons.Default.Search,
-                    modifier = Modifier.width(240.dp)
+                    modifier = Modifier.width(if (narrowHeader) 170.dp else 240.dp)
                 )
                 Spacer(Modifier.width(10.dp))
                 IconButton(onClick = { controller.jumpToNowPlaying() }) {
@@ -749,8 +805,12 @@ private fun ContentHeader(
                     )
                 }
                 Spacer(Modifier.width(6.dp))
-                GhostButton("Music folder", icon = Icons.Default.FolderOpen) {
-                    controller.openMusicFolder()
+                if (narrowHeader) {
+                    IconGhostButton("Music folder", Icons.Default.FolderOpen) { controller.openMusicFolder() }
+                } else {
+                    GhostButton("Music folder", icon = Icons.Default.FolderOpen) {
+                        controller.openMusicFolder()
+                    }
                 }
             }
         }
@@ -820,19 +880,29 @@ private fun ContentHeader(
                     Spacer(Modifier.width(10.dp))
                 }
 
-                GhostButton("Bulk tools", icon = Icons.Default.Tune, onClick = onBulk)
-                Spacer(Modifier.width(8.dp))
-                GhostButton(
-                    "Duplicates",
-                    icon = Icons.Default.ContentCopy,
-                    onClick = onDuplicates
-                )
-                Spacer(Modifier.width(8.dp))
-                GhostButton(
-                    "Zip and ship",
-                    enabled = !controller.archiveRunning,
-                    icon = Icons.Default.Archive
-                ) { controller.zipLibrary() }
+                if (narrowHeader) {
+                    IconGhostButton("Bulk tools", Icons.Default.Tune, onClick = onBulk)
+                    Spacer(Modifier.width(6.dp))
+                    IconGhostButton("Duplicates", Icons.Default.ContentCopy, onClick = onDuplicates)
+                    Spacer(Modifier.width(6.dp))
+                    IconGhostButton("Zip and ship", Icons.Default.Archive, enabled = !controller.archiveRunning) {
+                        controller.zipLibrary()
+                    }
+                } else {
+                    GhostButton("Bulk tools", icon = Icons.Default.Tune, onClick = onBulk)
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton(
+                        "Duplicates",
+                        icon = Icons.Default.ContentCopy,
+                        onClick = onDuplicates
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton(
+                        "Zip and ship",
+                        enabled = !controller.archiveRunning,
+                        icon = Icons.Default.Archive
+                    ) { controller.zipLibrary() }
+                }
             }
         }
     }
@@ -955,7 +1025,7 @@ private fun LibraryPane(
             Spacer(Modifier.width(46.dp))
             HeaderCell("Title", Modifier.weight(2.2f))
             HeaderCell("Artist", Modifier.weight(1.4f))
-            HeaderCell("Album", Modifier.weight(1.4f))
+            if (LocalPaneWidth.current >= 640.dp) HeaderCell("Album", Modifier.weight(1.4f))
             HeaderCell(controller.sort.trailingColumn, Modifier.width(100.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
@@ -968,7 +1038,9 @@ private fun LibraryPane(
             val at = tracks.indexOfFirst { it.file == nowPlaying?.file }
             if (at >= 0) listState.animateScrollToItem(at)
         }
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        // A scrollbar to drag, and middle-click scrolling, as Windows lists have.
+        ScrollingList(listState, Modifier.fillMaxSize()) { fill ->
+        LazyColumn(state = listState, modifier = fill) {
             itemsIndexed(tracks, key = { _, t -> t.file.absolutePath }) { index, track ->
                 TrackRow(
                     index = index + 1,
@@ -989,6 +1061,7 @@ private fun LibraryPane(
                     onExtendSelect = { controller.extendSelection(track, tracks) }
                 )
             }
+        }
         }
     }
 }
@@ -1130,7 +1203,7 @@ private fun TrackRow(
                 if (isCurrent) Palette.Accent else Palette.Text
             )
             Cell(track.displayArtist, Modifier.weight(1.4f), Palette.TextDim)
-            Cell(track.displayAlbum, Modifier.weight(1.4f), Palette.TextDim)
+            if (LocalPaneWidth.current >= 640.dp) Cell(track.displayAlbum, Modifier.weight(1.4f), Palette.TextDim)
 
             Row(
                 Modifier.width(100.dp),
@@ -1217,6 +1290,10 @@ private fun TransportBar(
     durationMs: Long
 ) {
     val panel = controller.sidePanel
+    // A narrow window's bar: a shorter seek line and title, and the two least-used toggles go.
+    val width = LocalWindowWidth.current
+    val narrow = width < 1000.dp
+    val tight = width < 900.dp
     Column {
         if (!Glass.on) Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Line))
         Row(
@@ -1236,7 +1313,7 @@ private fun TransportBar(
         ) {
             Artwork(track, 46.dp)
             Spacer(Modifier.width(13.dp))
-            Column(Modifier.width(200.dp)) {
+            Column(Modifier.width(if (narrow) 140.dp else 200.dp)) {
                 Text(
                     track?.title ?: "Nothing playing",
                     style = MaterialTheme.typography.bodyMedium,
@@ -1344,7 +1421,7 @@ private fun TransportBar(
                         enabled = track != null,
                         onPreview = { scrubbing = it },
                         onSet = { controller.seekFraction(it) },
-                        modifier = Modifier.width(330.dp)
+                        modifier = Modifier.width(if (narrow) 200.dp else 330.dp)
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
@@ -1360,7 +1437,7 @@ private fun TransportBar(
             Spacer(Modifier.weight(1f))
 
             var sleepMenu by remember { mutableStateOf(false) }
-            Box {
+            if (!tight) Box {
                 BarToggle(
                     icon = Icons.Default.Bedtime,
                     label = controller.sleepMinutesLeft?.let { "$it min" }
@@ -1394,7 +1471,7 @@ private fun TransportBar(
                     )
                 }
             }
-            BarToggle(
+            if (!tight) BarToggle(
                 icon = Icons.Default.PictureInPictureAlt,
                 label = "Mini",
                 active = controller.miniPlayer,
@@ -1472,7 +1549,7 @@ private fun TransportBar(
                 wheelStep = 0.05f,
                 restColor = Palette.TextDim,
                 activeColor = Palette.Accent,
-                modifier = Modifier.width(96.dp)
+                modifier = Modifier.width(if (narrow) 72.dp else 96.dp)
             )
         }
     }

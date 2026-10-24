@@ -109,7 +109,9 @@ class FxControls(
     val onRemember: () -> Unit,
     val onForget: () -> Unit,
     val onPickOutput: (String) -> Unit,
-    val onMirrorOutputs: (Boolean) -> Unit
+    val onMirrorOutputs: (Boolean) -> Unit,
+    /** Lo-fi, tremolo, 8D and echo. */
+    val onCharacter: (com.exo.musicplayer.data.audio.CharacterEffect, Float) -> Unit = { _, _ -> }
 )
 
 /** What the Up next panel can do to the queue. Positions are in play order. */

@@ -1,5 +1,7 @@
 package com.exo.musicplayer.ui.player
 
+import com.exo.musicplayer.data.audio.CharacterEffect
+import com.exo.musicplayer.data.audio.CharacterFx
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,7 +44,6 @@ import com.exo.musicplayer.playback.AudioOutput
 import com.exo.musicplayer.playback.ToneProcessor
 import com.exo.musicplayer.playback.FxPreset
 import com.exo.musicplayer.playback.ReverbRoom
-import com.exo.musicplayer.data.audio.Overdrive
 import kotlin.math.roundToInt
 
 @Composable
@@ -268,12 +269,30 @@ fun EffectsSheet(
         LabelRow(
             "Drive",
             when {
-                !Overdrive.active(state.drive) -> "off"
+                !CharacterFx.on(state.drive) -> "off"
                 state.drive < 0.3f -> "warm · ${(state.drive * 100).roundToInt()}%"
                 state.drive < 0.7f -> "crunchy · ${(state.drive * 100).roundToInt()}%"
                 else -> "fuzz · ${(state.drive * 100).roundToInt()}%"
             }
         )
+        Text(
+            text = "Grit without getting louder: the level is evened out to what went in.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // More in the same spirit: each a slider, off at the left.
+        CharacterEffect.entries.forEach { effect ->
+            Spacer(Modifier.height(16.dp))
+            Text(effect.label, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(4.dp))
+            LineSlider(
+                value = state.amount(effect),
+                onValueChange = { controls.onCharacter(effect, it) },
+                description = effect.label
+            )
+            LabelRow(effect.note, effect.describe(state.amount(effect)))
+        }
 
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
