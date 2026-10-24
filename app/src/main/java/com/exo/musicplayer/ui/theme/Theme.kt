@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.theme
 
+import android.annotation.SuppressLint
 import com.exo.musicplayer.data.art.CoverColour
 import coil.request.SuccessResult
 import coil.request.ImageRequest
@@ -100,6 +101,8 @@ fun MusicPlayerTheme(
     // Colours from the cover, after Riff (github.com/rootscripts/riff, MIT):
     // the palette stays and its accent follows the artwork, easing between songs.
     // The last song's colour holds while the next cover is read.
+    // Lint misses the value set from an if expression; it is set.
+    @SuppressLint("ProduceStateDoesNotAssignValue")
     val coverAccent by produceState<Color?>(null, theme.coverColours, coverArt, baseScheme.background) {
         value = if (theme.coverColours && coverArt != null) {
             accentFromCover(context, coverArt, baseScheme.background)
@@ -119,6 +122,8 @@ fun MusicPlayerTheme(
     val starsActive = style == BackdropStyle.STARS
 
     // Decoded off the main thread, and again only when a new picture is chosen.
+    // Lint misses the value set from an if expression; it is set.
+    @SuppressLint("ProduceStateDoesNotAssignValue")
     val wallpaper by produceState<ImageBitmap?>(null, theme.wallpaper) {
         value = if (theme.wallpaper == 0L) {
             null
