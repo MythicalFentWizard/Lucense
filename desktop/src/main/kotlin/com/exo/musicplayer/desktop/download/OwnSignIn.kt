@@ -34,19 +34,24 @@ import java.util.concurrent.atomic.AtomicInteger
  * cookies are read, the window is closed and the profile deleted. What is left
  * is Lucense's copy, used only by yt-dlp.
  *
- * Chrome-family browsers (Opera, Opera GX, Chrome, Edge, Brave, Vivaldi) are
- * read over their local debugging connection: they encrypt their cookies on
- * disk so no other program can. Firefox keeps them readable in its profile.
- * The browser is started as it would be by hand, with nothing driving its
- * pages, so YouTube's sign-in sees an ordinary browser.
+ * Chrome-family browsers (Opera, Opera GX, Chrome, Edge, Brave, Vivaldi)
+ * encrypt their cookies on disk so no other program can read them; they are
+ * read over the browser's local debugging connection instead. Google's
+ * sign-in refuses a browser that has that connection open ("This browser or
+ * app may not be secure"), so the window signed in with has none: it is the
+ * browser as started by hand. Once it is closed, the same profile is opened
+ * again unseen, on a blank page with nothing of Google's loaded, and read.
+ * Firefox keeps its cookies readable in its profile, and is watched as it goes.
  */
 object OwnSignIn {
 
     sealed interface Outcome {
         /** Signed in and kept. */
         data object Kept : Outcome
-        /** The window was closed before signing in, or Stop was pressed. */
+        /** Stop was pressed. */
         data object Stopped : Outcome
+        /** The window was closed, or Done pressed, without YouTube signed in to. */
+        data object NotSignedIn : Outcome
         data class Failed(val why: String) : Outcome
     }
 
@@ -96,16 +101,28 @@ object OwnSignIn {
             name == "chrome" -> Browser("Chrome", exe, Family.CHROMIUM)
             name == "brave" -> Browser("Brave", exe, Family.CHROMIUM)
             name == "vivaldi" -> Browser("Vivaldi", exe, Family.CHROMIUM)
-            name == "opera" || name == "launcher" -> Browser(if ("opera gx" in where) "Opera GX" else "Opera", exe, Family.CHROMIUM)
+            name == "opera" || name == "launcher" -> Browser(
+                if ("opera gx" in where) "Opera GX" else "Opera",
+                // Opera's launcher hands a link to an Opera already open, ignoring the
+                // profile it was given; the browser itself, started directly, keeps apart.
+                File(exe.parentFile, "opera.exe").takeIf { it.isFile } ?: exe,
+                Family.CHROMIUM
+            )
             else -> null
         }
     }
 
     @Volatile private var stopRequested = false
+    @Volatile private var doneRequested = false
 
     /** Ends a sign-in under way: the window closes and nothing is kept. */
     fun stop() {
         stopRequested = true
+    }
+
+    /** Done signing in: the window is closed for the sign-in in it to be read, as if closed by hand. */
+    fun done() {
+        doneRequested = true
     }
 
     /**
@@ -116,34 +133,91 @@ object OwnSignIn {
      */
     suspend fun signIn(proxy: String?, onStatus: (String) -> Unit): Outcome = withContext(Dispatchers.IO) {
         stopRequested = false
+        doneRequested = false
         val browser = browser() ?: return@withContext Outcome.Failed(
             "No browser was found to sign in with. Use a cookies.txt file instead."
         )
         val profile = YouTubeSignIn.windowProfile
+        if (profile.exists()) endProcessesUsing(profile)
         profile.deleteRecursively()
         profile.mkdirs()
-        val window = runCatching {
+        try {
             when (browser.family) {
-                Family.CHROMIUM -> ChromiumWindow.open(browser.exe, profile, SIGN_IN_URL, proxy, hidden = false)
-                Family.FIREFOX -> FirefoxWindow.open(browser.exe, profile, SIGN_IN_URL, proxy)
+                Family.CHROMIUM -> chromiumSignIn(browser, profile, proxy, onStatus)
+                Family.FIREFOX -> firefoxSignIn(browser, profile, proxy, onStatus)
             }
-        }.getOrElse {
-            profile.deleteRecursively()
-            return@withContext Outcome.Failed("${browser.name} didn't open: ${it.message}")
+        } finally {
+            // The profile held the session too; only Lucense's copy is left.
+            repeat(20) {
+                if (!profile.exists() || profile.deleteRecursively()) return@repeat
+                delay(500)
+            }
+        }
+    }
+
+    /**
+     * A Chrome-family browser: signed in to as an ordinary window, then read
+     * unseen once that is closed - by hand, or by Done.
+     */
+    private suspend fun chromiumSignIn(browser: Browser, profile: File, proxy: String?, onStatus: (String) -> Unit): Outcome {
+        val window = runCatching { PlainWindow.open(browser.exe, profile, SIGN_IN_URL, proxy) }.getOrElse {
+            endProcessesUsing(profile)
+            return Outcome.Failed("${browser.name} didn't open: ${it.message}")
+        }
+        try {
+            onStatus(
+                "${browser.name} opened in a window of its own, apart from your usual one. Sign in to YouTube " +
+                    "there, then close that window, or press Done here."
+            )
+            val deadline = System.currentTimeMillis() + GIVE_UP_MS
+            while (window.open()) {
+                if (stopRequested) return Outcome.Stopped
+                if (doneRequested) {
+                    onStatus("Closing ${browser.name}…")
+                    window.closeGently()
+                    break
+                }
+                if (System.currentTimeMillis() > deadline) {
+                    return Outcome.Failed("Nobody signed in for half an hour, so the window was closed.")
+                }
+                delay(POLL_MS)
+            }
+        } finally {
+            // Whatever is left of it, now: the profile is about to be read, or deleted.
+            endProcessesUsing(profile)
+        }
+
+        onStatus("Reading the sign-in…")
+        // The same profile, unseen, on a blank page: nothing of Google's is loaded to see it.
+        val reader = runCatching { ChromiumWindow.open(browser.exe, profile, "about:blank", proxy, hidden = true) }.getOrElse {
+            return Outcome.Failed("${browser.name} didn't open again to hand over the sign-in: ${it.message}")
+        }
+        try {
+            val cookies = reader.cookies() ?: return Outcome.Failed("${browser.name} didn't hand over the sign-in. Try again.")
+            if (!signedIn(cookies)) return Outcome.NotSignedIn
+            return if (YouTubeSignIn.keepLines(cookies, YouTubeSignIn.Source.OWN)) {
+                Outcome.Kept
+            } else {
+                Outcome.Failed("The sign-in finished without YouTube's cookies. Try again.")
+            }
+        } finally {
+            reader.close()
+        }
+    }
+
+    /** Firefox: its cookies are readable as it goes, so the window closes by itself once signed in. */
+    private suspend fun firefoxSignIn(browser: Browser, profile: File, proxy: String?, onStatus: (String) -> Unit): Outcome {
+        val window = runCatching { FirefoxWindow.open(browser.exe, profile, SIGN_IN_URL, proxy) }.getOrElse {
+            return Outcome.Failed("${browser.name} didn't open: ${it.message}")
         }
         try {
             onStatus(
                 "${browser.name} opened in a window of its own, apart from your usual one. Sign in to YouTube " +
                     "there; it closes by itself once you have."
             )
-            waitForSignIn(window, onStatus)
+            return waitForSignIn(window, onStatus)
         } finally {
             window.close()
-            // The profile held the session too; only Lucense's copy is left.
-            repeat(20) {
-                if (!profile.exists() || profile.deleteRecursively()) return@repeat
-                delay(500)
-            }
         }
     }
 
@@ -156,6 +230,7 @@ object OwnSignIn {
                 return Outcome.Failed("Nobody signed in for half an hour, so the window was closed.")
             }
             val cookies = window.cookies()
+            if (doneRequested && (cookies == null || !signedIn(cookies))) return Outcome.NotSignedIn
             if (cookies != null && signedIn(cookies)) {
                 onStatus("Signed in. Keeping the sign-in…")
                 // YouTube sets its last cookies a moment after the account's.
@@ -169,7 +244,7 @@ object OwnSignIn {
             }
             // Closed by hand, though a browser may linger in the background.
             gone = if (window.open()) 0 else gone + 1
-            if (gone >= 2) return Outcome.Stopped
+            if (gone >= 2) return Outcome.NotSignedIn
             delay(POLL_MS)
         }
     }
@@ -333,6 +408,58 @@ object OwnSignIn {
     }
 
     /**
+     * A Chrome-family browser as started by hand, with a profile of its own and
+     * nothing else: no debugging connection, which Google's sign-in refuses.
+     * It is followed by the lock it holds on its profile while it runs (the
+     * program started may be a launcher that hands over and exits).
+     */
+    class PlainWindow private constructor(private val profile: File) {
+
+        fun open(): Boolean = File(profile, "lockfile").exists()
+
+        /**
+         * Asks the browser to close, as its own close button would, so it saves
+         * its cookies on the way out; ended outright afterwards if it hasn't.
+         */
+        suspend fun closeGently() {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val path = profile.absolutePath.replace("'", "''")
+                    ProcessBuilder(
+                        "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        // The browser itself: its helpers name their --type. Not this search, whose command line names the profile too.
+                        "Get-CimInstance Win32_Process | Where-Object { \$_.ProcessId -ne \$PID -and \$_.CommandLine -and " +
+                            "\$_.CommandLine.Contains('$path') -and -not \$_.CommandLine.Contains('--type=') } | " +
+                            "ForEach-Object { taskkill /PID \$_.ProcessId | Out-Null }"
+                    ).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start().waitFor(20, TimeUnit.SECONDS)
+                }
+            }
+            withTimeoutOrNull(CLOSE_MS) { while (open()) delay(250) }
+        }
+
+        companion object {
+            /** [offscreen] only for checking this works without a window in the way. */
+            suspend fun open(exe: File, profile: File, url: String, proxy: String?, offscreen: Boolean = false): PlainWindow {
+                val command = buildList {
+                    add(exe.absolutePath)
+                    add("--user-data-dir=${profile.absolutePath}")
+                    add("--no-first-run")
+                    add("--no-default-browser-check")
+                    add("--disable-sync")
+                    if (offscreen) add("--window-position=-4000,-4000")
+                    proxy?.let { add("--proxy-server=" + it.replace("socks5h://", "socks5://").replace("socks4a://", "socks4://")) }
+                    add("--new-window")
+                    add(url)
+                }
+                ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+                val window = PlainWindow(profile)
+                withTimeoutOrNull(STARTUP_MS) { while (!window.open()) delay(200) } ?: error("it didn't start in time")
+                return window
+            }
+        }
+    }
+
+    /**
      * Firefox with a profile of its own: started apart from any Firefox
      * already open, told to wait for its browser so the program started is
      * the browser's life, with first-run pages off and Lucense's proxy set.
@@ -483,5 +610,6 @@ object OwnSignIn {
     private const val SETTLE_MS = 3_000L
     private const val CALL_TIMEOUT_MS = 5_000L
     private const val STARTUP_MS = 30_000L
+    private const val CLOSE_MS = 15_000L
     private const val GIVE_UP_MS = 30L * 60 * 1000
 }

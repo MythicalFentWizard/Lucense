@@ -42,9 +42,61 @@ internal val YT_DLP_RETRIES = listOf(
  * that request stops being answered, so that an installed copy keeps working
  * through it. yt-dlp looks for Deno by default; QuickJS does the same job at
  * two megabytes instead of a hundred, and has to be named.
+ *
+ * Signed in, every video needs the challenge solved, and QuickJS took about
+ * five seconds of each preview and download preparing YouTube's player for it,
+ * every time. [SolverCache] keeps the prepared player, so that is paid once per
+ * player instead (measured: 4.8 s to 0.3 s).
  */
-internal fun ytDlpJsEngine(): List<String> =
-    ToolPaths.qjs.takeIf { it.isFile }?.let { listOf("--js-runtimes", "quickjs:${it.absolutePath}") }.orEmpty()
+internal fun ytDlpJsEngine(): List<String> {
+    val qjs = ToolPaths.qjs.takeIf { it.isFile } ?: return emptyList()
+    return listOf("--js-runtimes", "quickjs:${qjs.absolutePath}") + SolverCache.arguments()
+}
+
+/**
+ * yt-dlp's QuickJS solver with its cache of prepared players switched on: a
+ * small yt-dlp plugin (resources/yt-dlp/lucense_solver.py, which says how),
+ * written out where yt-dlp is pointed at it, and a cache folder of Lucense's
+ * own. yt-dlp ships the cache switched off because the files are large (about
+ * four megabytes a player) and it never clears them away; here the old ones
+ * are cleared. Should a yt-dlp update break the plugin, yt-dlp's own solver
+ * takes over, as slow as before but working.
+ */
+internal object SolverCache {
+    private val plugins: File by lazy { File(AppDirs.root, "yt-dlp-plugins") }
+    private val cache: File by lazy { File(AppDirs.root, "yt-dlp-cache") }
+
+    @Volatile private var prepared = false
+
+    fun arguments(): List<String> {
+        prepare()
+        return listOf("--plugin-dirs", plugins.absolutePath, "--cache-dir", cache.absolutePath)
+    }
+
+    @Synchronized
+    private fun prepare() {
+        if (prepared) return
+        prepared = true
+        runCatching {
+            val text = SolverCache::class.java.getResource("/yt-dlp/lucense_solver.py")?.readText() ?: return@runCatching
+            val file = File(plugins, "lucense/yt_dlp_plugins/extractor/lucense_solver.py")
+            if (!file.isFile || file.readText() != text) {
+                file.parentFile.mkdirs()
+                file.writeText(text)
+            }
+        }
+        // Players YouTube has moved on from: it changes every week or two.
+        runCatching {
+            val old = System.currentTimeMillis() - PLAYER_KEPT_MS
+            cache.listFiles { dir -> dir.isDirectory && dir.name.startsWith("lucense-solver-") }?.forEach { section ->
+                section.listFiles()?.filter { it.lastModified() < old }?.forEach { it.delete() }
+                if (section.list()?.isEmpty() == true) section.delete()
+            }
+        }
+    }
+
+    private const val PLAYER_KEPT_MS = 14L * 24 * 60 * 60 * 1000
+}
 
 /** What the downloader can do right now. */
 data class ToolStatus(
@@ -143,6 +195,8 @@ object YtDlp {
             destination.mkdirs()
 
             val ffmpeg = ToolPaths.ffmpeg
+            // A video already read for its preview, or read ahead, isn't read again.
+            val kept = if (wholePlaylist) null else YouTubeAhead.videoId(target)?.let(YouTubeAhead::kept)
             inStaging(destination) { staging ->
                 val command = mutableListOf(
                     exe.absolutePath,
@@ -177,16 +231,27 @@ object YtDlp {
                 command += YouTubeSignIn.ytDlpArgs()
                 command += YT_DLP_NETWORK
                 command += YT_DLP_RETRIES
-                command += target
 
-                val process = ProcessBuilder(command).redirectErrorStream(true)
-                    .also(NetworkProxy::configure)
-                    .start()
-                registerProcess(process)
-                process.inputStream.bufferedReader().forEachLine { line ->
-                    onProgress(DownloadProgress(percentOf(line), line.trim()))
+                fun run(source: List<String>): Int {
+                    val process = ProcessBuilder(command + source).redirectErrorStream(true)
+                        .also(NetworkProxy::configure)
+                        .start()
+                    registerProcess(process)
+                    process.inputStream.bufferedReader().forEachLine { line ->
+                        onProgress(DownloadProgress(percentOf(line), line.trim()))
+                    }
+                    return process.waitFor()
                 }
-                val code = process.waitFor()
+
+                var code = if (kept != null) run(listOf("--load-info-json", kept.info.absolutePath)) else run(listOf(target))
+                // What was kept may have stopped working (YouTube moved on, or the
+                // connection did): read afresh, the way it always was.
+                if (code != 0 && kept != null && staging.walkTopDown().none { it.isFile && it.extension.lowercase() !in LEFTOVERS }) {
+                    YouTubeAhead.forget(kept.id)
+                    staging.listFiles()?.forEach { it.deleteRecursively() }
+                    onProgress(DownloadProgress(null, "Reading the video again"))
+                    code = run(listOf(target))
+                }
                 code to "yt-dlp exited with code $code."
             }
         }
