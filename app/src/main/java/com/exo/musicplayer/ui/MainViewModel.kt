@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui
 
+import android.content.Context
 import android.app.Application
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -30,6 +31,7 @@ import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.lyrics.LyricLine
 import com.exo.musicplayer.data.lyrics.LyricsFetch
 import com.exo.musicplayer.data.lyrics.LyricsTerm
+import com.exo.musicplayer.data.lyrics.LyricsTranslator
 import com.exo.musicplayer.data.lyrics.tidyLyrics
 import com.exo.musicplayer.data.playlist.PlaylistEntry
 import com.exo.musicplayer.data.playlist.PlaylistFile
@@ -957,6 +959,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // A message about one song's lyrics means nothing on the next song.
         viewModelScope.launch { currentTrackId.collect { _lyricsMessage.value = null } }
+    }
+
+    // ---- Lyrics timing and translation, after Riff ---------------------------------
+
+    /** Each song's lyrics offset, by track id; only songs that have one are written. */
+    private val lyricsOffsets by lazy { app.getSharedPreferences("lyrics_offsets", Context.MODE_PRIVATE) }
+
+    private val _lyricsOffsetMs = MutableStateFlow(0L)
+
+    /** How far this song's lyrics are moved; positive shows each line sooner. */
+    val lyricsOffsetMs: StateFlow<Long> = _lyricsOffsetMs.asStateFlow()
+
+    private val _lyricsTranslation = MutableStateFlow<List<String>?>(null)
+    val lyricsTranslation: StateFlow<List<String>?> = _lyricsTranslation.asStateFlow()
+
+    private val _lyricsTranslating = MutableStateFlow(false)
+    val lyricsTranslating: StateFlow<Boolean> = _lyricsTranslating.asStateFlow()
+
+    private val _lyricsTranslationNote = MutableStateFlow<String?>(null)
+    val lyricsTranslationNote: StateFlow<String?> = _lyricsTranslationNote.asStateFlow()
+
+    init {
+        // A translation and an offset belong to one song.
+        viewModelScope.launch {
+            currentTrackId.collect { id ->
+                _lyricsOffsetMs.value = id?.let { lyricsOffsets.getLong(it.toString(), 0L) } ?: 0L
+                _lyricsTranslation.value = null
+                _lyricsTranslationNote.value = null
+            }
+        }
+    }
+
+    fun nudgeLyrics(deltaMs: Long) {
+        val id = currentTrackId.value ?: return
+        val offset = (_lyricsOffsetMs.value + deltaMs).coerceIn(-15_000L, 15_000L)
+        _lyricsOffsetMs.value = offset
+        lyricsOffsets.edit().apply {
+            if (offset == 0L) remove(id.toString()) else putLong(id.toString(), offset)
+        }.apply()
+    }
+
+    fun resetLyricsOffset() = nudgeLyrics(-_lyricsOffsetMs.value)
+
+    /** Translates the lyrics into the phone's language, or hides the translation if one is showing. */
+    fun translateLyrics() {
+        if (_lyricsTranslation.value != null) {
+            _lyricsTranslation.value = null
+            _lyricsTranslationNote.value = null
+            return
+        }
+        val lyrics = currentLyrics.value ?: return
+        val lines = currentLyricLines.value.map { it.text }
+            .ifEmpty { lyrics.plainText.orEmpty().lines() }
+        if (lines.isEmpty() || _lyricsTranslating.value) return
+        val id = currentTrackId.value
+        viewModelScope.launch {
+            _lyricsTranslating.value = true
+            val result = LyricsTranslator.translate(lines)
+            _lyricsTranslating.value = false
+            if (currentTrackId.value != id) return@launch
+            val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
+            when {
+                result == null -> _lyricsTranslationNote.value = "The translator couldn't be reached."
+                result.lines.map { it.trim() } == lines.map { it.trim() } ->
+                    _lyricsTranslationNote.value = "These lyrics are already in $language."
+                else -> {
+                    _lyricsTranslation.value = result.lines
+                    _lyricsTranslationNote.value = LyricsTranslator.languageName(result.from)
+                        ?.let { "Translated from $it into $language" } ?: "Translated into $language"
+                }
+            }
+        }
     }
 
     fun fetchLyrics(force: Boolean = false) {

@@ -1,5 +1,10 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -101,6 +106,45 @@ fun LyricsPanel(controller: DesktopController, track: DesktopTrack?, positionMs:
             Text(it, style = MaterialTheme.typography.labelSmall, color = Palette.TextDim)
         }
 
+        // Translate, move in time, go fullscreen: Riff's lyrics tools.
+        if (!editing && (controller.lyricsSynced != null || controller.lyricsPlain != null)) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GhostButton(
+                    when {
+                        controller.lyricsTranslating -> "Translating…"
+                        controller.lyricsTranslation != null -> "Hide translation"
+                        else -> "Translate"
+                    },
+                    enabled = !controller.lyricsTranslating,
+                    icon = Icons.Default.Translate
+                ) { controller.translateLyrics() }
+                Spacer(Modifier.width(7.dp))
+                GhostButton("Fullscreen", icon = Icons.Default.Fullscreen) { controller.lyricsFullscreen = true }
+            }
+            controller.lyricsTranslationNote?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, style = MaterialTheme.typography.labelSmall, color = Palette.TextFaint)
+            }
+            if (controller.lyricsSynced != null) {
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Timing", style = MaterialTheme.typography.labelMedium, color = Palette.TextDim)
+                    Spacer(Modifier.width(8.dp))
+                    GhostButton("Later") { controller.nudgeLyrics(-NUDGE_MS) }
+                    Spacer(Modifier.width(6.dp))
+                    GhostButton("Sooner") { controller.nudgeLyrics(NUDGE_MS) }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        offsetLabel(controller.lyricsOffsetMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Palette.TextFaint,
+                        modifier = Modifier.clickable { controller.resetLyricsOffset() }
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(12.dp))
 
         // Read once each: these are state, and a second read of the same one
@@ -116,16 +160,31 @@ fun LyricsPanel(controller: DesktopController, track: DesktopTrack?, positionMs:
                 }
             )
 
-            synced != null -> SyncedLyrics(synced, positionMs)
+            synced != null -> SyncedLyrics(synced, positionMs + controller.lyricsOffsetMs, controller.lyricsTranslation)
 
-            plain != null ->
-                Text(
-                    plain,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Palette.TextDim,
-                    lineHeight = MaterialTheme.typography.bodyMedium.fontSize * 1.6,
-                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-                )
+            // Selectable, so a line can be copied out.
+            plain != null -> SelectionContainer {
+                val translation = controller.lyricsTranslation
+                if (translation == null) {
+                    Text(
+                        plain,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Palette.TextDim,
+                        lineHeight = MaterialTheme.typography.bodyMedium.fontSize * 1.6,
+                        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    )
+                } else {
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                        plain.lines().forEachIndexed { i, line ->
+                            Text(line, style = MaterialTheme.typography.bodyMedium, color = Palette.TextDim)
+                            translation.getOrNull(i)?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, color = Palette.TextFaint)
+                            }
+                            Spacer(Modifier.height(5.dp))
+                        }
+                    }
+                }
+            }
 
             else -> Column {
                 Hint(
@@ -139,7 +198,7 @@ fun LyricsPanel(controller: DesktopController, track: DesktopTrack?, positionMs:
 
 /** Highlights the current line and keeps it centred. */
 @Composable
-private fun SyncedLyrics(lrc: String, positionMs: Long) {
+private fun SyncedLyrics(lrc: String, positionMs: Long, translation: List<String>?) {
     val lines = remember(lrc) { LrcParser.parse(lrc) }
     if (lines.isEmpty()) {
         Hint("These lyrics have timestamps that couldn't be read.")
@@ -157,23 +216,35 @@ private fun SyncedLyrics(lrc: String, positionMs: Long) {
         }
     }
 
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        itemsIndexed(lines) { index, line ->
-            val isActive = index == active
-            val alpha by animateFloatAsState(if (isActive) 1f else 0.45f)
-            Text(
-                line.text.ifBlank { "·" },
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (isActive) {
-                    Palette.LyricsActive
-                } else {
-                    Palette.LyricsInactive.copy(alpha = Palette.LyricsInactive.alpha * alpha)
-                },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)
-            )
+    // Selectable, so a line can be copied out.
+    SelectionContainer {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            itemsIndexed(lines) { index, line ->
+                val isActive = index == active
+                val alpha by animateFloatAsState(if (isActive) 1f else 0.45f)
+                Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                    Text(
+                        line.text.ifBlank { "·" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (isActive) {
+                            Palette.LyricsActive
+                        } else {
+                            Palette.LyricsInactive.copy(alpha = Palette.LyricsInactive.alpha * alpha)
+                        }
+                    )
+                    translation?.getOrNull(index)?.takeIf { it.isNotBlank() }?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontStyle = FontStyle.Italic,
+                            color = Palette.TextFaint
+                        )
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(120.dp)) }
         }
-        item { Spacer(Modifier.height(120.dp)) }
     }
 }
 
@@ -208,5 +279,18 @@ private fun LyricsEditor(initial: String, onSave: (String) -> Unit) {
         Spacer(Modifier.height(10.dp))
         AccentButton("Save lyrics", icon = Icons.Default.Lyrics) { onSave(text) }
         Spacer(Modifier.height(12.dp))
+    }
+}
+
+/** How much one press moves the lyrics. */
+private const val NUDGE_MS = 250L
+
+/** "0.5 s sooner", "1.25 s later" or "on time". */
+private fun offsetLabel(offsetMs: Long): String = when (offsetMs) {
+    0L -> "on time"
+    else -> {
+        val seconds = kotlin.math.abs(offsetMs) / 1000.0
+        val text = if (seconds % 1.0 == 0.0) "${seconds.toInt()}" else "%.2f".format(seconds).trimEnd('0')
+        "$text s ${if (offsetMs > 0) "sooner" else "later"} · reset"
     }
 }

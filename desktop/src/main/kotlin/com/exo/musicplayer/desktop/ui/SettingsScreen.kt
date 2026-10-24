@@ -500,6 +500,19 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
+                    Text("Thanks to Riff", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
+                    Hint(
+                        "Several features are adapted from Riff by rootscripts, a free desktop music " +
+                            "player: distortion, download formats, playlist import, fullscreen lyrics, " +
+                            "lyrics timing and translation, colours from the cover, the trimmer and " +
+                            "streaming. Riff is MIT licensed."
+                    )
+                }
+                GhostButton("Riff on GitHub") { openLink("https://github.com/rootscripts/riff") }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
                     Text("Updates", style = MaterialTheme.typography.bodyMedium, color = Palette.Text)
                     Hint(controller.updateNote ?: "Looked up when Lucense starts.")
                 }

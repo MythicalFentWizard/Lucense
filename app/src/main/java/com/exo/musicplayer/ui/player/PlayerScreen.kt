@@ -156,10 +156,12 @@ fun PlayerScreen(
     onFetchLyrics: () -> Unit,
     onSaveLyrics: (String) -> Unit,
     onDeleteLyrics: () -> Unit,
+    lyricsExtras: LyricsExtras,
     fxControls: FxControls,
     queueControls: QueueControls
 ) {
     var panel by rememberSaveable { mutableStateOf<Panel?>(null) }
+    var fullscreenLyrics by rememberSaveable { mutableStateOf(false) }
     // Back closes the open panel first, and only then the player.
     BackHandler(enabled = panel != null) { panel = null }
 
@@ -209,9 +211,11 @@ fun PlayerScreen(
                             positionMs = state.positionMs,
                             busy = lyricsBusy,
                             message = lyricsMessage,
+                            extras = lyricsExtras,
                             onFetch = onFetchLyrics,
                             onSave = onSaveLyrics,
-                            onDelete = onDeleteLyrics
+                            onDelete = onDeleteLyrics,
+                            onFullscreen = { fullscreenLyrics = true }
                         )
                         Panel.QUEUE -> QueuePanel(queue, state.queueIndex, queueControls)
                         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -286,6 +290,18 @@ fun PlayerScreen(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
+            }
+            if (fullscreenLyrics) {
+                FullscreenLyrics(
+                    track = track,
+                    lines = lyricLines,
+                    plainText = lyrics?.plainText,
+                    positionMs = state.positionMs + lyricsExtras.offsetMs,
+                    translation = lyricsExtras.translation,
+                    playing = state.isPlaying,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onClose = { fullscreenLyrics = false }
+                )
             }
         }
     }

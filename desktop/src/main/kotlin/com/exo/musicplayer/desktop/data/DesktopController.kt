@@ -63,6 +63,8 @@ import com.exo.musicplayer.data.youtube.YouTubeLinkFinder
 import com.exo.musicplayer.data.youtube.YouTubeSearch
 import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
+import com.exo.musicplayer.data.lyrics.LyricsTranslator
+import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.youtube.PreviewLabel
 import java.util.concurrent.atomic.AtomicInteger
 import com.exo.musicplayer.desktop.download.DownloadArchive
@@ -1668,11 +1670,81 @@ class DesktopController(parent: CoroutineScope) {
     var lyricsNote by mutableStateOf<String?>(null)
         private set
 
+    // Timing and translation, after Riff (github.com/rootscripts/riff, MIT).
+
+    /** Each song's lyrics offset, by a hash of its path; only songs that have one are written. */
+    private val lyricsOffsets = java.util.prefs.Preferences.userRoot().node("com/exo/musicplayer/lyrics-offsets")
+
+    private fun offsetKey(track: DesktopTrack): String =
+        java.security.MessageDigest.getInstance("SHA-1")
+            .digest(track.file.absolutePath.lowercase().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    /** How far this song's lyrics are moved; positive shows each line sooner. */
+    var lyricsOffsetMs by mutableStateOf(0L)
+        private set
+
+    /** A translation, one line per line of the lyrics, or null when none is showing. */
+    var lyricsTranslation by mutableStateOf<List<String>?>(null)
+        private set
+    var lyricsTranslating by mutableStateOf(false)
+        private set
+    var lyricsTranslationNote by mutableStateOf<String?>(null)
+        private set
+
+    /** Whether the fullscreen lyrics window is open. */
+    var lyricsFullscreen by mutableStateOf(false)
+
+    fun nudgeLyrics(deltaMs: Long) {
+        val track = engine.status.value.track ?: return
+        val offset = (lyricsOffsetMs + deltaMs).coerceIn(-15_000L, 15_000L)
+        lyricsOffsetMs = offset
+        runCatching {
+            if (offset == 0L) lyricsOffsets.remove(offsetKey(track)) else lyricsOffsets.putLong(offsetKey(track), offset)
+        }
+    }
+
+    fun resetLyricsOffset() = nudgeLyrics(-lyricsOffsetMs)
+
+    /** Translates the lyrics into the computer's language, or hides the translation if one is showing. */
+    fun translateLyrics() {
+        if (lyricsTranslation != null) {
+            lyricsTranslation = null
+            lyricsTranslationNote = null
+            return
+        }
+        val track = engine.status.value.track ?: return
+        val lines = lyricsSynced?.let { LrcParser.parse(it).map { line -> line.text } }?.takeIf { it.isNotEmpty() }
+            ?: lyricsPlain?.lines()
+            ?: return
+        if (lyricsTranslating) return
+        lyricsTranslating = true
+        scope.launch {
+            val result = LyricsTranslator.translate(lines)
+            lyricsTranslating = false
+            if (engine.status.value.track?.file != track.file) return@launch
+            val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
+            when {
+                result == null -> lyricsTranslationNote = "The translator couldn't be reached."
+                result.lines.map { it.trim() } == lines.map { it.trim() } ->
+                    lyricsTranslationNote = "These lyrics are already in $language."
+                else -> {
+                    lyricsTranslation = result.lines
+                    lyricsTranslationNote = LyricsTranslator.languageName(result.from)
+                        ?.let { "Translated from $it into $language" } ?: "Translated into $language"
+                }
+            }
+        }
+    }
+
     private fun loadLyricsFor(track: DesktopTrack) {
         lyricsPlain = null
         lyricsSynced = null
         lyricsSource = null
         lyricsNote = null
+        lyricsTranslation = null
+        lyricsTranslationNote = null
+        lyricsOffsetMs = runCatching { lyricsOffsets.getLong(offsetKey(track), 0L) }.getOrDefault(0L)
         scope.launch {
             val stored = io { store.lyricsFor(track.file.absolutePath) }
             if (stored != null) {

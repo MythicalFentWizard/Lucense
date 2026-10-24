@@ -43,9 +43,11 @@ import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import androidx.compose.ui.window.WindowPlacement
 import com.exo.musicplayer.desktop.data.DesktopController
 import com.exo.musicplayer.desktop.ui.DesktopApp
 import com.exo.musicplayer.desktop.ui.LyricsWindow
+import com.exo.musicplayer.desktop.ui.FullscreenLyrics
 import com.exo.musicplayer.desktop.ui.MiniPlayer
 import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.LucenseDesktopTheme
@@ -199,6 +201,27 @@ fun main(args: Array<String>) = application {
         ) {
             EveryIconSize()
             LucenseDesktopTheme { MiniPlayer(controller) }
+        }
+    }
+
+    if (controller.lyricsFullscreen) {
+        Window(
+            onCloseRequest = { controller.lyricsFullscreen = false },
+            title = "Lyrics · Lucense",
+            icon = painterResource(FALLBACK_ICON),
+            state = rememberWindowState(placement = WindowPlacement.Fullscreen),
+            undecorated = true,
+            onKeyEvent = { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                    controller.lyricsFullscreen = false
+                    true
+                } else {
+                    false
+                }
+            }
+        ) {
+            EveryIconSize()
+            LucenseDesktopTheme { FullscreenLyrics(controller) }
         }
     }
 

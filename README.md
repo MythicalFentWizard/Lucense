@@ -471,6 +471,20 @@ Telegram, [@zeto0_2](https://www.tiktok.com/@zeto0_2) on TikTok.
 
 ---
 
+## Credits
+
+**[Riff](https://github.com/rootscripts/riff)** by **rootscripts**, a free
+desktop music player, is where several of Lucense's features come from:
+distortion, the download formats, importing playlists from Spotify, Apple
+Music, YouTube Music and SoundCloud, fullscreen lyrics, lyrics timing and
+translation, colours from the cover, the trimmer and streaming. Lucense is
+written in Kotlin and Riff in JavaScript, so these are Lucense's own versions
+of Riff's ideas, with Riff's approach followed where it was the right one (how
+it reads a Spotify playlist without an account, for example). Riff is MIT
+licensed, copyright (c) 2026 rootscripts.
+
+---
+
 ## Contact
 
 Telegram: [@Eth4wn](https://t.me/Eth4wn) — bugs, requests, or just to say it

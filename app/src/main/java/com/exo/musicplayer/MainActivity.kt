@@ -98,6 +98,7 @@ import com.exo.musicplayer.ui.library.LibraryScreen
 import com.exo.musicplayer.ui.library.SelectionActions
 import com.exo.musicplayer.ui.moods.MoodsScreen
 import com.exo.musicplayer.ui.player.FxControls
+import com.exo.musicplayer.ui.player.LyricsExtras
 import com.exo.musicplayer.ui.player.MiniPlayer
 import com.exo.musicplayer.ui.player.PlayerScreen
 import com.exo.musicplayer.ui.player.QueueControls
@@ -294,6 +295,10 @@ private fun AppScaffold(
     val lyricLines by viewModel.currentLyricLines.collectAsStateWithLifecycle()
     val lyricsBusy by viewModel.lyricsBusy.collectAsStateWithLifecycle()
     val lyricsMessage by viewModel.lyricsMessage.collectAsStateWithLifecycle()
+    val lyricsOffset by viewModel.lyricsOffsetMs.collectAsStateWithLifecycle()
+    val lyricsTranslation by viewModel.lyricsTranslation.collectAsStateWithLifecycle()
+    val lyricsTranslating by viewModel.lyricsTranslating.collectAsStateWithLifecycle()
+    val lyricsTranslationNote by viewModel.lyricsTranslationNote.collectAsStateWithLifecycle()
     val sleep by viewModel.sleep.collectAsStateWithLifecycle()
     val crossfade by viewModel.crossfadeSeconds.collectAsStateWithLifecycle()
     val levelling by viewModel.levelling.collectAsStateWithLifecycle()
@@ -830,6 +835,15 @@ private fun AppScaffold(
                 onFetchLyrics = { viewModel.fetchLyrics(force = true) },
                 onSaveLyrics = { viewModel.saveLyrics(it) },
                 onDeleteLyrics = { viewModel.deleteLyrics() },
+                lyricsExtras = LyricsExtras(
+                    offsetMs = lyricsOffset,
+                    translation = lyricsTranslation,
+                    translating = lyricsTranslating,
+                    note = lyricsTranslationNote,
+                    onNudge = viewModel::nudgeLyrics,
+                    onResetOffset = viewModel::resetLyricsOffset,
+                    onTranslate = viewModel::translateLyrics
+                ),
                 fxControls = FxControls(
                     onPreset = viewModel::applyFxPreset,
                     onSpeed = viewModel::setFxSpeed,
@@ -947,6 +961,7 @@ private fun AppScaffold(
                                     onAppearance = { settingsRoute = SettingsRoute.APPEARANCE },
                                     onSound = { settingsRoute = SettingsRoute.SOUND },
                                     onContact = { openTelegram(context) },
+                                    onRiff = { openUrl(context, "https://github.com/rootscripts/riff") },
                                     onCrossfade = viewModel::setCrossfadeSeconds,
                                     onLevelling = viewModel::setLevelling,
                                     onSleepFade = viewModel::setSleepFade,

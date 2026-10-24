@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Palette
@@ -72,6 +73,8 @@ class SettingsActions(
     val onAppearance: () -> Unit,
     val onSound: () -> Unit,
     val onContact: () -> Unit,
+    /** Opens Riff's page, credited for the features adapted from it. */
+    val onRiff: () -> Unit,
     val onCrossfade: (Int) -> Unit,
     val onLevelling: (Boolean) -> Unit,
     val onSleepFade: (Boolean) -> Unit,
@@ -243,6 +246,12 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
 
         Section("About")
         LinkRow(Icons.AutoMirrored.Filled.Send, "Contact me", "t.me/Eth4wn — bugs, requests, or to say it broke", actions.onContact)
+        LinkRow(
+            Icons.Default.Favorite,
+            "Thanks to Riff",
+            "Several features are adapted from Riff by rootscripts, a free desktop music player (MIT)",
+            actions.onRiff
+        )
 
         Spacer(Modifier.height(28.dp))
         Text(
