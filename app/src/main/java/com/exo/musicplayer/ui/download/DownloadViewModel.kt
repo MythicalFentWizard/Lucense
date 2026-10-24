@@ -81,7 +81,10 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
     private val _url = MutableStateFlow("")
     val url: StateFlow<String> = _url.asStateFlow()
 
-    private val _quality = MutableStateFlow(DownloadQuality.DEFAULT)
+    private val _quality = MutableStateFlow(
+        DownloadQuality.entries.firstOrNull { it.name == application.musicApp.prefs.downloadQuality.value }
+            ?: DownloadQuality.DEFAULT
+    )
     val quality: StateFlow<DownloadQuality> = _quality.asStateFlow()
 
     private var job: Job? = null
@@ -104,7 +107,10 @@ class DownloadViewModel(application: Application) : AndroidViewModel(application
         pendingWanted = null
     }
 
-    fun setQuality(value: DownloadQuality) { _quality.value = value }
+    fun setQuality(value: DownloadQuality) {
+        _quality.value = value
+        getApplication<Application>().musicApp.prefs.setDownloadQuality(value.name)
+    }
 
     fun cancel() {
         job?.cancel()

@@ -118,6 +118,15 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, true)
         set(value) = prefs.putBoolean(KEY_DOWNLOAD_CUT_NON_MUSIC, value)
 
+    var downloadEmbedArt: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_EMBED_ART, true)
+        set(value) = prefs.putBoolean(KEY_DOWNLOAD_EMBED_ART, value)
+
+    /** Whether a video link that is part of a playlist downloads the whole playlist. */
+    var downloadPlaylist: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_PLAYLIST, false)
+        set(value) = prefs.putBoolean(KEY_DOWNLOAD_PLAYLIST, value)
+
     /** Whether the accent follows the cover of the song playing. */
     var coverColours: Boolean
         get() = prefs.getBoolean(KEY_COVER_COLOURS, false)
@@ -311,6 +320,8 @@ class DesktopSettings {
         const val KEY_DOWNLOAD_QUALITY = "download_quality"
         const val KEY_DOWNLOAD_FORMAT = "download_format"
         const val KEY_DOWNLOAD_CUT_NON_MUSIC = "download_cut_non_music"
+        const val KEY_DOWNLOAD_EMBED_ART = "download_embed_art"
+        const val KEY_DOWNLOAD_PLAYLIST = "download_whole_playlist"
         const val KEY_COVER_COLOURS = "cover_colours"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"

@@ -142,6 +142,11 @@ class AppPrefs(context: Context) {
     val cutNonMusic: StateFlow<Boolean> = _cutNonMusic.asStateFlow()
     fun setCutNonMusic(value: Boolean) = put(_cutNonMusic, value) { putBoolean(KEY_CUT_NON_MUSIC, value) }
 
+    /** The download quality's name, kept like the format so it is there next time. */
+    private val _downloadQuality = MutableStateFlow(prefs.getString(KEY_DOWNLOAD_QUALITY, null).orEmpty())
+    val downloadQuality: StateFlow<String> = _downloadQuality.asStateFlow()
+    fun setDownloadQuality(value: String) = put(_downloadQuality, value) { putString(KEY_DOWNLOAD_QUALITY, value) }
+
     private inline fun <T> put(
         flow: MutableStateFlow<T>,
         value: T,
@@ -167,6 +172,7 @@ class AppPrefs(context: Context) {
         const val KEY_COVER_PROVIDER = "cover_provider"
         const val KEY_DOWNLOAD_PROXY = "download_proxy"
         const val KEY_DOWNLOAD_FORMAT = "download_format"
+        const val KEY_DOWNLOAD_QUALITY = "download_quality"
         const val KEY_CUT_NON_MUSIC = "download_cut_non_music"
     }
 }

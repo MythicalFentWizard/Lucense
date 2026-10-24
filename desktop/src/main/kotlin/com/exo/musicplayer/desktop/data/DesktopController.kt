@@ -3312,8 +3312,24 @@ class DesktopController(parent: CoroutineScope) {
             cutNonMusicState.value = value
             settings.downloadCutNonMusic = value
         }
-    var downloadEmbedArt by mutableStateOf(true)
-    var downloadPlaylist by mutableStateOf(false)
+    private val embedArtState = mutableStateOf(settings.downloadEmbedArt)
+
+    /** Kept, like the rest of the download choices, so they are as left next time. */
+    var downloadEmbedArt: Boolean
+        get() = embedArtState.value
+        set(value) {
+            embedArtState.value = value
+            settings.downloadEmbedArt = value
+        }
+
+    private val wholePlaylistState = mutableStateOf(settings.downloadPlaylist)
+
+    var downloadPlaylist: Boolean
+        get() = wholePlaylistState.value
+        set(value) {
+            wholePlaylistState.value = value
+            settings.downloadPlaylist = value
+        }
 
     private val qualityState = mutableStateOf(
         DownloadQuality.fromName(settings.downloadQualityName)
