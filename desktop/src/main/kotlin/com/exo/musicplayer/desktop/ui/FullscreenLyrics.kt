@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -87,7 +88,9 @@ fun FullscreenLyrics(controller: DesktopController) {
                 reactiveMode = controller.reactiveMode,
                 modifier = Modifier.matchParentSize()
             )
-            Box(Modifier.fillMaxSize().background(Color(0x80000000)))
+            // White words need a dark veil, and a light theme's background needs more of one.
+            val veil = if (Palette.Base.luminance() > 0.5f) 0.74f else 0.5f
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = veil)))
         } else {
             cover?.let {
                 Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(60.dp))

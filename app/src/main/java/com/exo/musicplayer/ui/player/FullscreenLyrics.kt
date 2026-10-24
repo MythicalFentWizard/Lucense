@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.player
 
+import androidx.compose.ui.graphics.luminance
 import com.exo.musicplayer.ui.theme.ScreenBackdrop
 import com.exo.musicplayer.musicApp
 import androidx.compose.runtime.collectAsState
@@ -90,7 +91,9 @@ fun FullscreenLyrics(
             // Your own background: the wallpaper and the moving background, as behind the library.
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
             ScreenBackdrop()
-            Box(Modifier.fillMaxSize().background(Color(0x80000000)))
+            // White words need a dark veil, and a light theme's background needs more of one.
+            val veil = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) 0.74f else 0.5f
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = veil)))
         } else {
             track?.artPath?.let {
                 AsyncImage(

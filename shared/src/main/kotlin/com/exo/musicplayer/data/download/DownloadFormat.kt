@@ -53,6 +53,13 @@ object YtDlpTidy {
     val TAGS: List<String> = listOf(
         "--parse-metadata",
         "%(artist&$KNOWN|)s%(title)s:^(?!$KNOWN)(?P<meta_artist>.+?) - (?P<meta_title>.+)$",
+        // The artist is known and the title starts with it anyway ("Tall Dwarfs -
+        // Mr. Broccoli" by Tall Dwarfs): the repeat comes off the title.
+        "--parse-metadata",
+        "%(artist)s~~~%(title)s:(?i)^(?P<lucense_who>.+?)~~~(?P=lucense_who)\\s*[-–—]\\s*(?P<title>.+)$",
+        // And from the track name, which is what goes into the file when a site gives one.
+        "--parse-metadata",
+        "%(artist)s~~~%(track)s:(?i)^(?P<lucense_who2>.+?)~~~(?P=lucense_who2)\\s*[-–—]\\s*(?P<track>.+)$",
         "--replace-in-metadata",
         "meta_title,title",
         """\s*[(\[][^)\]]*\b(?i:official|lyrics?|audio|video|visuali[sz]er|music video|mv|hd|hq|4k)\b[^)\]]*[)\]]""",

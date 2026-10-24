@@ -10,8 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jaudiotagger.tag.FieldKey
 import java.io.File
-import java.util.logging.Level
-import java.util.logging.Logger
 
 /** Immutable so Compose can skip rows whose track hasn't changed. */
 @Immutable
@@ -47,12 +45,6 @@ data class DesktopTrack(
  * and it reads what is there, leaving the files exactly where they are.
  */
 object FolderLibrary {
-
-    init {
-        // jaudiotagger logs an INFO line per file, which is unusable noise when
-        // scanning thousands of tracks.
-        Logger.getLogger("org.jaudiotagger").level = Level.SEVERE
-    }
 
     private const val MAX_DEPTH = 12
 

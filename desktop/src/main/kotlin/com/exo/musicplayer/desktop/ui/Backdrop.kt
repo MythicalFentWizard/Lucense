@@ -160,10 +160,20 @@ internal class Pulse(bands: Int = 14) {
      * far that runs ahead of the speakers, and [heardBass] the bass a [BeatTap]
      * says is being heard as RMS of full scale - negative where there is none.
      */
+    /** The most anything drawn from this moved in the last [update]: nearly nothing once it has settled. */
+    var change = 1f
+        private set
+
+    /** A ring sent out in the last moment is still travelling. */
+    fun ringsOut(t: Float): Boolean = rings.any { t - it in 0f..RING_SECONDS }
+
     fun update(snapshot: FloatArray, t: Float, aheadSeconds: Float = 0f, heardBass: Float = -1f) {
         val dt = if (lastTime < 0f) 0f else (t - lastTime).coerceIn(0f, 0.1f)
         lastTime = t
         val reading = delayed(snapshot, t, aheadSeconds)
+        var moved = 0f
+        val punchBefore = punch
+        val kickBefore = kick
 
         val attack = ease(dt, 0.03f)
         val release = ease(dt, 0.12f)
@@ -175,7 +185,9 @@ internal class Pulse(bands: Int = 14) {
             val swing = ((value - floors[i]) / max(ceilings[i] - floors[i], MIN_SPAN)).coerceIn(0f, 1f)
             // Near silence the stretch is faded out, so a quiet hiss doesn't dance.
             val target = (value * 0.3f + swing * 0.7f) * (value / 0.08f).coerceAtMost(1f)
-            levels[i] += (target - levels[i]) * (if (target > levels[i]) attack else release)
+            val step = (target - levels[i]) * (if (target > levels[i]) attack else release)
+            levels[i] += step
+            moved = max(moved, abs(step))
         }
 
         val lowEnd = (levels.size * 0.22f).toInt().coerceAtLeast(1)
@@ -210,6 +222,8 @@ internal class Pulse(bands: Int = 14) {
         val onset = ((heard - heardSlow) * 2.4f).coerceIn(0f, 1f)
         kickPeak = max(kickPeak * exp(-dt / 0.14f), onset)
         kick += (kickPeak - kick) * ease(dt, 0.015f)
+
+        change = max(moved, max(abs(punch - punchBefore), abs(kick - kickBefore)))
 
         travel += dt * (0.015f + energy * 0.1f)
         if (onset > 0.45f && t - lastRing > 0.22f) {
@@ -262,6 +276,8 @@ internal class Pulse(bands: Int = 14) {
         const val MIN_HEARD_SPAN = 0.10f
         /** A second and a half of readings, at sixty a second. */
         const val HISTORY = 90
+        /** How long a ring takes to go out and fade. */
+        const val RING_SECONDS = 1.2f
     }
 }
 
@@ -333,36 +349,61 @@ private fun Animated(
 
     LaunchedEffect(focused, style) {
         if (!focused) return@LaunchedEffect
+        // Reactive with nothing to listen to never changes: drawn once, it's done.
+        if (style == BackdropStyle.REACTIVE && analyser == null) return@LaunchedEffect
         val origin = System.nanoTime() - (seconds.floatValue * 1e9f).toLong()
         val raw = FloatArray(spectrum?.bands() ?: 1)
         var lastTick = 0L
+        // Ticks in a row that changed nothing to see.
+        var still = 0
         while (isActive) {
-            if (moving) {
-                // Every display frame, up to about sixty a second: these move with
-                // the music, and at thirty updates a second their motion stepped.
-                withFrameNanos { }
-                val tick = System.nanoTime()
-                if (tick - lastTick < 15_000_000L) continue
-                lastTick = tick
-            } else {
-                delay(50L)
-            }
-            val nanos = System.nanoTime()
-            val now = (nanos - origin) / 1e9f
-            if (analyser != null) {
-                // Re-asserted every tick: the effects panel's meter switches the
-                // analyser off when it closes, and this still needs it.
+            if (analyser != null && style == BackdropStyle.REACTIVE && still >= SETTLED_TICKS) {
+                // At rest: drawn again, it would look the same. Listen now and then,
+                // without asking for a frame - waiting on one draws one - and wake
+                // when there is something to hear.
                 analyser.enabled = true
                 beat?.enabled = true
-                pulse.update(
-                    analyser.snapshot(raw),
-                    now,
-                    aheadSeconds = (beat?.delayNanos ?: 0L) / 1e9f,
-                    heardBass = if (beat == null) -1f else beat.bassAt(nanos)
-                )
+                if (analyser.snapshot(raw).all { it == 0f } && (beat?.bassAt(System.nanoTime()) ?: 0f) <= 0f) {
+                    delay(REST_POLL_MS)
+                    continue
+                }
+                still = 0
             }
-            if (style == BackdropStyle.WAVES) (graph as? SongGraph)?.sync()
-            seconds.floatValue = now
+            // One step of the picture: the music read, the clock moved on.
+            fun advance() {
+                val nanos = System.nanoTime()
+                val now = (nanos - origin) / 1e9f
+                if (analyser != null) {
+                    // Re-asserted every tick: the effects panel's meter switches the
+                    // analyser off when it closes, and this still needs it.
+                    analyser.enabled = true
+                    beat?.enabled = true
+                    val reading = analyser.snapshot(raw)
+                    val heard = if (beat == null) -1f else beat.bassAt(nanos)
+                    pulse.update(reading, now, aheadSeconds = (beat?.delayNanos ?: 0L) / 1e9f, heardBass = heard)
+                    // Reactive draws nothing new once the music has stopped and all
+                    // of it has died away; counted here, it rests above.
+                    val settled = pulse.change < SETTLED_CHANGE && !pulse.ringsOut(now) && reading.all { it == 0f } && heard <= 0f
+                    still = if (settled) still + 1 else 0
+                }
+                if (style == BackdropStyle.WAVES) (graph as? SongGraph)?.sync()
+                seconds.floatValue = now
+            }
+            if (moving) {
+                // About sixty updates a second, each on a display frame: these move
+                // with the music, and at thirty a second their motion stepped. No
+                // more than that, though - every update redraws the window, and a
+                // fast screen would otherwise redraw it at its full rate. Stepped
+                // inside the frame, so that frame draws it: stepped after, it took
+                // a second frame to show.
+                val wait = (FRAME_NANOS - (System.nanoTime() - lastTick)) / 1_000_000L - FRAME_SLACK_MS
+                if (wait > 0) delay(wait)
+                withFrameNanos { advance() }
+                lastTick = System.nanoTime()
+            } else {
+                delay(50L)
+                advance()
+            }
         }
     }
     DisposableEffect(analyser) {
@@ -406,6 +447,21 @@ private fun Animated(
 }
 
 private fun wrap(value: Float) = ((value % 1f) + 1f) % 1f
+
+/** About sixty a second, for the backdrops that move with the music. */
+private const val FRAME_NANOS = 16_600_000L
+
+/** Woken this much early, so the next display frame isn't missed and the rate halved. */
+private const val FRAME_SLACK_MS = 4L
+
+/** Less than this between ticks reads as nothing moving. */
+private const val SETTLED_CHANGE = 0.0005f
+
+/** A quarter of a second of nothing moving, and the reactive backdrop rests. */
+private const val SETTLED_TICKS = 15
+
+/** How often a resting backdrop listens for the music coming back. */
+private const val REST_POLL_MS = 150L
 
 // Reused on the UI thread, where every backdrop draws.
 private val glowPaint = Paint()

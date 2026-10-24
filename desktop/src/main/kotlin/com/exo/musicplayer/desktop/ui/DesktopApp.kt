@@ -1,7 +1,8 @@
 package com.exo.musicplayer.desktop.ui
 
 import androidx.compose.foundation.TooltipArea
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.CompositionLocalProvider
 import dev.chrisbanes.haze.hazeSource
@@ -214,10 +215,14 @@ fun DesktopApp(
             Wallpaper(controller.wallpaper, controller.wallpaperDim, Modifier.matchParentSize())
         }
         CompositionLocalProvider(LocalGlass provides glassState.takeIf { glass }) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // The window's width in the steps the layout changes at, so resizing it
+        // rebuilds nothing until one is crossed (see LocalWindowWidth).
+        val density = LocalDensity.current
+        var windowWidth by remember { mutableStateOf(WINDOW_STEPS.last()) }
+        Box(Modifier.fillMaxSize().onSizeChanged { windowWidth = with(density) { it.width.toDp() }.steppedAt(WINDOW_STEPS) }) {
         // Below this the sidebar goes down to its icons and the side panel narrows.
-        val roomy = maxWidth >= 1100.dp
-        CompositionLocalProvider(LocalWindowWidth provides maxWidth) {
+        val roomy = windowWidth >= 1100.dp
+        CompositionLocalProvider(LocalWindowWidth provides windowWidth) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -258,8 +263,9 @@ fun DesktopApp(
                         reactiveMode = controller.reactiveMode,
                         modifier = Modifier.matchParentSize()
                     )
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
-                    CompositionLocalProvider(LocalPaneWidth provides maxWidth) {
+                    var paneWidth by remember { mutableStateOf(PANE_STEPS.last()) }
+                    Box(Modifier.fillMaxSize().onSizeChanged { paneWidth = with(density) { it.width.toDp() }.steppedAt(PANE_STEPS) }) {
+                    CompositionLocalProvider(LocalPaneWidth provides paneWidth) {
                     Column(Modifier.fillMaxSize()) {
                         ContentHeader(
                             controller = controller,
