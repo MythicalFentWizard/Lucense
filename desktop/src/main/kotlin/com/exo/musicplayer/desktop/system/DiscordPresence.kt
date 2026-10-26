@@ -2,6 +2,8 @@ package com.exo.musicplayer.desktop.system
 
 import java.io.File
 import java.io.RandomAccessFile
+import java.net.UnixDomainSocketAddress
+import java.nio.channels.SocketChannel
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,7 +45,7 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
 
     private val running = AtomicBoolean(false)
     private var worker: Thread? = null
-    @Volatile private var pipe: RandomAccessFile? = null
+    @Volatile private var pipe: Line? = null
 
     @Volatile private var wanted: Showing? = null
     private var sentAt = 0L
@@ -114,11 +116,62 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         }
     }
 
+    /**
+     * The connection to Discord: a named pipe on Windows, a Unix socket on
+     * Linux. Frames go over either the same way.
+     */
+    private interface Line {
+        fun write(bytes: ByteArray)
+        fun readFully(bytes: ByteArray)
+        fun close()
+    }
+
+    private class PipeLine(private val file: RandomAccessFile) : Line {
+        override fun write(bytes: ByteArray) = file.write(bytes)
+        override fun readFully(bytes: ByteArray) = file.readFully(bytes)
+        override fun close() = file.close()
+    }
+
+    private class SocketLine(private val channel: SocketChannel) : Line {
+        override fun write(bytes: ByteArray) {
+            val buffer = ByteBuffer.wrap(bytes)
+            while (buffer.hasRemaining()) channel.write(buffer)
+        }
+
+        override fun readFully(bytes: ByteArray) {
+            val buffer = ByteBuffer.wrap(bytes)
+            while (buffer.hasRemaining()) {
+                if (channel.read(buffer) < 0) throw java.io.EOFException("Discord closed the connection")
+            }
+        }
+
+        override fun close() = channel.close()
+    }
+
+    /** Where Discord might be listening, in the order it is tried. */
+    private fun endpoints(): List<() -> Line?> {
+        if (Platform.isWindows) {
+            return (0..9).map { index ->
+                { runCatching { PipeLine(RandomAccessFile(File("""\\.\pipe\discord-ipc-""" + index), "rw")) }.getOrNull() }
+            }
+        }
+        // Discord's own runtime folder, or a temporary one; inside it, as installed
+        // plainly, from Flathub, or as a snap.
+        val roots = listOfNotNull(
+            System.getenv("XDG_RUNTIME_DIR"), System.getenv("TMPDIR"), System.getenv("TMP"), System.getenv("TEMP"), "/tmp"
+        ).distinct()
+        val within = listOf("", "app/com.discordapp.Discord/", "snap.discord/", ".flatpak/dev.vencord.Vesktop/xdg-run/")
+        return roots.flatMap { root -> within.flatMap { sub -> (0..9).map { index -> File(root, sub + "discord-ipc-" + index) } } }
+            .filter { it.exists() }
+            .map { socket ->
+                { runCatching { SocketLine(SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath()))) }.getOrNull() }
+            }
+    }
+
     private fun open(applicationId: String) {
         var sawPipe = false
-        for (index in 0..9) {
-            val path = File("""\\.\pipe\discord-ipc-""" + index)
-            val opened = runCatching { RandomAccessFile(path, "rw") }.getOrNull() ?: continue
+        for (endpoint in endpoints()) {
+            val opened = endpoint() ?: continue
             sawPipe = true
             val hello = "{" + quoted("v") + ":1," + quoted("client_id") + ":" + quoted(applicationId) + "}"
             val reply = runCatching {
@@ -227,7 +280,7 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
             quoted("nonce") + ":" + quoted(System.nanoTime().toString()) + "," +
             quoted("args") + ":{" + quoted("pid") + ":" + ProcessHandle.current().pid() + "}}"
 
-    private fun write(handle: RandomAccessFile, opcode: Int, json: String) {
+    private fun write(handle: Line, opcode: Int, json: String) {
         val body = json.toByteArray(Charsets.UTF_8)
         val frame = ByteBuffer.allocate(8 + body.size).order(ByteOrder.LITTLE_ENDIAN)
         frame.putInt(opcode)
@@ -236,7 +289,7 @@ class DiscordPresence(private val onState: () -> Unit = {}) {
         handle.write(frame.array())
     }
 
-    private fun read(handle: RandomAccessFile): String {
+    private fun read(handle: Line): String {
         val header = ByteArray(8)
         handle.readFully(header)
         val length = ByteBuffer.wrap(header, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int

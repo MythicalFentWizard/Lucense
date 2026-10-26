@@ -20,8 +20,10 @@ object AppDirs {
     val root: File by lazy {
         home(
             File(
+                // Windows' own place; elsewhere the one Linux desktops use.
                 System.getenv("LOCALAPPDATA")
-                    ?: (System.getProperty("user.home") + File.separator + ".lucense")
+                    ?: System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
+                    ?: (System.getProperty("user.home") + File.separator + ".local" + File.separator + "share")
             )
         )
     }

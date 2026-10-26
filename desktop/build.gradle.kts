@@ -51,7 +51,28 @@ dependencies {
     // machine and is indistinguishable from a keylogger to antivirus software.
     implementation(libs.jna)
     implementation(libs.jna.platform)
+
+    // MPRIS on Linux: how the desktop hands a player its media keys and shows
+    // it in its media controls. Pure Java over the session bus's Unix socket.
+    implementation(libs.dbus.java.core)
+    implementation(libs.dbus.java.transport)
+
+    testImplementation(kotlin("test-junit5"))
 }
+
+tasks.test {
+    useJUnitPlatform()
+    // Linux's data folder, kept inside the build, so tests never touch anyone's own Lucense.
+    environment("XDG_DATA_HOME", layout.buildDirectory.dir("test-data").get().asFile.absolutePath)
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+/** The Linux build is made on Linux; jpackage only packages for the system it runs on. */
+val buildingOnLinux = System.getProperty("os.name").startsWith("Linux")
 
 compose.desktop {
     application {
@@ -95,7 +116,7 @@ compose.desktop {
         jvmArgs("-Dkotlinx.coroutines.io.parallelism=12")
 
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Lucense"
 
             windows {
@@ -123,6 +144,11 @@ compose.desktop {
                 "java.net.http",    // WebSocket, to read the sign-in window's cookies
                 "jdk.unsupported"   // sun.misc.Unsafe, used by the audio SPIs
             )
+            if (buildingOnLinux) {
+                // D-Bus for MPRIS: its introspection is XML, it authenticates as
+                // the Unix user, and it reads the peer's credentials off the socket.
+                modules("java.xml", "jdk.security.auth", "jdk.net")
+            }
             // Drives the MSI ProductVersion, which is the whole of Windows'
             // upgrade logic: it has to increase for an installer to replace an
             // existing install instead of offering to remove it. jpackage
@@ -134,6 +160,24 @@ compose.desktop {
                 shortcut = true
                 // Stable UUID so upgrades replace rather than stack.
                 upgradeUuid = "6E3F1C42-6B7B-4C3E-9A1F-2B7D5E0A9C11"
+            }
+            linux {
+                // The package's name, and the start of its menu entry's:
+                // lucense-Lucense.desktop, which MPRIS names as the DesktopEntry.
+                packageName = "lucense"
+                iconFile.set(project.layout.projectDirectory.file("icons/lucense.png"))
+                shortcut = true
+                menuGroup = "AudioVideo;Audio;Player"
+                appCategory = "sound"
+                debMaintainer = "Lucense <lucense@users.noreply.github.com>"
+                rpmLicenseType = "MIT"
+                // In the "Open with" list for music files; the desktop asks before making it the default.
+                for ((extension, mime) in listOf(
+                    "mp3" to "audio/mpeg", "flac" to "audio/flac", "ogg" to "audio/ogg", "opus" to "audio/opus",
+                    "m4a" to "audio/mp4", "aac" to "audio/aac", "wav" to "audio/x-wav", "aiff" to "audio/x-aiff"
+                )) {
+                    fileAssociation(mimeType = mime, extension = extension, description = "Music")
+                }
             }
         }
     }

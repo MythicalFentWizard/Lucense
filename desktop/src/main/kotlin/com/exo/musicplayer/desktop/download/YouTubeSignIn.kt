@@ -97,7 +97,7 @@ object YouTubeSignIn {
 
     /** Reads the sign-in from [chosen] itself. */
     private fun browserArgs(chosen: Source): List<String> = when (chosen) {
-        Source.OPERA_GX -> listOf(
+        Source.OPERA_GX -> if (System.getenv("APPDATA") == null) listOf("--cookies-from-browser", "opera") else listOf(
             "--cookies-from-browser",
             "opera:" + File(System.getenv("APPDATA").orEmpty(), "Opera Software/Opera GX Stable").path
         )

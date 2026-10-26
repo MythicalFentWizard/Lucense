@@ -51,6 +51,13 @@ object Covers {
 
     fun knownMissing(track: DesktopTrack): Boolean = track.file.absolutePath in misses
 
+    /** The cover's own bytes, as stored: for a picture handed to something else to show. */
+    suspend fun bytes(track: DesktopTrack): ByteArray? = withContext(Dispatchers.IO) {
+        downloadedFile(track).takeIf { it.exists() }?.readBytes()
+            ?: embedded(track.file)
+            ?: sidecar(track.file)
+    }
+
     suspend fun load(track: DesktopTrack): ImageBitmap? = withContext(Dispatchers.IO) {
         val key = track.file.absolutePath
         memory[key]?.let { return@withContext it }

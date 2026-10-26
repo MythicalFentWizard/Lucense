@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import com.exo.musicplayer.desktop.system.Platform
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -278,80 +279,83 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        // A global hotkey is a Windows thing; Linux desktops keep the keyboard to themselves.
+        if (Platform.isWindows) {
+            Spacer(Modifier.height(14.dp))
 
-        Panel(Modifier.fillMaxWidth()) {
-            SectionTitle("Game ducking")
-            Spacer(Modifier.height(4.dp))
-            Hint(
-                "Turns the music down system-wide at the press of a key, so you can hear " +
-                    "what the game is doing without alt-tabbing. Works while the game has " +
-                    "focus."
-            )
-            Spacer(Modifier.height(12.dp))
-
-            CheckRow(
-                label = "Duck the music with a hotkey",
-                checked = controller.duckEnabled,
-                note = "Press once to turn down, again to restore"
-            ) { controller.duckEnabled = it }
-
-            if (controller.duckEnabled) {
-                Spacer(Modifier.height(14.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Key",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Palette.TextDim,
-                        modifier = Modifier.width(64.dp)
-                    )
-                    SegmentedRow(
-                        options = DuckKey.entries,
-                        selected = controller.duckKey,
-                        label = { it.label },
-                        onSelect = { controller.duckKey = it }
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Only these keys are offered: a global hotkey is taken from every " +
-                        "other program too, so binding a letter would break typing " +
-                        "everywhere.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Palette.TextFaint
+            Panel(Modifier.fillMaxWidth()) {
+                SectionTitle("Game ducking")
+                Spacer(Modifier.height(4.dp))
+                Hint(
+                    "Turns the music down system-wide at the press of a key, so you can hear " +
+                        "what the game is doing without alt-tabbing. Works while the game has " +
+                        "focus."
                 )
+                Spacer(Modifier.height(12.dp))
 
-                Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Turn down by",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Palette.TextDim,
-                        modifier = Modifier.width(94.dp)
-                    )
-                    Text(
-                        "${controller.duckPercent}%",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Palette.Accent,
-                        modifier = Modifier.width(46.dp)
-                    )
-                    Slider(
-                        value = controller.duckPercent.toFloat(),
-                        onValueChange = { controller.duckPercent = it.toInt() },
-                        valueRange = 10f..100f,
-                        steps = 17,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Palette.Accent,
-                            activeTrackColor = Palette.Accent,
-                            inactiveTrackColor = Palette.Line
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                CheckRow(
+                    label = "Duck the music with a hotkey",
+                    checked = controller.duckEnabled,
+                    note = "Press once to turn down, again to restore"
+                ) { controller.duckEnabled = it }
 
-                controller.duckError?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = Palette.TextDim)
+                if (controller.duckEnabled) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Key",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Palette.TextDim,
+                            modifier = Modifier.width(64.dp)
+                        )
+                        SegmentedRow(
+                            options = DuckKey.entries,
+                            selected = controller.duckKey,
+                            label = { it.label },
+                            onSelect = { controller.duckKey = it }
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Only these keys are offered: a global hotkey is taken from every " +
+                            "other program too, so binding a letter would break typing " +
+                            "everywhere.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Palette.TextFaint
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Turn down by",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Palette.TextDim,
+                            modifier = Modifier.width(94.dp)
+                        )
+                        Text(
+                            "${controller.duckPercent}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Palette.Accent,
+                            modifier = Modifier.width(46.dp)
+                        )
+                        Slider(
+                            value = controller.duckPercent.toFloat(),
+                            onValueChange = { controller.duckPercent = it.toInt() },
+                            valueRange = 10f..100f,
+                            steps = 17,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Palette.Accent,
+                                activeTrackColor = Palette.Accent,
+                                inactiveTrackColor = Palette.Line
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    controller.duckError?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = Palette.TextDim)
+                    }
                 }
             }
         }
@@ -398,24 +402,32 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
             CheckRow(
                 label = "Media keys",
                 checked = controller.mediaKeysEnabled,
-                note = "Play, pause, next and previous on the keyboard, from anywhere. " +
-                    "While this is on, other players won't see those keys."
-            ) { controller.mediaKeysEnabled = it }
-            Spacer(Modifier.height(14.dp))
-            CheckRow(
-                label = "Offer Lucense for music files in Explorer",
-                checked = controller.fileTypes,
-                enabled = controller.canAssociate,
-                note = controller.fileTypesNote ?: when {
-                    !controller.canAssociate ->
-                        "Available once Lucense is running from its installed shortcut " +
-                            "rather than from a development build."
-                    else ->
-                        "Puts Lucense in the Open with list for MP3, FLAC, M4A and the rest. " +
-                            "Windows does not allow a program to make itself the default, so " +
-                            "pick it from Open with once and tick \"Always use this app\"."
+                note = if (Platform.isWindows) {
+                    "Play, pause, next and previous on the keyboard, from anywhere. " +
+                        "While this is on, other players won't see those keys."
+                } else {
+                    "Play, pause, next and previous on the keyboard, and Lucense in the desktop's " +
+                        "media controls with the song playing and its cover."
                 }
-            ) { controller.changeFileTypes(it) }
+            ) { controller.mediaKeysEnabled = it }
+            // On Linux the package puts Lucense in the Open with list itself.
+            if (Platform.isWindows) {
+                Spacer(Modifier.height(14.dp))
+                CheckRow(
+                    label = "Offer Lucense for music files in Explorer",
+                    checked = controller.fileTypes,
+                    enabled = controller.canAssociate,
+                    note = controller.fileTypesNote ?: when {
+                        !controller.canAssociate ->
+                            "Available once Lucense is running from its installed shortcut " +
+                                "rather than from a development build."
+                        else ->
+                            "Puts Lucense in the Open with list for MP3, FLAC, M4A and the rest. " +
+                                "Windows does not allow a program to make itself the default, so " +
+                                "pick it from Open with once and tick \"Always use this app\"."
+                    }
+                ) { controller.changeFileTypes(it) }
+            }
 
             Spacer(Modifier.height(28.dp))
             SectionTitle("Lyrics and artwork")

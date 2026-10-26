@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.desktop.system.Platform
+import com.exo.musicplayer.desktop.system.Mpris
 import com.exo.musicplayer.desktop.ui.Glass
 import com.exo.musicplayer.desktop.download.OwnSignIn
 import com.exo.musicplayer.desktop.download.YouTubeAhead
@@ -1553,6 +1555,80 @@ class DesktopController(parent: CoroutineScope) {
     private val mediaKeys = MediaKeys()
     private val mediaKeysState = mutableStateOf(settings.mediaKeys)
 
+    /** Covers handed to the Linux desktop, by song path: a file:// address, or blank for none or not yet. */
+    private val desktopCovers = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Linux's media keys and media controls: Lucense announced on D-Bus. Its
+     * calls arrive on a D-Bus thread and each hops to the UI thread.
+     */
+    private val mpris: Mpris? = if (!Platform.isLinux) null else Mpris(object : Mpris.Actions {
+        override fun playPause() { scope.launch { togglePlay() } }
+        override fun play() {
+            scope.launch { if (!engine.status.value.playing && engine.status.value.track != null) togglePlay() }
+        }
+        override fun pause() { scope.launch { if (engine.status.value.playing) togglePlay() } }
+        override fun next() { scope.launch { this@DesktopController.next() } }
+        override fun previous() { scope.launch { this@DesktopController.previous() } }
+        override fun stop() {
+            scope.launch {
+                engine.stop()
+                tellDiscord()
+            }
+        }
+        override fun seekTo(ms: Long) {
+            scope.launch {
+                engine.seekTo(ms)
+                tellDiscord()
+            }
+        }
+        override fun positionMs(): Long = engine.status.value.positionMs
+    })
+
+    /** Tells the Linux desktop what is playing, for its media controls; nothing elsewhere. */
+    private fun tellDesktopPlayer() {
+        val bus = mpris ?: return
+        val status = engine.status.value
+        val track = status.track
+        val key = track?.file?.absolutePath
+        val cover = key?.let { desktopCovers[it] }
+        bus.update(
+            Mpris.NowPlaying(
+                key = key,
+                title = track?.title,
+                artist = track?.displayArtist,
+                album = track?.album?.takeIf { it.isNotBlank() },
+                lengthMs = status.durationMs.takeIf { it > 0L } ?: track?.durationMs ?: 0L,
+                playing = status.playing,
+                artUrl = cover?.ifBlank { null }
+            ),
+            status.positionMs
+        )
+        if (track != null && key != null && cover == null) {
+            desktopCovers[key] = ""
+            scope.launch {
+                val file = withContext(Dispatchers.IO) { coverForDesktop(track) } ?: return@launch
+                desktopCovers[key] = file.toURI().toString()
+                if (engine.status.value.track?.file?.absolutePath == key) tellDesktopPlayer()
+            }
+        }
+    }
+
+    /**
+     * The song's cover as a file, for the desktop to show: one per song, as it
+     * keeps pictures by their address, and only the last few kept.
+     */
+    private suspend fun coverForDesktop(track: DesktopTrack): File? {
+        val bytes = Covers.bytes(track) ?: return null
+        val folder = File(AppDirs.root, "now-playing").apply { mkdirs() }
+        val png = bytes.size > 4 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte()
+        val file = File(folder, Integer.toHexString(track.file.absolutePath.hashCode()) + if (png) ".png" else ".jpg")
+        if (!file.isFile) file.writeBytes(bytes)
+        file.setLastModified(System.currentTimeMillis())
+        folder.listFiles()?.sortedByDescending { it.lastModified() }?.drop(DESKTOP_COVERS_KEPT)?.forEach { it.delete() }
+        return file
+    }
+
     var mediaKeysEnabled: Boolean
         get() = mediaKeysState.value
         set(value) {
@@ -1562,6 +1638,14 @@ class DesktopController(parent: CoroutineScope) {
         }
 
     private fun applyMediaKeys() {
+        mpris?.let { bus ->
+            if (!mediaKeysEnabled) {
+                bus.stop()
+            } else if (bus.start()) {
+                tellDesktopPlayer()
+            }
+            return
+        }
         if (!mediaKeysEnabled) {
             mediaKeys.unbind()
             return
@@ -3838,6 +3922,9 @@ class DesktopController(parent: CoroutineScope) {
         /** Songs in a row that wouldn't stream before a list stops trying. */
         const val STREAM_FAILURES_TO_STOP = 3
 
+        /** Covers kept as files for the Linux desktop's media controls. */
+        const val DESKTOP_COVERS_KEPT = 20
+
         /** A kept YouTube address that plays nothing is read again only if it is at least this old. */
         const val READ_AGAIN_AFTER_MS = 30_000L
 
@@ -5075,6 +5162,7 @@ class DesktopController(parent: CoroutineScope) {
             image = track?.let { discordCoverUrl(it) },
             album = track?.album
         )
+        tellDesktopPlayer()
     }
 
     /** Whether the small always-on-top player is open. */

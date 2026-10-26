@@ -50,6 +50,10 @@ class GlobalHotkey {
     fun bind(virtualKey: Int, modifiers: Int = 0, onPressed: () -> Unit) {
         unbind()
         if (virtualKey == 0) return
+        if (!Platform.isWindows) {
+            lastError = "A global hotkey is only possible on Windows."
+            return
+        }
 
         pendingKey = virtualKey
         pendingModifiers = modifiers
