@@ -67,7 +67,7 @@ class Mpris(private val actions: Actions) {
     fun start(): Boolean {
         if (connection != null) return true
         return runCatching {
-            val bus = DBusConnectionBuilder.forSessionBus().build()
+            val bus = sessionBus()
             // A second Lucense takes a name of its own, as the specification asks.
             val name = runCatching { bus.requestBusName(BUS_NAME); BUS_NAME }.getOrElse {
                 val other = "$BUS_NAME.instance${ProcessHandle.current().pid()}"
@@ -78,6 +78,25 @@ class Mpris(private val actions: Actions) {
             connection = bus
             name
         }.onFailure { problem = it }.onSuccess { problem = null }.isSuccess
+    }
+
+    /**
+     * The session bus. Its address may name an abstract socket (dbus-launch
+     * and dbus-run-session give one), which Java's own Unix sockets can't
+     * open; a systemd desktop's bus is also at /run/user/<uid>/bus, which they can.
+     */
+    private fun sessionBus(): DBusConnection {
+        val address = System.getenv("DBUS_SESSION_BUS_ADDRESS").orEmpty()
+        if ("abstract=" in address || address.isBlank()) {
+            val uid = runCatching {
+                java.io.File("/proc/self/status").readLines().first { it.startsWith("Uid:") }.split('\t', ' ').filter { it.isNotEmpty() }[1]
+            }.getOrNull()
+            val socket = uid?.let { java.io.File("/run/user/$it/bus") }
+            if (socket != null && socket.exists()) {
+                return DBusConnectionBuilder.forAddress("unix:path=" + socket.path).build()
+            }
+        }
+        return DBusConnectionBuilder.forSessionBus().build()
     }
 
     @Synchronized

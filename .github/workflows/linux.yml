@@ -36,13 +36,18 @@ jobs:
       - name: What the tests and packages need
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb dbus-x11 playerctl rpm fakeroot
+          sudo apt-get install -y xvfb dbus-x11 playerctl rpm fakeroot openbox wmctrl
 
       - name: The bundled tools, Linux builds
         run: bash tools/fetch-tools.sh linux
 
-      - name: Tests (a display and a session bus, as a desktop has)
-        run: dbus-run-session -- xvfb-run -a gradle :desktop:test --console=plain
+      # A session bus at a path, as a systemd desktop has one (dbus-run-session's
+      # is abstract, which Java's Unix sockets can't open), and a window manager.
+      - name: Tests (a display, a window manager and a session bus, as a desktop has)
+        run: |
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNNER_TEMP/session-bus"
+          dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+          xvfb-run -a bash -c 'openbox & sleep 2; gradle :desktop:test --console=plain'
 
       - name: Packages
         run: gradle :desktop:packageDeb :desktop:packageRpm :desktop:createDistributable --console=plain
@@ -113,7 +118,9 @@ jobs:
           echo "alive=$alive"
           test $alive = 1
           EOF
-          dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" bash /tmp/smoke.sh
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNNER_TEMP/session-bus"
+          dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+          xvfb-run -a -s "-screen 0 1440x900x24" bash /tmp/smoke.sh
           echo "---- log"; cat /tmp/lucense.log | tail -60
           ls -la ~/.local/share/Lucense || true
           ls -la ~/.local/share/Lucense/tools || true
