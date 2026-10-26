@@ -1,0 +1,184 @@
+<UserControl x:Class="LucenseSetup.SetupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="780" Height="480" FontFamily="{StaticResource Ui}"
+             TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Grid Margin="20">
+        <Border x:Name="Card" CornerRadius="16" BorderThickness="1" BorderBrush="#24FFFFFF">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#1E1E2E" Offset="0"/>
+                    <GradientStop Color="#141420" Offset="0.6"/>
+                    <GradientStop Color="#11111B" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.6" Color="Black"/>
+            </Border.Effect>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Lucense itself: the cat, glowing softly in its colours. -->
+                <Border Grid.Column="0" CornerRadius="16,0,0,16" ClipToBounds="True" MouseLeftButtonDown="OnDrag">
+                    <Border.Background>
+                        <RadialGradientBrush Center="0.5,0.4" GradientOrigin="0.5,0.4" RadiusX="0.8" RadiusY="0.62">
+                            <GradientStop Color="#40CBA6F7" Offset="0"/>
+                            <GradientStop Color="#1489B4FA" Offset="0.55"/>
+                            <GradientStop Color="#00000000" Offset="1"/>
+                        </RadialGradientBrush>
+                    </Border.Background>
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,0,0,10">
+                            <Image x:Name="Logo" Source="Assets/lucense-256.png" Width="172" Height="172"
+                                   RenderOptions.BitmapScalingMode="HighQuality" RenderTransformOrigin="0.5,0.5">
+                                <Image.Effect>
+                                    <DropShadowEffect BlurRadius="40" ShadowDepth="0" Color="#CBA6F7" Opacity="0.35"/>
+                                </Image.Effect>
+                                <Image.RenderTransform><ScaleTransform x:Name="LogoScale" ScaleX="1" ScaleY="1"/></Image.RenderTransform>
+                            </Image>
+                            <TextBlock Text="Lucense" FontFamily="{StaticResource Display}" FontSize="32" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Text}" HorizontalAlignment="Center" Margin="0,22,0,0"/>
+                            <TextBlock x:Name="VersionText" Text="" FontSize="13" Foreground="{StaticResource TextFaint}"
+                                       HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Rectangle Grid.Column="0" HorizontalAlignment="Right" Width="1" Fill="#14FFFFFF" Margin="0,28"/>
+
+                <!-- What to do. -->
+                <Grid Grid.Column="1" Background="Transparent" MouseLeftButtonDown="OnDrag">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,8,0">
+                        <Button x:Name="MinimizeButton" Style="{StaticResource ChromeButton}" Content="&#xE921;"
+                                ToolTip="Minimise" Click="OnMinimize"/>
+                        <Button x:Name="CloseButton" Style="{StaticResource ChromeCloseButton}" Content="&#xE8BB;"
+                                ToolTip="Close" Click="OnClose"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" Margin="40,4,40,34">
+
+                        <!-- Install, or update -->
+                        <DockPanel x:Name="WelcomePage" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Top">
+                                <TextBlock x:Name="WelcomeTitle" Style="{StaticResource Title}" Text="Install Lucense"/>
+                                <TextBlock x:Name="WelcomeText" Style="{StaticResource Body}" Margin="0,12,0,0"
+                                           Text="A free music player for the music you own. It plays it properly, tidies its names, covers and lyrics, and finds what you're missing. No accounts, no subscriptions."/>
+                                <StackPanel x:Name="RunningNote" Orientation="Horizontal" Visibility="Collapsed" Margin="0,14,0,0">
+                                    <TextBlock Text="&#xE946;" FontFamily="{StaticResource Icons}" FontSize="14" Foreground="#F9E2AF"
+                                               VerticalAlignment="Center" Margin="0,1,8,0"/>
+                                    <TextBlock Style="{StaticResource Small}" FontSize="13" Foreground="{StaticResource TextDim}" VerticalAlignment="Center"
+                                               Text="Lucense is open; it will be closed for the update."/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel DockPanel.Dock="Bottom">
+                                <Border Padding="16,12" CornerRadius="12" Background="#99181825" BorderBrush="#14FFFFFF" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Installs to" Style="{StaticResource Small}"/>
+                                            <TextBlock x:Name="LocationText" Foreground="{StaticResource Text}" FontSize="13"
+                                                       Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <Button x:Name="ChangeButton" Grid.Column="1" Style="{StaticResource LinkButton}"
+                                                Content="Change" VerticalAlignment="Center" Margin="16,0,0,0" Click="OnChangeLocation"/>
+                                    </Grid>
+                                </Border>
+                                <CheckBox x:Name="DesktopShortcut" Content="Put Lucense on the desktop" IsChecked="True" Margin="2,16,0,0"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+                                    <Button x:Name="InstallButton" Style="{StaticResource AccentButton}" Content="Install"
+                                            Click="OnInstall" IsDefault="True"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Working -->
+                        <DockPanel x:Name="ProgressPage" Visibility="Collapsed" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Top">
+                                <TextBlock x:Name="ProgressTitle" Style="{StaticResource Title}" Text="Installing Lucense"/>
+                                <TextBlock x:Name="ProgressText" Style="{StaticResource Body}" Margin="0,12,0,0"/>
+                            </StackPanel>
+                            <StackPanel DockPanel.Dock="Bottom">
+                                <Grid Margin="0,0,0,10">
+                                    <TextBlock x:Name="StatusText" Text="Getting ready…" Style="{StaticResource Small}"
+                                               FontSize="13" Foreground="{StaticResource TextDim}"/>
+                                    <TextBlock x:Name="PercentText" Text="0%" HorizontalAlignment="Right" FontSize="13"
+                                               Foreground="{StaticResource TextDim}"/>
+                                </Grid>
+                                <ProgressBar x:Name="Bar" Value="0"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,28,0,0">
+                                    <Button x:Name="CancelButton" Style="{StaticResource GhostButton}" Content="Cancel" Click="OnCancel"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Done -->
+                        <DockPanel x:Name="DonePage" Visibility="Collapsed" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Top">
+                                <Grid Width="56" Height="56" HorizontalAlignment="Left">
+                                    <Ellipse Fill="{StaticResource Accent}"/>
+                                    <TextBlock Text="&#xE73E;" FontFamily="{StaticResource Icons}" FontSize="24"
+                                               Foreground="{StaticResource OnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock x:Name="DoneTitle" Style="{StaticResource Title}" Margin="0,20,0,0" Text="Lucense is ready"/>
+                                <TextBlock x:Name="DoneText" Style="{StaticResource Body}" Margin="0,12,0,0"
+                                           Text="Find it in the Start menu, or open it now."/>
+                            </StackPanel>
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="DoneCloseButton" Style="{StaticResource GhostButton}" Content="Close" Click="OnClose"/>
+                                <Button x:Name="OpenButton" Style="{StaticResource AccentButton}" Content="Open Lucense"
+                                        Margin="12,0,0,0" Click="OnOpen" IsDefault="True"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Something went wrong -->
+                        <DockPanel x:Name="ErrorPage" Visibility="Collapsed" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Top">
+                                <Grid Width="56" Height="56" HorizontalAlignment="Left">
+                                    <Ellipse Fill="#33F38BA8"/>
+                                    <TextBlock Text="&#xE7BA;" FontFamily="{StaticResource Icons}" FontSize="24"
+                                               Foreground="{StaticResource Danger}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock x:Name="ErrorTitle" Style="{StaticResource Title}" Margin="0,20,0,0" Text="That didn't work"/>
+                                <TextBlock x:Name="ErrorText" Style="{StaticResource Body}" Margin="0,12,0,0"/>
+                                <Button x:Name="LogButton" Style="{StaticResource LinkButton}" Content="Open the installer's log"
+                                        HorizontalAlignment="Left" Margin="0,14,0,0" Click="OnOpenLog"/>
+                            </StackPanel>
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Style="{StaticResource GhostButton}" Content="Close" Click="OnClose"/>
+                                <Button x:Name="RetryButton" Style="{StaticResource AccentButton}" Content="Try again"
+                                        Margin="12,0,0,0" Click="OnRetry"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- This version is already there -->
+                        <DockPanel x:Name="InstalledPage" Visibility="Collapsed" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Top">
+                                <TextBlock x:Name="InstalledTitle" Style="{StaticResource Title}" Text="Lucense is installed"/>
+                                <TextBlock x:Name="InstalledText" Style="{StaticResource Body}" Margin="0,12,0,0"/>
+                                <!-- Removing is there, but quietly: it isn't what most people came for. -->
+                                <Button x:Name="RemoveButton" Style="{StaticResource LinkButton}" Content="Remove Lucense from this PC"
+                                        HorizontalAlignment="Left" Margin="0,18,0,0" Click="OnRemove"/>
+                            </StackPanel>
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button x:Name="ReinstallButton" Style="{StaticResource GhostButton}" Content="Reinstall" Click="OnReinstall"/>
+                                <Button x:Name="InstalledOpenButton" Style="{StaticResource AccentButton}" Content="Open Lucense"
+                                        Margin="12,0,0,0" Click="OnOpen" IsDefault="True"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

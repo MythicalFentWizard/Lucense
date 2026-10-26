@@ -217,3 +217,24 @@ val fixMsiUpgradeSequence by tasks.registering(Exec::class) {
 listOf("packageMsi", "packageReleaseMsi").forEach { name ->
     tasks.matching { it.name == name }.configureEach { finalizedBy(fixMsiUpgradeSequence) }
 }
+
+// ---- The installer ---------------------------------------------------------
+//
+// Lucense-<version>-Setup.exe: Lucense's own installer window (installer/),
+// carrying the MSI and running it with Windows Installer's dialogs switched
+// off. The MSI is still made, and ships beside it for anyone who wants one.
+val packageSetup by tasks.registering(Exec::class) {
+    description = "Builds Lucense-<version>-Setup.exe: the installer with the MSI inside it."
+    group = "compose desktop"
+    dependsOn("packageMsi")
+    // After the MSI's upgrade repair, which finalises packageMsi.
+    mustRunAfter(fixMsiUpgradeSequence)
+    outputs.upToDateWhen { false }
+    val binaries = layout.buildDirectory.dir("compose/binaries/main").get().asFile
+    commandLine(
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        rootProject.layout.projectDirectory.file("tools/build-setup.ps1").asFile.absolutePath,
+        "-Msi", File(binaries, "msi/Lucense-$lucenseVersion.msi").absolutePath,
+        "-Out", File(binaries, "setup/Lucense-$lucenseVersion-Setup.exe").absolutePath
+    )
+}

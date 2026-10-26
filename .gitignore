@@ -29,3 +29,7 @@ sdk files/
 .chain.sh
 .wait-both.sh
 .kotlin/
+
+# The installer's build output.
+installer/bin/
+installer/obj/
