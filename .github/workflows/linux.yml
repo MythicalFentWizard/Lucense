@@ -58,12 +58,18 @@ jobs:
           mkdir -p out
           cp desktop/build/compose/binaries/main/deb/*.deb out/
           cp desktop/build/compose/binaries/main/rpm/*.rpm out/
+          # The portable archive is the app image itself: its tools are made runnable before packing.
+          for tool in yt-dlp ffmpeg qjs spotdl; do chmod 755 "desktop/build/compose/binaries/main/app/Lucense/lib/app/resources/$tool"; done
           tar -C desktop/build/compose/binaries/main/app -czf "out/Lucense-$version-linux-x64.tar.gz" Lucense
           ls -la out
           dpkg-deb --info out/*.deb
           dpkg-deb --contents out/*.deb | grep -E "\.desktop|/bin/|resources/" | head -40
-          # The tools have to arrive able to run.
-          dpkg-deb --contents out/*.deb | grep -E "resources/(yt-dlp|ffmpeg|qjs|spotdl)$" | grep -c "^-rwxr-xr-x" | grep -qx 4
+          # The tools have to arrive able to run: the .rpm and .tar.gz carry it; the .deb's
+          # install script gives it (checked by installing it, below).
+          rpm -qlpv out/*.rpm | grep -E "resources/(yt-dlp|ffmpeg|qjs|spotdl)$"
+          rpm -qlpv out/*.rpm | grep -E "resources/(yt-dlp|ffmpeg|qjs|spotdl)$" | grep -c "^-rwxr-xr-x" | grep -qx 4
+          tar -tvzf out/*.tar.gz | grep -E "resources/(yt-dlp|ffmpeg|qjs|spotdl)$" | grep -c "^-rwxr-xr-x" | grep -qx 4
+          dpkg-deb --ctrl-tarfile out/*.deb | tar -xO ./postinst | grep -q "chmod 755"
 
       - uses: actions/upload-artifact@v4
         with:

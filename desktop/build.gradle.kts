@@ -241,20 +241,15 @@ val packageSetup by tasks.registering(Exec::class) {
     )
 }
 
-// The bundled tools are programs: on Linux they need permission to run, which
-// Compose's copy of them into the app image leaves behind (measured: rw-r--r--
-// in the .deb, and "Permission denied" running them). So it is given back on
-// the finished image, which the .deb and .rpm are then made from. ToolPaths
-// copies one that can't run somewhere it can be given it, but that is 300 MB
-// copied on first use.
-tasks.matching { it.name == "createDistributable" || it.name == "createReleaseDistributable" }.configureEach {
-    doLast {
-        if (!buildingOnLinux) return@doLast
-        val tools = setOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
-        outputs.files.forEach { root ->
-            root.walkTopDown()
-                .filter { it.isFile && it.name in tools && it.parentFile?.name == "resources" }
-                .forEach { it.setExecutable(true, false) }
-        }
-    }
+// The bundled tools are programs: on Linux they need permission to run, and
+// jpackage's own copy of them into the package leaves it behind (measured:
+// rw-r--r-- in the .deb, and "Permission denied" running them). So jpackage is
+// given its install scripts from packaging/linux: its own templates, with the
+// permission given back - in the .rpm as it is built, and by the .deb as it
+// installs. Compose clears its own resource folder as it runs, so this one is
+// passed after it, and the later --resource-dir is the one jpackage takes.
+tasks.matching { it.name in setOf("packageDeb", "packageRpm", "packageReleaseDeb", "packageReleaseRpm") }.configureEach {
+    (this as org.jetbrains.compose.desktop.application.tasks.AbstractJvmToolOperationTask).freeArgs.addAll(
+        "--resource-dir", layout.projectDirectory.dir("packaging/linux").asFile.absolutePath
+    )
 }
