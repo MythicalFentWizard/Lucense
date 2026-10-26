@@ -242,11 +242,19 @@ val packageSetup by tasks.registering(Exec::class) {
 }
 
 // The bundled tools are programs: on Linux they need permission to run, which
-// the copy into the app image otherwise leaves behind (measured: rw-r--r-- in
-// the .deb). ToolPaths copies one that can't run somewhere it can be given it,
-// but that is 300 MB copied on first use.
-tasks.matching { it.name == "prepareAppResources" }.configureEach {
-    (this as? AbstractCopyTask)?.eachFile {
-        if (name in setOf("yt-dlp", "ffmpeg", "qjs", "spotdl")) permissions { unix("rwxr-xr-x") }
+// Compose's copy of them into the app image leaves behind (measured: rw-r--r--
+// in the .deb, and "Permission denied" running them). So it is given back on
+// the finished image, which the .deb and .rpm are then made from. ToolPaths
+// copies one that can't run somewhere it can be given it, but that is 300 MB
+// copied on first use.
+tasks.matching { it.name == "createDistributable" || it.name == "createReleaseDistributable" }.configureEach {
+    doLast {
+        if (!buildingOnLinux) return@doLast
+        val tools = setOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
+        outputs.files.forEach { root ->
+            root.walkTopDown()
+                .filter { it.isFile && it.name in tools && it.parentFile?.name == "resources" }
+                .forEach { it.setExecutable(true, false) }
+        }
     }
 }

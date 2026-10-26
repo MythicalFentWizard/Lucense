@@ -62,6 +62,8 @@ jobs:
           ls -la out
           dpkg-deb --info out/*.deb
           dpkg-deb --contents out/*.deb | grep -E "\.desktop|/bin/|resources/" | head -40
+          # The tools have to arrive able to run.
+          dpkg-deb --contents out/*.deb | grep -E "resources/(yt-dlp|ffmpeg|qjs|spotdl)$" | grep -c "^-rwxr-xr-x" | grep -qx 4
 
       - uses: actions/upload-artifact@v4
         with:
