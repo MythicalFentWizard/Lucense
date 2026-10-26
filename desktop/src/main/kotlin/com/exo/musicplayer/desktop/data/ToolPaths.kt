@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.desktop.system.Platform
 import java.io.File
 
 /**
@@ -20,21 +21,32 @@ object ToolPaths {
             ?.let(::File)
             ?.takeIf { it.isDirectory }
 
-    private fun resolve(name: String): File {
+    private fun resolve(tool: String): File {
+        val name = Platform.program(tool)
         val updated = File(AppDirs.tools, name)
-        if (updated.isFile) return updated
-        bundledDir?.let { File(it, name) }?.takeIf { it.isFile }?.let { return it }
+        if (updated.isFile) return updated.also(::runnable)
+        bundledDir?.let { File(it, name) }?.takeIf { it.isFile }?.let { bundled ->
+            // On Linux a program can arrive without its permission to run, and the
+            // installed copy belongs to root; a copy that can run is made instead.
+            if (Platform.isWindows || bundled.canExecute()) return bundled
+            return makeUpdatable(name) ?: bundled
+        }
         // Returned even when missing so callers can report a path that makes
         // sense; every caller checks isFile first.
         return updated
     }
 
-    val ytDlp: File get() = resolve("yt-dlp.exe")
-    val ffmpeg: File get() = resolve("ffmpeg.exe")
-    val spotdl: File get() = resolve("spotdl.exe")
+    /** Lets [file] run, where that is a permission rather than a file name. */
+    private fun runnable(file: File) {
+        if (!Platform.isWindows && !file.canExecute()) file.setExecutable(true)
+    }
+
+    val ytDlp: File get() = resolve("yt-dlp")
+    val ffmpeg: File get() = resolve("ffmpeg")
+    val spotdl: File get() = resolve("spotdl")
 
     /** QuickJS, the JavaScript engine yt-dlp runs YouTube's challenges in. */
-    val qjs: File get() = resolve("qjs.exe")
+    val qjs: File get() = resolve("qjs")
 
     /** True once a writable copy exists, i.e. the tool can update itself. */
     fun isUpdatable(name: String): Boolean = File(AppDirs.tools, name).isFile
@@ -51,6 +63,7 @@ object ToolPaths {
         return runCatching {
             AppDirs.tools.mkdirs()
             source.copyTo(target, overwrite = true)
+            runnable(target)
             target
         }.getOrNull()
     }

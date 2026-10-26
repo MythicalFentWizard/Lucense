@@ -11,8 +11,11 @@
 // mirror. See tools/build.sh, which routes these hosts around the proxy.
 pluginManagement {
     repositories {
-        maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
-        maven("https://repo.huaweicloud.com/repository/maven/")
+        // Mirrors for this machine's connection; on GitHub's builders (CI set) they would only slow it down.
+        if (System.getenv("CI") == null) {
+            maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
+            maven("https://repo.huaweicloud.com/repository/maven/")
+        }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -22,8 +25,10 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
-        maven("https://repo.huaweicloud.com/repository/maven/")
+        if (System.getenv("CI") == null) {
+            maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
+            maven("https://repo.huaweicloud.com/repository/maven/")
+        }
         google()
         mavenCentral()
     }

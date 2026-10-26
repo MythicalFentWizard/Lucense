@@ -51,7 +51,28 @@ dependencies {
     // machine and is indistinguishable from a keylogger to antivirus software.
     implementation(libs.jna)
     implementation(libs.jna.platform)
+
+    // MPRIS on Linux: how the desktop hands a player its media keys and shows
+    // it in its media controls. Pure Java over the session bus's Unix socket.
+    implementation(libs.dbus.java.core)
+    implementation(libs.dbus.java.transport)
+
+    testImplementation(kotlin("test-junit5"))
 }
+
+tasks.test {
+    useJUnitPlatform()
+    // Linux's data folder, kept inside the build, so tests never touch anyone's own Lucense.
+    environment("XDG_DATA_HOME", layout.buildDirectory.dir("test-data").get().asFile.absolutePath)
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+/** The Linux build is made on Linux; jpackage only packages for the system it runs on. */
+val buildingOnLinux = System.getProperty("os.name").startsWith("Linux")
 
 compose.desktop {
     application {
@@ -95,8 +116,10 @@ compose.desktop {
         jvmArgs("-Dkotlinx.coroutines.io.parallelism=12")
 
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+            targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Lucense"
+            // The publisher Windows lists under Apps, and the .deb's maintainer.
+            vendor = "Lucense"
 
             windows {
                 // Shown by the installer, the Start menu, the taskbar and the
@@ -123,6 +146,11 @@ compose.desktop {
                 "java.net.http",    // WebSocket, to read the sign-in window's cookies
                 "jdk.unsupported"   // sun.misc.Unsafe, used by the audio SPIs
             )
+            if (buildingOnLinux) {
+                // D-Bus for MPRIS: its introspection is XML, it authenticates as
+                // the Unix user, and it reads the peer's credentials off the socket.
+                modules("java.xml", "jdk.security.auth", "jdk.net")
+            }
             // Drives the MSI ProductVersion, which is the whole of Windows'
             // upgrade logic: it has to increase for an installer to replace an
             // existing install instead of offering to remove it. jpackage
@@ -134,6 +162,24 @@ compose.desktop {
                 shortcut = true
                 // Stable UUID so upgrades replace rather than stack.
                 upgradeUuid = "6E3F1C42-6B7B-4C3E-9A1F-2B7D5E0A9C11"
+            }
+            linux {
+                // The package's name, and the start of its menu entry's:
+                // lucense-Lucense.desktop, which MPRIS names as the DesktopEntry.
+                packageName = "lucense"
+                iconFile.set(project.layout.projectDirectory.file("icons/lucense.png"))
+                shortcut = true
+                menuGroup = "AudioVideo;Audio;Player"
+                appCategory = "sound"
+                debMaintainer = "lucense@users.noreply.github.com"
+                rpmLicenseType = "MIT"
+                // In the "Open with" list for music files; the desktop asks before making it the default.
+                for ((extension, mime) in listOf(
+                    "mp3" to "audio/mpeg", "flac" to "audio/flac", "ogg" to "audio/ogg", "opus" to "audio/opus",
+                    "m4a" to "audio/mp4", "aac" to "audio/aac", "wav" to "audio/x-wav", "aiff" to "audio/x-aiff"
+                )) {
+                    fileAssociation(mimeType = mime, extension = extension, description = "Music")
+                }
             }
         }
     }
@@ -172,4 +218,43 @@ val fixMsiUpgradeSequence by tasks.registering(Exec::class) {
 
 listOf("packageMsi", "packageReleaseMsi").forEach { name ->
     tasks.matching { it.name == name }.configureEach { finalizedBy(fixMsiUpgradeSequence) }
+}
+
+// ---- The installer ---------------------------------------------------------
+//
+// Lucense-<version>-Setup.exe: Lucense's own installer window (installer/),
+// carrying the MSI and running it with Windows Installer's dialogs switched
+// off. The MSI is still made, and ships beside it for anyone who wants one.
+val packageSetup by tasks.registering(Exec::class) {
+    description = "Builds Lucense-<version>-Setup.exe: the installer with the MSI inside it."
+    group = "compose desktop"
+    dependsOn("packageMsi")
+    // After the MSI's upgrade repair, which finalises packageMsi.
+    mustRunAfter(fixMsiUpgradeSequence)
+    outputs.upToDateWhen { false }
+    val binaries = layout.buildDirectory.dir("compose/binaries/main").get().asFile
+    commandLine(
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        rootProject.layout.projectDirectory.file("tools/build-setup.ps1").asFile.absolutePath,
+        "-Msi", File(binaries, "msi/Lucense-$lucenseVersion.msi").absolutePath,
+        "-Out", File(binaries, "setup/Lucense-$lucenseVersion-Setup.exe").absolutePath
+    )
+}
+
+// The bundled tools are programs: on Linux they need permission to run, which
+// Compose's copy of them into the app image leaves behind (measured: rw-r--r--
+// in the .deb, and "Permission denied" running them). So it is given back on
+// the finished image, which the .deb and .rpm are then made from. ToolPaths
+// copies one that can't run somewhere it can be given it, but that is 300 MB
+// copied on first use.
+tasks.matching { it.name == "createDistributable" || it.name == "createReleaseDistributable" }.configureEach {
+    doLast {
+        if (!buildingOnLinux) return@doLast
+        val tools = setOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
+        outputs.files.forEach { root ->
+            root.walkTopDown()
+                .filter { it.isFile && it.name in tools && it.parentFile?.name == "resources" }
+                .forEach { it.setExecutable(true, false) }
+        }
+    }
 }

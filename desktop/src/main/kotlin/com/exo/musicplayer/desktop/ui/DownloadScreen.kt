@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import com.exo.musicplayer.desktop.system.Platform
 import androidx.compose.material.icons.filled.Refresh
 import com.exo.musicplayer.desktop.download.YouTubeSignIn
 import androidx.compose.foundation.background
@@ -431,7 +432,8 @@ private fun SignInPanel(controller: DesktopController) {
         )
         Spacer(Modifier.height(10.dp))
         SegmentedRow(
-            options = YouTubeSignIn.Source.entries,
+            // Opera GX is made for Windows only.
+            options = YouTubeSignIn.Source.entries.filter { Platform.isWindows || it != YouTubeSignIn.Source.OPERA_GX },
             selected = chosen,
             label = { it.label },
             onSelect = { controller.youtubeSignIn = it }

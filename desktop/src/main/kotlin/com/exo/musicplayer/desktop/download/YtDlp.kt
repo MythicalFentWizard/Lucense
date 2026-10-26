@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.download
 
+import com.exo.musicplayer.desktop.system.Platform
 import com.exo.musicplayer.data.download.DownloadFormat
 import com.exo.musicplayer.data.download.DownloadQuality
 import com.exo.musicplayer.data.download.YtDlpTidy
@@ -155,7 +156,7 @@ object YtDlp {
      */
     suspend fun update(onLine: (String) -> Unit): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val exe = ToolPaths.makeUpdatable("yt-dlp.exe")
+            val exe = ToolPaths.makeUpdatable(Platform.program("yt-dlp"))
                 ?: error("Couldn't find yt-dlp to update.")
             onLine("Updating ${exe.absolutePath}")
             val process = ProcessBuilder(listOf(exe.absolutePath, "-U") + NetworkProxy.ytDlpArgs())

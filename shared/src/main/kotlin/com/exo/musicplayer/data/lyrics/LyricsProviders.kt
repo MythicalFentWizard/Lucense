@@ -25,8 +25,13 @@ private val LYRIC_SPACES = Regex("""\s+""")
 private val LYRIC_ARTIST_SPLIT = Regex("""\s*(,|&|\bx\b|\bfeat\.?|\bft\.?)\s*""", RegexOption.IGNORE_CASE)
 
 class LyricsProviderChain(
-    private val providers: List<LyricsProvider>
+    private val providers: List<LyricsProvider>,
+    /** Whether the service by this name is to be asked; Settings can turn each off. */
+    private val isOn: (String) -> Boolean = { true }
 ) {
+    /** What the services are called, in the order they are asked. */
+    val labels: List<String> get() = providers.map { it.label }
+
     /**
      * Looks the song up as named, then by pieces of its name when that finds
      * nothing: downloaded files are often called "Artist - Song (Official
@@ -70,6 +75,7 @@ class LyricsProviderChain(
     ): Pair<LyricsFetch, String?> {
         var sawInstrumental = false
         for (provider in providers) {
+            if (!isOn(provider.label)) continue
             val result = runCatching { provider.fetch(title, artist, album, durationMs) }
                 .getOrElse { LyricsFetch.NotFound }
             when (result) {

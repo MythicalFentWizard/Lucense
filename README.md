@@ -1,7 +1,7 @@
 # Lucense
 
-A music player for **Android** and **Windows** that works on files you actually
-own, identifies songs it doesn't recognise, and asks no service for an account.
+A music player for **Windows**, **Linux** and **Android** that works on files you
+actually own, identifies songs it doesn't recognise, and asks no service for an account.
 
 It started as one workflow — *share a song from Telegram and it stays in your
 library* — and grew from there. Nothing in it requires a login, an API key, or a
@@ -15,13 +15,20 @@ subscription; every service it talks to is one that answers without them.
 
 | | file | needs |
 |---|---|---|
-| **Windows** | `Lucense-<version>.msi` | Windows 10 or 11, 64-bit. Java, yt-dlp, ffmpeg and spotdl come inside it — nothing else to install. |
+| **Windows** | `Lucense-<version>-Setup.exe` | Windows 10 or 11, 64-bit. Java, yt-dlp, ffmpeg and spotdl come inside it — nothing else to install. |
+| **Linux** | `lucense_<version>_amd64.deb`, `lucense-<version>-1.x86_64.rpm`, or `Lucense-<version>-linux-x64.tar.gz` | A 64-bit desktop Linux: Ubuntu 22.04, Debian 12, Fedora or newer. Everything comes inside it here too. |
 | **Android** | `Lucense-<version>.apk` | Android 7.0 or newer, on any phone or tablet. |
 
-- **Windows:** the installer isn't code-signed, so SmartScreen may say *Windows
-  protected your PC*. Press **More info → Run anyway**.
-- **Windows upgrades:** a newer `.msi` upgrades the one you already have, and your
+- **Windows:** `-Setup.exe` is Lucense's own installer: install or update in one
+  press, choose where it goes, and open Lucense at the end. It isn't code-signed,
+  so SmartScreen may say *Windows protected your PC*. Press **More info → Run
+  anyway**. The plain `.msi` is there too, for anyone who'd rather have one.
+- **Windows upgrades:** a newer installer updates the Lucense you have, and your
   library, playlists, ratings and play counts stay.
+- **Linux:** the `.deb` (Ubuntu, Debian, Mint, Pop!_OS) or `.rpm` (Fedora,
+  openSUSE) installs Lucense in the menu and in *Open with* for music files. The
+  `.tar.gz` runs from wherever it's unpacked: `Lucense/bin/Lucense`. The media
+  keys and the desktop's media controls work through MPRIS, as for any Linux player.
 - **Android:** `Lucense-<version>.apk` carries every kind of processor and installs
   anywhere. The smaller ones carry one each: `-arm64` for most phones of the last
   several years, `-armv7` for phones running 32-bit Android (many budget ones, even
@@ -82,8 +89,11 @@ Deezer is blocked in some countries: without it genres still work, and the
 page says what it couldn't reach. See [why not Every Noise itself](#why-discover-doesnt-use-every-noise-at-once).
 
 **Lyrics** come from four services in turn (LRCLIB, NetEase, lyrics.ovh, Genius),
-keeping timed LRC where it exists so they scroll in sync. If all four come up
-empty, you can paste them in yourself. Timed lyrics that run early or late can
+keeping timed LRC where it exists so they scroll in sync. Settings lists them
+with a tick each, and one unticked is never asked; the cover services have the
+same list (YouTube, iTunes, Deezer, Audius, Genius, MusicBrainz), so if you'd
+rather no song took a music video's still as its cover, untick YouTube. If all
+four lyrics services come up empty, you can paste them in yourself. Timed lyrics that run early or late can
 be moved a quarter-second at a time, and each song keeps its own setting.
 *Translate* puts the lyrics in your language under each line, the text can be
 selected and copied, and *Fullscreen* shows just the lyrics, big, over the
@@ -200,6 +210,10 @@ fav:   unplayed:   rating:4+   stars:<3   year:2015-2020   plays:0   added:30d
 
 Combine as many filters as you like. The last eight searches appear as chips
 when the box is empty.
+
+**Albums and Artists have a search of their own.** Type any part of a name, or of
+who it's by, in any order and with or without accents: `beyonce lemonade` finds
+*Lemonade*. On a phone, the search button searches whichever tab is open.
 
 You can sort by artist, title, album, length, times played, time listened, date
 added, rating or year. **J** (or *Playing* on Android) scrolls the list to
@@ -464,12 +478,21 @@ Requires a JDK 17+ and, for Android, the SDK (`tools/fetch-deps.sh` will vendor
 one if you'd rather not install it).
 
 ```bash
-# Once, to fetch the tools the Windows build bundles (~200 MB).
-bash tools/fetch-tools.sh
+# Once, to fetch the tools the desktop build bundles (~200 MB).
+bash tools/fetch-tools.sh          # Windows
+bash tools/fetch-tools.sh linux    # Linux
 
-# Windows app — runnable image, then an installer
+# Windows app — runnable image, the MSI, then Lucense-<version>-Setup.exe
+# (installer/, which needs the .NET SDK) with the MSI inside it
 bash tools/build.sh :desktop:createDistributable
 bash tools/build.sh :desktop:packageMsi
+bash tools/build.sh :desktop:packageSetup
+
+# Linux app, on Linux: .deb, .rpm and the runnable image
+gradle :desktop:packageDeb :desktop:packageRpm :desktop:createDistributable
+
+# Desktop tests; the Linux ones (MPRIS, Discord, the sign-in window) run on Linux only
+bash tools/build.sh :desktop:test
 
 # Android — the APKs that ship: app/build/outputs/apk/release/app-universal-release.apk,
 # and one per processor type (app-arm64-v8a-, app-armeabi-v7a-, app-x86_64-, app-x86-release.apk)
@@ -481,6 +504,12 @@ bash tools/build.sh :app:connectedDebugAndroidTest
 
 `tools/build.sh` wraps Gradle with per-host proxy routing, which matters on
 connections where some Maven mirrors are reachable and others aren't.
+
+jpackage only packages for the system it runs on, so the Linux packages are made
+by [`.github/workflows/linux.yml`](.github/workflows/linux.yml) on GitHub's Ubuntu
+22.04. It runs the tests there under a virtual display, a window manager and a
+session bus, then installs the `.deb` on clean Ubuntu 22.04 and 24.04 machines,
+runs the bundled tools, starts Lucense and takes a screenshot.
 
 The Android release build is shrunk by R8 and signed with the building
 machine's debug key, the key every published APK has carried, so each one

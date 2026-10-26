@@ -1,0 +1,140 @@
+# The Linux build. jpackage only packages for the system it runs on, so the
+# .deb, .rpm and portable .tar.gz are made here, on GitHub's Ubuntu, and then
+# installed on clean machines and started, as a person would.
+name: Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [riff-features]
+    paths:
+      - "desktop/**"
+      - "shared/**"
+      - "gradle/**"
+      - "gradle.properties"
+      - "settings.gradle.kts"
+      - "build.gradle.kts"
+      - "tools/fetch-tools.sh"
+      - ".github/workflows/linux.yml"
+
+jobs:
+  build:
+    # The oldest Ubuntu GitHub offers: what is built against its libraries runs on newer ones.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: What the tests and packages need
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb dbus-x11 playerctl rpm fakeroot openbox wmctrl
+
+      - name: The bundled tools, Linux builds
+        run: bash tools/fetch-tools.sh linux
+
+      # A session bus at a path, as a systemd desktop has one (dbus-run-session's
+      # is abstract, which Java's Unix sockets can't open), and a window manager.
+      - name: Tests (a display, a window manager and a session bus, as a desktop has)
+        run: |
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNNER_TEMP/session-bus"
+          dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+          xvfb-run -a bash -c 'openbox & sleep 2; gradle :desktop:test --console=plain'
+
+      - name: Packages
+        run: gradle :desktop:packageDeb :desktop:packageRpm :desktop:createDistributable --console=plain
+
+      - name: Portable archive
+        run: |
+          version=$(grep '^lucenseVersion=' gradle.properties | cut -d= -f2)
+          mkdir -p out
+          cp desktop/build/compose/binaries/main/deb/*.deb out/
+          cp desktop/build/compose/binaries/main/rpm/*.rpm out/
+          tar -C desktop/build/compose/binaries/main/app -czf "out/Lucense-$version-linux-x64.tar.gz" Lucense
+          ls -la out
+          dpkg-deb --info out/*.deb
+          dpkg-deb --contents out/*.deb | grep -E "\.desktop|/bin/|resources/" | head -40
+          # The tools have to arrive able to run.
+          dpkg-deb --contents out/*.deb | grep -E "resources/(yt-dlp|ffmpeg|qjs|spotdl)$" | grep -c "^-rwxr-xr-x" | grep -qx 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lucense-linux
+          path: out/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: desktop/build/reports/tests/
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucense-linux
+          path: out
+
+      # GitHub's Ubuntu is a server: no menu folders, which every desktop has and
+      # the package's setup puts Lucense in. Made here, as a desktop would have them.
+      - name: Install the .deb as a person would
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xdg-utils desktop-file-utils shared-mime-info
+          sudo mkdir -p /etc/xdg/menus /usr/share/applications /usr/share/desktop-directories
+          sudo apt-get install -y ./out/*.deb xvfb dbus-x11 playerctl imagemagick x11-utils
+          ls -la /opt/lucense/bin /opt/lucense/lib/app/resources
+
+      - name: The bundled tools run
+        run: |
+          r=/opt/lucense/lib/app/resources
+          ls -la "$r"
+          "$r/yt-dlp" --version
+          "$r/ffmpeg" -hide_banner -version | head -1
+          echo 'console.log("quickjs runs")' > /tmp/q.js && "$r/qjs" /tmp/q.js
+          "$r/spotdl" --version
+
+      - name: Start Lucense and look at it
+        run: |
+          cat > /tmp/smoke.sh <<'EOF'
+          set -x
+          /opt/lucense/bin/Lucense > /tmp/lucense.log 2>&1 &
+          pid=$!
+          sleep 45
+          xwininfo -root -tree | grep -i lucense || true
+          import -window root /tmp/lucense.png
+          playerctl -l || true
+          alive=0; kill -0 $pid && alive=1
+          kill $pid || true
+          sleep 3
+          echo "alive=$alive"
+          test $alive = 1
+          EOF
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNNER_TEMP/session-bus"
+          dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --fork
+          xvfb-run -a -s "-screen 0 1440x900x24" bash /tmp/smoke.sh
+          echo "---- log"; cat /tmp/lucense.log | tail -60
+          ls -la ~/.local/share/Lucense || true
+          ls -la ~/.local/share/Lucense/tools || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.os }}
+          path: |
+            /tmp/lucense.png
+            /tmp/lucense.log

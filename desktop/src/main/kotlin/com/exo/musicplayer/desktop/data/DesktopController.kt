@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.desktop.system.Platform
+import com.exo.musicplayer.desktop.system.Mpris
 import com.exo.musicplayer.desktop.ui.Glass
 import com.exo.musicplayer.desktop.download.OwnSignIn
 import com.exo.musicplayer.desktop.download.YouTubeAhead
@@ -280,7 +282,8 @@ class DesktopController(parent: CoroutineScope) {
             NeteaseLyricsProvider(),
             LyricsOvhProvider(),
             GeniusLyricsProvider()
-        )
+        ),
+        isOn = { label -> lyricsProviderOn(label) }
     )
 
     /**
@@ -349,6 +352,17 @@ class DesktopController(parent: CoroutineScope) {
         private set
 
     var query by mutableStateOf("")
+
+    /** What the Albums and Artists pages are searched for, each its own. */
+    var albumQuery by mutableStateOf("")
+    var artistQuery by mutableStateOf("")
+
+    fun collectionQuery(kind: CollectionKind): String = if (kind == CollectionKind.ALBUMS) albumQuery else artistQuery
+
+    fun searchCollection(kind: CollectionKind, text: String) {
+        if (kind == CollectionKind.ALBUMS) albumQuery = text else artistQuery = text
+    }
+
     // Ordering is remembered between sessions: each of these writes itself
     // into the settings as it changes, and is read back by name on the way in.
     private val sortState = mutableStateOf(
@@ -1553,6 +1567,80 @@ class DesktopController(parent: CoroutineScope) {
     private val mediaKeys = MediaKeys()
     private val mediaKeysState = mutableStateOf(settings.mediaKeys)
 
+    /** Covers handed to the Linux desktop, by song path: a file:// address, or blank for none or not yet. */
+    private val desktopCovers = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Linux's media keys and media controls: Lucense announced on D-Bus. Its
+     * calls arrive on a D-Bus thread and each hops to the UI thread.
+     */
+    private val mpris: Mpris? = if (!Platform.isLinux) null else Mpris(object : Mpris.Actions {
+        override fun playPause() { scope.launch { togglePlay() } }
+        override fun play() {
+            scope.launch { if (!engine.status.value.playing && engine.status.value.track != null) togglePlay() }
+        }
+        override fun pause() { scope.launch { if (engine.status.value.playing) togglePlay() } }
+        override fun next() { scope.launch { this@DesktopController.next() } }
+        override fun previous() { scope.launch { this@DesktopController.previous() } }
+        override fun stop() {
+            scope.launch {
+                engine.stop()
+                tellDiscord()
+            }
+        }
+        override fun seekTo(ms: Long) {
+            scope.launch {
+                engine.seekTo(ms)
+                tellDiscord()
+            }
+        }
+        override fun positionMs(): Long = engine.status.value.positionMs
+    })
+
+    /** Tells the Linux desktop what is playing, for its media controls; nothing elsewhere. */
+    private fun tellDesktopPlayer() {
+        val bus = mpris ?: return
+        val status = engine.status.value
+        val track = status.track
+        val key = track?.file?.absolutePath
+        val cover = key?.let { desktopCovers[it] }
+        bus.update(
+            Mpris.NowPlaying(
+                key = key,
+                title = track?.title,
+                artist = track?.displayArtist,
+                album = track?.album?.takeIf { it.isNotBlank() },
+                lengthMs = status.durationMs.takeIf { it > 0L } ?: track?.durationMs ?: 0L,
+                playing = status.playing,
+                artUrl = cover?.ifBlank { null }
+            ),
+            status.positionMs
+        )
+        if (track != null && key != null && cover == null) {
+            desktopCovers[key] = ""
+            scope.launch {
+                val file = withContext(Dispatchers.IO) { coverForDesktop(track) } ?: return@launch
+                desktopCovers[key] = file.toURI().toString()
+                if (engine.status.value.track?.file?.absolutePath == key) tellDesktopPlayer()
+            }
+        }
+    }
+
+    /**
+     * The song's cover as a file, for the desktop to show: one per song, as it
+     * keeps pictures by their address, and only the last few kept.
+     */
+    private suspend fun coverForDesktop(track: DesktopTrack): File? {
+        val bytes = Covers.bytes(track) ?: return null
+        val folder = File(AppDirs.root, "now-playing").apply { mkdirs() }
+        val png = bytes.size > 4 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte()
+        val file = File(folder, Integer.toHexString(track.file.absolutePath.hashCode()) + if (png) ".png" else ".jpg")
+        if (!file.isFile) file.writeBytes(bytes)
+        file.setLastModified(System.currentTimeMillis())
+        folder.listFiles()?.sortedByDescending { it.lastModified() }?.drop(DESKTOP_COVERS_KEPT)?.forEach { it.delete() }
+        return file
+    }
+
     var mediaKeysEnabled: Boolean
         get() = mediaKeysState.value
         set(value) {
@@ -1562,6 +1650,14 @@ class DesktopController(parent: CoroutineScope) {
         }
 
     private fun applyMediaKeys() {
+        mpris?.let { bus ->
+            if (!mediaKeysEnabled) {
+                bus.stop()
+            } else if (bus.start()) {
+                tellDesktopPlayer()
+            }
+            return
+        }
         if (!mediaKeysEnabled) {
             mediaKeys.unbind()
             return
@@ -2568,7 +2664,7 @@ class DesktopController(parent: CoroutineScope) {
                     )
                 }
             }
-            match.artworkUrl?.let { Covers.fetchAndStore(track, it, writeTags) }
+            coverOf(match)?.let { Covers.fetchAndStore(track, it, writeTags) }
             io { store.mark(track.file.absolutePath, "identifiedAt") }
             tab.status = "Applied \"${match.display}\" to ${track.file.name}."
             tab.busy = false
@@ -3031,6 +3127,37 @@ class DesktopController(parent: CoroutineScope) {
     /** The cover services, in the order they are normally asked. */
     val coverProviders: List<String> get() = libraryLookup.labels
 
+    /** The lyrics services, in the order they are asked. */
+    val lyricsProviders: List<String> get() = lyricsChain.labels
+
+    private val lyricsOffState = mutableStateOf(settings.lyricsProvidersOff)
+    private val coversOffState = mutableStateOf(settings.coverProvidersOff)
+
+    fun lyricsProviderOn(label: String): Boolean = label !in lyricsOffState.value
+
+    fun setLyricsProvider(label: String, on: Boolean) {
+        val next = if (on) lyricsOffState.value - label else lyricsOffState.value + label
+        lyricsOffState.value = next
+        settings.lyricsProvidersOff = next
+    }
+
+    /** Whether covers are taken from [label]; a source not in the list, like Shazam, always is. */
+    fun coverProviderOn(label: String?): Boolean = label == null || label !in coversOffState.value
+
+    fun setCoverProvider(label: String, on: Boolean) {
+        val next = if (on) coversOffState.value - label else coversOffState.value + label
+        coversOffState.value = next
+        settings.coverProvidersOff = next
+        // The one asked first can't be one that is off.
+        if (!on && coverProvider.equals(label, ignoreCase = true)) coverProvider = ""
+    }
+
+    /** The cover services that are on, with the preferred one asked first. */
+    private fun coverLookup() = libraryLookup.only { coverProviderOn(it) }.preferring(coverProvider)
+
+    /** [match]'s cover, unless it comes from a service turned off. */
+    private fun coverOf(match: MusicMatch): String? = match.artworkUrl?.takeIf { coverProviderOn(match.provider) }
+
     private val coverProviderState = mutableStateOf(settings.coverProvider)
 
     /** Which of them to ask first; blank asks them all in their usual order. */
@@ -3043,7 +3170,7 @@ class DesktopController(parent: CoroutineScope) {
 
     private suspend fun bulkCover(track: DesktopTrack): BulkOutcome {
         if (io { Covers.hasLocalArt(track) }) return BulkOutcome.ALREADY_HAD
-        val stored = libraryLookup.preferring(coverProvider).findArtwork(track.searchQuery) { url ->
+        val stored = coverLookup().findArtwork(track.searchQuery) { url ->
             Covers.fetchAndStore(track, url, writeTags).takeIf { it }?.also {
                 // Kept because Discord needs an address, not a local file.
                 io { store.saveCoverUrl(track.file.absolutePath, url) }
@@ -3122,7 +3249,7 @@ class DesktopController(parent: CoroutineScope) {
                 )
             }
         }
-        match.artworkUrl?.let { Covers.fetchAndStore(track, it, writeTags) }
+        coverOf(match)?.let { Covers.fetchAndStore(track, it, writeTags) }
         return true
     }
 
@@ -3837,6 +3964,9 @@ class DesktopController(parent: CoroutineScope) {
 
         /** Songs in a row that wouldn't stream before a list stops trying. */
         const val STREAM_FAILURES_TO_STOP = 3
+
+        /** Covers kept as files for the Linux desktop's media controls. */
+        const val DESKTOP_COVERS_KEPT = 20
 
         /** A kept YouTube address that plays nothing is read again only if it is at least this old. */
         const val READ_AGAIN_AFTER_MS = 30_000L
@@ -5047,7 +5177,7 @@ class DesktopController(parent: CoroutineScope) {
         scope.launch {
             val found = io { store.coverUrl(path) }
                 ?: runCatching {
-                    libraryLookup.searchAll(track.searchQuery, limitPer = 3)
+                    coverLookup().searchAll(track.searchQuery, limitPer = 3)
                         .firstNotNullOfOrNull { it.artworkUrl }
                 }.getOrNull()
             coverUrls[path] = found.orEmpty()
@@ -5075,6 +5205,7 @@ class DesktopController(parent: CoroutineScope) {
             image = track?.let { discordCoverUrl(it) },
             album = track?.album
         )
+        tellDesktopPlayer()
     }
 
     /** Whether the small always-on-top player is open. */

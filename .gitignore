@@ -15,6 +15,7 @@ captures/
 # committed: ffmpeg.exe alone is 139 MB, past GitHub's 100 MB file limit, and
 # it is an unmodified upstream GPL build that is better linked than vendored.
 desktop/resources/windows-x64/*.exe
+desktop/resources/linux-x64/*
 
 # Vendored Android SDK and the archives it was unpacked from. The folder name
 # contains a space, which is exactly why an "sdk/" rule silently missed it.
@@ -28,3 +29,7 @@ sdk files/
 .chain.sh
 .wait-both.sh
 .kotlin/
+
+# The installer's build output.
+installer/bin/
+installer/obj/

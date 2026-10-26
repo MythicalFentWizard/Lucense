@@ -322,6 +322,8 @@ private fun AppScaffold(
     val lyricsTerm by viewModel.lyricsTerm.collectAsStateWithLifecycle()
     val lyricsPattern by viewModel.lyricsPattern.collectAsStateWithLifecycle()
     val coverProvider by viewModel.coverProvider.collectAsStateWithLifecycle()
+    val lyricsProvidersOff by viewModel.lyricsProvidersOff.collectAsStateWithLifecycle()
+    val coverProvidersOff by viewModel.coverProvidersOff.collectAsStateWithLifecycle()
     val downloadProxy by viewModel.downloadProxy.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val discoverStack by discover.browser.stack.collectAsStateWithLifecycle()
@@ -985,6 +987,9 @@ private fun AppScaffold(
                                     lyricsPattern = lyricsPattern,
                                     coverProvider = coverProvider,
                                     coverProviders = viewModel.coverProviders,
+                                    lyricsProviders = viewModel.lyricsProviders,
+                                    lyricsProvidersOff = lyricsProvidersOff,
+                                    coverProvidersOff = coverProvidersOff,
                                     downloadProxy = downloadProxy,
                                     youtubeSignedIn = youtubeSignedIn,
                                     update = update
@@ -1001,6 +1006,8 @@ private fun AppScaffold(
                                     onLyricsTerm = viewModel::setLyricsTerm,
                                     onLyricsPattern = viewModel::setLyricsPattern,
                                     onCoverProvider = viewModel::setCoverProvider,
+                                    onLyricsProviderOn = viewModel::setLyricsProviderOn,
+                                    onCoverProviderOn = viewModel::setCoverProviderOn,
                                     onDownloadProxy = viewModel::setDownloadProxy,
                                     onYouTubeSignIn = { signingInToYouTube = true },
                                     onYouTubeCookieFile = { cookieFileLauncher.launchOrExplain(arrayOf("text/*", "*/*"), context) },

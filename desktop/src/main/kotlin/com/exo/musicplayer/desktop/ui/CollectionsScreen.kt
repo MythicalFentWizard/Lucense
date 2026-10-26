@@ -1,5 +1,7 @@
 package com.exo.musicplayer.desktop.ui
 
+import androidx.compose.material.icons.filled.Search
+import com.exo.musicplayer.data.NameSearch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -81,12 +83,26 @@ fun CollectionScreen(
     onClearDuplicates: (List<DesktopTrack>) -> Unit
 ) {
     val sort = if (kind == CollectionKind.ALBUMS) controller.albumSort else controller.artistSort
-    val groups = remember(controller.tracks, kind, sort) { TrackGroups.gather(kind, controller.tracks, sort) }
+    val all = remember(controller.tracks, kind, sort) { TrackGroups.gather(kind, controller.tracks, sort) }
+    val query = controller.collectionQuery(kind)
+    // An album by its name or who it's by; an artist by name. What is shown is what picking and merging act on.
+    val groups = remember(all, query) { if (query.isBlank()) all else all.filter { NameSearch.matches(query, it.name, it.artist) } }
     val picked = if (controller.pickedKind == kind) controller.pickedGroups else emptySet()
     val grid = remember(kind) { LazyGridState() }
 
     // A pick belongs to the page it was made on.
     DisposableEffect(kind) { onDispose { controller.clearPicked() } }
+
+    if (groups.isEmpty() && all.isNotEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            EmptyState(
+                icon = Icons.Default.Search,
+                title = "No ${kind.plural} match \"$query\"",
+                body = "Every word typed is looked for in the name and in who it's by."
+            )
+        }
+        return
+    }
 
     if (groups.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -119,6 +135,14 @@ fun CollectionScreen(
                     }
                 )
                 Spacer(Modifier.width(12.dp))
+                if (query.isNotBlank()) {
+                    Text(
+                        "${groups.size} of ${all.size} ${kind.plural}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.TextDim
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
                 if (picked.isNotEmpty()) {
                     Text(
                         "${picked.size} picked",

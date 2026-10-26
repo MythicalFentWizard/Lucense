@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.download
 
+import com.exo.musicplayer.desktop.system.Platform
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinReg
 import kotlinx.coroutines.CompletableDeferred
@@ -64,7 +65,8 @@ object OwnSignIn {
      * The default browser, as Windows opens a web link; Edge, or another
      * Chrome-family browser, when the default is one this can't use.
      */
-    fun browser(): Browser? = defaultBrowser() ?: fallback()
+    fun browser(): Browser? =
+        if (Platform.isWindows) defaultBrowser() ?: fallback() else linuxDefaultBrowser() ?: linuxFallback()
 
     private fun defaultBrowser(): Browser? = runCatching {
         val progId = Advapi32Util.registryGetStringValue(
@@ -91,8 +93,55 @@ object OwnSignIn {
         return candidates.firstNotNullOfOrNull { path -> programs.map { File(it, path) }.firstOrNull { it.isFile } }?.let(::describe)
     }
 
+    /**
+     * Linux's default browser: the menu entry xdg-settings names, and the
+     * program its Exec line starts. Null where there is none this can use - a
+     * Flatpak, whose browser can't be given a profile from outside it.
+     */
+    private fun linuxDefaultBrowser(): Browser? = runCatching {
+        val tool = Platform.onPath("xdg-settings") ?: return null
+        val process = ProcessBuilder(tool.path, "get", "default-web-browser").redirectErrorStream(true).start()
+        val entry = process.inputStream.bufferedReader().readText().trim()
+        process.waitFor(5, TimeUnit.SECONDS)
+        if (!entry.endsWith(".desktop")) return null
+        val home = System.getProperty("user.home")
+        val dataDirs = listOfNotNull(System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() } ?: "$home/.local/share") +
+            (System.getenv("XDG_DATA_DIRS")?.takeIf { it.isNotBlank() } ?: "/usr/local/share:/usr/share").split(':') +
+            listOf("/var/lib/snapd/desktop", "/var/lib/flatpak/exports/share", "$home/.local/share/flatpak/exports/share")
+        val desktopFile = dataDirs.map { File(it, "applications/$entry") }.firstOrNull { it.isFile } ?: return null
+        val exec = desktopFile.readLines().asSequence()
+            .dropWhile { it.trim() != "[Desktop Entry]" }
+            .firstOrNull { it.startsWith("Exec=") }
+            ?.removePrefix("Exec=") ?: return null
+        // The program: the first word that isn't env or a VARIABLE=value for it.
+        val program = exec.split(' ').map { it.trim('"') }
+            .firstOrNull { it.isNotBlank() && it != "env" && !it.contains('=') } ?: return null
+        val exe = if (program.startsWith("/")) File(program) else Platform.onPath(program) ?: return null
+        describe(exe)
+    }.getOrNull()
+
+    /** A Chrome-family browser or Firefox that is installed, when there is no default to use. */
+    private fun linuxFallback(): Browser? = listOf(
+        "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge",
+        "microsoft-edge-stable", "brave-browser", "brave", "vivaldi", "vivaldi-stable", "opera", "firefox"
+    ).firstNotNullOfOrNull { name -> Platform.onPath(name)?.let(::describe) }
+
+    /**
+     * Where [browser] keeps the sign-in window's profile. A snap browser can't
+     * reach hidden folders like Lucense's own, so it gets one in its own.
+     */
+    private fun profileFor(browser: Browser): File {
+        val path = browser.exe.path
+        if (Platform.isLinux && path.startsWith("/snap/")) {
+            val snap = path.removePrefix("/snap/bin/").substringBefore('/').substringBefore('.')
+            return File(System.getProperty("user.home"), "snap/$snap/common/lucense-sign-in")
+        }
+        return YouTubeSignIn.windowProfile
+    }
+
     /** What [exe] is, by its name and folder; null for a browser this can't read. */
     private fun describe(exe: File): Browser? {
+        if (!Platform.isWindows) return describeOnLinux(exe)
         val name = exe.nameWithoutExtension.lowercase()
         val where = exe.parentFile?.path.orEmpty().lowercase()
         return when {
@@ -108,6 +157,21 @@ object OwnSignIn {
                 File(exe.parentFile, "opera.exe").takeIf { it.isFile } ?: exe,
                 Family.CHROMIUM
             )
+            else -> null
+        }
+    }
+
+    private fun describeOnLinux(exe: File): Browser? {
+        if (!exe.isFile) return null
+        val name = exe.name.lowercase()
+        return when {
+            name.startsWith("firefox") -> Browser("Firefox", exe, Family.FIREFOX)
+            name.startsWith("microsoft-edge") || name == "msedge" -> Browser("Microsoft Edge", exe, Family.CHROMIUM)
+            name.startsWith("google-chrome") || name == "chrome" -> Browser("Chrome", exe, Family.CHROMIUM)
+            name.startsWith("chromium") -> Browser("Chromium", exe, Family.CHROMIUM)
+            name.startsWith("brave") -> Browser("Brave", exe, Family.CHROMIUM)
+            name.startsWith("vivaldi") -> Browser("Vivaldi", exe, Family.CHROMIUM)
+            name.startsWith("opera") -> Browser("Opera", exe, Family.CHROMIUM)
             else -> null
         }
     }
@@ -137,7 +201,7 @@ object OwnSignIn {
         val browser = browser() ?: return@withContext Outcome.Failed(
             "No browser was found to sign in with. Use a cookies.txt file instead."
         )
-        val profile = YouTubeSignIn.windowProfile
+        val profile = profileFor(browser)
         if (profile.exists()) endProcessesUsing(profile)
         profile.deleteRecursively()
         profile.mkdirs()
@@ -173,7 +237,10 @@ object OwnSignIn {
             while (window.open()) {
                 if (stopRequested) return Outcome.Stopped
                 if (doneRequested) {
-                    onStatus("Closing ${browser.name}…")
+                    onStatus(
+                        if (Platform.isWindows) "Closing ${browser.name}…"
+                        else "Saving the sign-in: this takes about half a minute. Closing the ${browser.name} window yourself is quicker."
+                    )
                     window.closeGently()
                     break
                 }
@@ -364,6 +431,7 @@ object OwnSignIn {
                     add("--no-first-run")
                     add("--no-default-browser-check")
                     add("--disable-sync")
+                    if (Platform.isLinux) add("--password-store=basic")
                     if (hidden) {
                         add("--headless=new")
                         // Off the screen, for a browser that starts a window all the same.
@@ -415,7 +483,8 @@ object OwnSignIn {
      */
     class PlainWindow private constructor(private val profile: File) {
 
-        fun open(): Boolean = File(profile, "lockfile").exists()
+        /** On Windows the browser holds a lockfile in its profile while it runs; on Linux its processes say. */
+        fun open(): Boolean = if (Platform.isWindows) File(profile, "lockfile").exists() else processesUsing(profile).isNotEmpty()
 
         /**
          * Asks the browser to close, as its own close button would, so it saves
@@ -423,6 +492,16 @@ object OwnSignIn {
          */
         suspend fun closeGently() {
             withContext(Dispatchers.IO) {
+                if (!Platform.isWindows) {
+                    // Chrome writes its cookies down every 30 seconds, and when its window is
+                    // closed, but not when it is told to quit (SIGTERM): measured, a cookie a
+                    // second old was lost that way, and one 32 seconds old kept. So it is given
+                    // that long to close by hand or write them down, and only then told.
+                    withTimeoutOrNull(LINUX_SAVE_MS) { while (open()) delay(250) }
+                    processesUsing(profile).filter { it.second.none { arg -> arg.startsWith("--type=") } }
+                        .forEach { (pid, _) -> ProcessHandle.of(pid).ifPresent { it.destroy() } }
+                    return@withContext
+                }
                 runCatching {
                     val path = profile.absolutePath.replace("'", "''")
                     ProcessBuilder(
@@ -446,6 +525,8 @@ object OwnSignIn {
                     add("--no-first-run")
                     add("--no-default-browser-check")
                     add("--disable-sync")
+                    // A profile thrown away afterwards needs no keyring, and asking to unlock one would only get in the way.
+                    if (Platform.isLinux) add("--password-store=basic")
                     if (offscreen) add("--window-position=-4000,-4000")
                     proxy?.let { add("--proxy-server=" + it.replace("socks5h://", "socks5://").replace("socks4a://", "socks4://")) }
                     add("--new-window")
@@ -501,6 +582,7 @@ object OwnSignIn {
          * the browser is followed by the lock it holds on its profile instead.
          */
         override suspend fun open(): Boolean = process.isAlive || withContext(Dispatchers.IO) {
+            if (!Platform.isWindows) return@withContext processesUsing(profile).isNotEmpty()
             val lock = File(profile, "parent.lock")
             lock.isFile && runCatching { java.io.RandomAccessFile(lock, "rw").close() }.isFailure
         }
@@ -560,8 +642,29 @@ object OwnSignIn {
         }
     }
 
+    /**
+     * The processes started with [profile] in their command line, and their
+     * arguments, read from /proc. Linux only; this one isn't among them.
+     */
+    private fun processesUsing(profile: File): List<Pair<Long, List<String>>> {
+        val path = profile.absolutePath
+        val self = ProcessHandle.current().pid()
+        return File("/proc").listFiles { file -> file.name.all(Char::isDigit) }.orEmpty().mapNotNull { folder ->
+            val pid = folder.name.toLongOrNull() ?: return@mapNotNull null
+            if (pid == self) return@mapNotNull null
+            val args = runCatching { File(folder, "cmdline").readBytes() }.getOrNull()
+                ?.toString(Charsets.UTF_8)?.split('\u0000')?.filter { it.isNotEmpty() } ?: return@mapNotNull null
+            if (args.none { path in it }) return@mapNotNull null
+            pid to args
+        }
+    }
+
     /** Ends whatever is still running with [profile] - a browser left behind by its launcher. */
     private fun endProcessesUsing(profile: File) {
+        if (!Platform.isWindows) {
+            processesUsing(profile).forEach { (pid, _) -> ProcessHandle.of(pid).ifPresent { it.destroyForcibly() } }
+            return
+        }
         runCatching {
             val path = profile.absolutePath.replace("'", "''")
             ProcessBuilder(
@@ -611,5 +714,8 @@ object OwnSignIn {
     private const val CALL_TIMEOUT_MS = 5_000L
     private const val STARTUP_MS = 30_000L
     private const val CLOSE_MS = 15_000L
+
+    /** Chrome writes its cookies down every 30 seconds; a little over that. */
+    private const val LINUX_SAVE_MS = 32_000L
     private const val GIVE_UP_MS = 30L * 60 * 1000
 }

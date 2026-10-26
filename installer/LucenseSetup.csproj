@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lucense's installer: its own window in front of the MSI, which it runs
+    silently. .NET Framework 4.7.2 is part of every Windows 10 and 11, so the
+    installer needs nothing installed first and stays a couple of hundred KB.
+    tools/build-setup.ps1 builds it and appends the MSI to it.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Lucense-Setup</AssemblyName>
+    <RootNamespace>LucenseSetup</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- dotnet build -p:Preview=true: the same installer without asking for administrator rights, for pictures and trials. -->
+    <ApplicationManifest Condition="'$(Preview)' == 'true'">preview.manifest</ApplicationManifest>
+    <OutputPath Condition="'$(Preview)' == 'true'">bin\Preview\</OutputPath>
+    <ApplicationIcon>lucense.ico</ApplicationIcon>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Product>Lucense</Product>
+    <Company>Lucense</Company>
+    <AssemblyTitle>Lucense Setup</AssemblyTitle>
+    <Description>Installs Lucense</Description>
+    <Copyright>MIT License</Copyright>
+    <Version>1.0.0</Version>
+    <DebugType>none</DebugType>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\lucense-256.png" />
+  </ItemGroup>
+
+</Project>

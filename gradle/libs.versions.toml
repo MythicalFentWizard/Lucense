@@ -11,6 +11,8 @@ room = "2.6.1"
 coil = "2.7.0"
 ytdlp = "0.18.1"
 desugarJdkLibs = "2.1.2"
+# MPRIS on Linux: the desktop's media keys and media controls.
+dbusJava = "5.2.2"
 composeMultiplatform = "1.7.3"
 # Backdrop blur for the Windows glass look; 1.2.2 is the one built on Compose 1.7.3.
 haze = "1.2.2"
@@ -54,6 +56,8 @@ vorbisspi = { group = "com.googlecode.soundlibs", name = "vorbisspi", version.re
 jflac = { group = "org.jflac", name = "jflac-codec", version.ref = "jflac" }
 jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 jna-platform = { group = "net.java.dev.jna", name = "jna-platform", version.ref = "jna" }
+dbus-java-core = { group = "com.github.hypfvieh", name = "dbus-java-core", version.ref = "dbusJava" }
+dbus-java-transport = { group = "com.github.hypfvieh", name = "dbus-java-transport-native-unixsocket", version.ref = "dbusJava" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugarJdkLibs" }
 ytdlp-library = { group = "io.github.junkfood02.youtubedl-android", name = "library", version.ref = "ytdlp" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version = "1.6.2" }

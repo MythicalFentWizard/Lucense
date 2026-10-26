@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.library
 
+import com.exo.musicplayer.data.NameSearch
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -193,10 +194,10 @@ fun LibraryScreen(
         Column(Modifier.fillMaxSize()) {
             if (openGroup == null) Column(Modifier.onSizeChanged { headerHeight = it.height }) {
                 Header(
+                    // Searches the tab that is open: songs, albums or artists.
                     onSearch = {
                         searchOpen = !searchOpen
                         if (!searchOpen) onQueryChange("")
-                        if (searchOpen && view != LibraryView.SONGS) onViewChange(LibraryView.SONGS)
                     },
                     searchOpen = searchOpen,
                     onAddFiles = onAddFiles,
@@ -205,7 +206,7 @@ fun LibraryScreen(
                     onOpenTools = onOpenTools,
                     onOpenSettings = onOpenSettings
                 )
-                if (!searchOpen) {
+                run {
                     SingleChoiceSegmentedButtonRow(
                         Modifier
                             .fillMaxWidth()
@@ -239,7 +240,7 @@ fun LibraryScreen(
             }
 
             when {
-                searchOpen || view == LibraryView.SONGS -> SongsView(
+                view == LibraryView.SONGS -> SongsView(
                     tracks = tracks,
                     shown = shown,
                     searching = searching,
@@ -261,6 +262,9 @@ fun LibraryScreen(
 
                 view == LibraryView.ALBUMS -> GroupGrid(
                     groups = albums,
+                    query = query.takeIf { searchOpen }.orEmpty(),
+                    searchOpen = searchOpen,
+                    onQueryChange = onQueryChange,
                     isAlbum = true,
                     sort = albumSort,
                     onSortChange = onAlbumSortChange,
@@ -270,6 +274,9 @@ fun LibraryScreen(
 
                 else -> GroupGrid(
                     groups = artists,
+                    query = query.takeIf { searchOpen }.orEmpty(),
+                    searchOpen = searchOpen,
+                    onQueryChange = onQueryChange,
                     isAlbum = false,
                     sort = artistSort,
                     onSortChange = onArtistSortChange,
@@ -517,20 +524,48 @@ private fun <T> SortChip(
 @Composable
 private fun GroupGrid(
     groups: List<TrackGroup>,
+    query: String,
+    searchOpen: Boolean,
+    onQueryChange: (String) -> Unit,
     isAlbum: Boolean,
     sort: GroupSort,
     onSortChange: (GroupSort) -> Unit,
     onOpen: (TrackGroup) -> Unit,
     emptyNote: String
 ) {
+    val all = groups
+    // An album by its name or who it's by; an artist by name.
+    val shown = remember(all, query) { if (query.isBlank()) all else all.filter { NameSearch.matches(query, it.name, it.subtitle) } }
+    val focus = remember { FocusRequester() }
+    AnimatedVisibility(visible = searchOpen) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            placeholder = { Text(if (isAlbum) "Albums, or who they're by" else "Artists") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = if (query.isNotEmpty()) {
+                { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear search") } }
+            } else null,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .focusRequester(focus)
+        )
+    }
+    LaunchedEffect(searchOpen) { if (searchOpen) runCatching { focus.requestFocus() } }
+    @Suppress("NAME_SHADOWING") val groups = shown
     Row(
         Modifier
             .fillMaxWidth()
             .padding(start = 20.dp, end = 8.dp, top = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        val noun = if (isAlbum) (if (all.size == 1) "album" else "albums") else (if (all.size == 1) "artist" else "artists")
         Text(
-            text = "${groups.size} ${if (isAlbum) (if (groups.size == 1) "album" else "albums") else (if (groups.size == 1) "artist" else "artists")}",
+            text = if (query.isBlank()) "${all.size} $noun" else "${groups.size} of ${all.size} $noun",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f)
@@ -544,7 +579,7 @@ private fun GroupGrid(
     }
     if (groups.isEmpty()) {
         Text(
-            emptyNote,
+            if (all.isNotEmpty()) "Nothing matches \"$query\"." else emptyNote,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
