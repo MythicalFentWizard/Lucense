@@ -16,7 +16,7 @@ subscription; every service it talks to is one that answers without them.
 | | file | needs |
 |---|---|---|
 | **Windows** | `Lucense-<version>-Setup.exe` | Windows 10 or 11, 64-bit. Java, yt-dlp, ffmpeg and spotdl come inside it — nothing else to install. |
-| **Linux** | `lucense_<version>-1_amd64.deb`, `lucense-<version>-1.x86_64.rpm`, or `Lucense-<version>-linux-x64.tar.gz` | A 64-bit desktop Linux: Ubuntu 22.04, Debian 12, Fedora or newer. Everything comes inside it here too. |
+| **Linux** | `lucense_<version>_amd64.deb`, `lucense-<version>-1.x86_64.rpm`, or `Lucense-<version>-linux-x64.tar.gz` | A 64-bit desktop Linux: Ubuntu 22.04, Debian 12, Fedora or newer. Everything comes inside it here too. |
 | **Android** | `Lucense-<version>.apk` | Android 7.0 or newer, on any phone or tablet. |
 
 - **Windows:** `-Setup.exe` is Lucense's own installer: install or update in one

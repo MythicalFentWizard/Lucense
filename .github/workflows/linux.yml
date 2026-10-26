@@ -87,9 +87,13 @@ jobs:
           name: lucense-linux
           path: out
 
+      # GitHub's Ubuntu is a server: no menu folders, which every desktop has and
+      # the package's setup puts Lucense in. Made here, as a desktop would have them.
       - name: Install the .deb as a person would
         run: |
           sudo apt-get update
+          sudo apt-get install -y xdg-utils desktop-file-utils shared-mime-info
+          sudo mkdir -p /etc/xdg/menus /usr/share/applications /usr/share/desktop-directories
           sudo apt-get install -y ./out/*.deb xvfb dbus-x11 playerctl imagemagick x11-utils
           ls -la /opt/lucense/bin /opt/lucense/lib/app/resources
 

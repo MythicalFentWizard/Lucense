@@ -118,6 +118,8 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Lucense"
+            // The publisher Windows lists under Apps, and the .deb's maintainer.
+            vendor = "Lucense"
 
             windows {
                 // Shown by the installer, the Start menu, the taskbar and the
@@ -169,7 +171,7 @@ compose.desktop {
                 shortcut = true
                 menuGroup = "AudioVideo;Audio;Player"
                 appCategory = "sound"
-                debMaintainer = "Lucense <lucense@users.noreply.github.com>"
+                debMaintainer = "lucense@users.noreply.github.com"
                 rpmLicenseType = "MIT"
                 // In the "Open with" list for music files; the desktop asks before making it the default.
                 for ((extension, mime) in listOf(
@@ -237,4 +239,14 @@ val packageSetup by tasks.registering(Exec::class) {
         "-Msi", File(binaries, "msi/Lucense-$lucenseVersion.msi").absolutePath,
         "-Out", File(binaries, "setup/Lucense-$lucenseVersion-Setup.exe").absolutePath
     )
+}
+
+// The bundled tools are programs: on Linux they need permission to run, which
+// the copy into the app image otherwise leaves behind (measured: rw-r--r-- in
+// the .deb). ToolPaths copies one that can't run somewhere it can be given it,
+// but that is 300 MB copied on first use.
+tasks.matching { it.name == "prepareAppResources" }.configureEach {
+    (this as? AbstractCopyTask)?.eachFile {
+        if (name in setOf("yt-dlp", "ffmpeg", "qjs", "spotdl")) permissions { unix("rwxr-xr-x") }
+    }
 }
