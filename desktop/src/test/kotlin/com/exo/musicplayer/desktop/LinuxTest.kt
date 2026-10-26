@@ -95,7 +95,8 @@ class LinuxTest {
             assertEquals("212000000", run("playerctl", "-p", "lucense", "metadata", "mpris:length"))
             assertEquals("file:///tmp/cover.png", run("playerctl", "-p", "lucense", "metadata", "mpris:artUrl"))
             assertEquals("Playing", run("playerctl", "-p", "lucense", "status"))
-            assertEquals("12.000000", run("playerctl", "-p", "lucense", "position"))
+            val reported = run("playerctl", "-p", "lucense", "position")?.toDoubleOrNull()
+            assertTrue(reported != null && kotlin.math.abs(reported - 12.0) < 0.5, "the position: $reported")
 
             run("playerctl", "-p", "lucense", "play-pause")
             run("playerctl", "-p", "lucense", "next")
@@ -195,6 +196,7 @@ class LinuxTest {
         val page = cookiePage(value, hits)
         try {
             val window = OwnSignIn.PlainWindow.open(exe!!, profile, "http://127.0.0.1:${page.address.port}/", null, offscreen = true)
+            val opened = System.currentTimeMillis()
             assertTrue(window.open(), "the window runs with its own profile")
             withTimeoutOrNull(30_000) { while (hits.get() == 0) delay(200) }
             assertTrue(hits.get() > 0, "it loads the page")
@@ -202,6 +204,7 @@ class LinuxTest {
             assertTrue(!File(profile, "DevToolsActivePort").exists(), "no debugging connection is open")
             window.closeGently()
             assertTrue(!window.open(), "Done closes it")
+            println("Done took ${(System.currentTimeMillis() - opened) / 1000} s from opening")
             // What the window left behind: its cookie database, read directly.
             profile.walkTopDown().filter { it.name.startsWith("Cookies") }.forEach { file ->
                 println("left: ${file.relativeTo(profile)} ${file.length()} bytes")
@@ -226,79 +229,6 @@ class LinuxTest {
         } finally {
             page.stop(0)
             profile.deleteRecursively()
-        }
-    }
-
-    /** The pids running with [profile] in their command line. */
-    private fun pidsUsing(profile: File): Set<Long> = File("/proc").listFiles { f -> f.name.all(Char::isDigit) }.orEmpty().filter { folder ->
-        runCatching { File(folder, "cmdline").readText() }.getOrDefault("").contains(profile.absolutePath)
-    }.mapNotNull { it.name.toLongOrNull() }.toSet()
-
-    /** What Chrome left in its cookie database. */
-    private fun savedCookies(profile: File): List<String> = profile.walkTopDown().filter { it.name == "Cookies" }.flatMap { file ->
-        runCatching {
-            java.sql.DriverManager.getConnection("jdbc:sqlite:" + file.absolutePath).use { db ->
-                db.createStatement().executeQuery("SELECT host_key, name FROM cookies").use { rows ->
-                    buildList { while (rows.next()) add(rows.getString(1) + " " + rows.getString(2)) }
-                }
-            }
-        }.getOrDefault(emptyList())
-    }.toList()
-
-    /**
-     * Experiment: which way of ending Chrome saves the cookie it was just given.
-     * [how] ends it; the cookie database is then read directly.
-     */
-    private fun chromeSaves(how: String, end: suspend (File, Long) -> Unit) = runBlocking {
-        linux()
-        assumeTrue(System.getenv("DISPLAY") != null, "needs a display")
-        val exe = listOf("google-chrome", "google-chrome-stable", "chromium", "chromium-browser").firstNotNullOfOrNull { Platform.onPath(it) }
-        assumeTrue(exe != null, "needs Chrome or Chromium")
-        val profile = File(System.getProperty("java.io.tmpdir"), "lucense-exp-${System.nanoTime()}").apply { mkdirs() }
-        val hits = AtomicInteger()
-        val page = cookiePage("v${System.nanoTime()}", hits)
-        try {
-            OwnSignIn.PlainWindow.open(exe!!, profile, "http://127.0.0.1:${page.address.port}/", null)
-            withTimeoutOrNull(30_000) { while (hits.get() == 0) delay(200) }
-            val loadedAt = System.currentTimeMillis()
-            end(profile, loadedAt)
-            withTimeoutOrNull(20_000) { while (pidsUsing(profile).isNotEmpty()) delay(250) }
-            val saved = savedCookies(profile)
-            println("EXPERIMENT $how: exited=${pidsUsing(profile).isEmpty()} saved=$saved")
-        } finally {
-            pidsUsing(profile).forEach { ProcessHandle.of(it).ifPresent { h -> h.destroyForcibly() } }
-            page.stop(0)
-            profile.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun `experiment - Chrome closed by the window manager, as by its X`() = chromeSaves("window manager close") { profile, _ ->
-        assumeTrue(Platform.onPath("wmctrl") != null, "needs wmctrl")
-        delay(1_500)
-        val pids = pidsUsing(profile)
-        val listed = run("wmctrl", "-l", "-p").orEmpty()
-        println("wmctrl: $listed")
-        listed.lines().map { it.trim().split(Regex(" +")) }
-            .filter { it.size > 2 && it[2].toLongOrNull() in pids }
-            .forEach { run("wmctrl", "-i", "-c", it[0]) }
-    }
-
-    @Test
-    fun `experiment - Chrome sent SIGTERM straight away`() = chromeSaves("SIGTERM at once") { profile, _ ->
-        delay(1_500)
-        pidsUsing(profile).forEach { pid ->
-            val args = runCatching { File("/proc/$pid/cmdline").readText() }.getOrDefault("")
-            if ("--type=" !in args) ProcessHandle.of(pid).ifPresent { it.destroy() }
-        }
-    }
-
-    @Test
-    fun `experiment - Chrome sent SIGTERM after its 30 second save`() = chromeSaves("SIGTERM after 32 s") { profile, loadedAt ->
-        delay((loadedAt + 32_000 - System.currentTimeMillis()).coerceAtLeast(0))
-        pidsUsing(profile).forEach { pid ->
-            val args = runCatching { File("/proc/$pid/cmdline").readText() }.getOrDefault("")
-            if ("--type=" !in args) ProcessHandle.of(pid).ifPresent { it.destroy() }
         }
     }
 

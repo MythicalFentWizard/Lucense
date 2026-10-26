@@ -237,7 +237,10 @@ object OwnSignIn {
             while (window.open()) {
                 if (stopRequested) return Outcome.Stopped
                 if (doneRequested) {
-                    onStatus("Closing ${browser.name}…")
+                    onStatus(
+                        if (Platform.isWindows) "Closing ${browser.name}…"
+                        else "Saving the sign-in: this takes about half a minute. Closing the ${browser.name} window yourself is quicker."
+                    )
                     window.closeGently()
                     break
                 }
@@ -490,7 +493,11 @@ object OwnSignIn {
         suspend fun closeGently() {
             withContext(Dispatchers.IO) {
                 if (!Platform.isWindows) {
-                    // SIGTERM, which Chrome-family browsers and Firefox take as quit: they save, then go.
+                    // Chrome writes its cookies down every 30 seconds, and when its window is
+                    // closed, but not when it is told to quit (SIGTERM): measured, a cookie a
+                    // second old was lost that way, and one 32 seconds old kept. So it is given
+                    // that long to close by hand or write them down, and only then told.
+                    withTimeoutOrNull(LINUX_SAVE_MS) { while (open()) delay(250) }
                     processesUsing(profile).filter { it.second.none { arg -> arg.startsWith("--type=") } }
                         .forEach { (pid, _) -> ProcessHandle.of(pid).ifPresent { it.destroy() } }
                     return@withContext
@@ -707,5 +714,8 @@ object OwnSignIn {
     private const val CALL_TIMEOUT_MS = 5_000L
     private const val STARTUP_MS = 30_000L
     private const val CLOSE_MS = 15_000L
+
+    /** Chrome writes its cookies down every 30 seconds; a little over that. */
+    private const val LINUX_SAVE_MS = 32_000L
     private const val GIVE_UP_MS = 30L * 60 * 1000
 }
