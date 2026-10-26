@@ -77,7 +77,9 @@ class LinuxTest {
             override fun seekTo(ms: Long) { calls += "seekTo $ms"; position = ms }
             override fun positionMs(): Long = position
         })
-        assertTrue(mpris.start(), "announced on the session bus")
+        val started = mpris.start()
+        mpris.problem?.printStackTrace()
+        assertTrue(started, "announced on the session bus: ${mpris.problem}")
         try {
             mpris.update(
                 Mpris.NowPlaying(
@@ -200,9 +202,22 @@ class LinuxTest {
             assertTrue(!File(profile, "DevToolsActivePort").exists(), "no debugging connection is open")
             window.closeGently()
             assertTrue(!window.open(), "Done closes it")
+            // What the window left behind: its cookie database, read directly.
+            profile.walkTopDown().filter { it.name.startsWith("Cookies") }.forEach { file ->
+                println("left: ${file.relativeTo(profile)} ${file.length()} bytes")
+                if (file.name == "Cookies") runCatching {
+                    java.sql.DriverManager.getConnection("jdbc:sqlite:" + file.absolutePath).use { db ->
+                        db.createStatement().executeQuery("SELECT host_key, name FROM cookies").use { rows ->
+                            while (rows.next()) println("  cookie ${rows.getString(1)} ${rows.getString(2)}")
+                        }
+                    }
+                }.onFailure { println("  unreadable: $it") }
+            }
 
             val reader = OwnSignIn.ChromiumWindow.open(exe, profile, "about:blank", null, hidden = true)
-            val cookies = reader.cookies().orEmpty()
+            val answered = reader.cookies()
+            println("the reader answered: ${answered?.size ?: "nothing"}")
+            val cookies = answered.orEmpty()
             reader.close()
             val found = cookies.firstOrNull { "\tlucensecheck\t" in it }
             assertTrue(found?.endsWith("\t$value") == true, "the reader finds the cookie: ${found ?: "${cookies.size} cookies, not it"}")

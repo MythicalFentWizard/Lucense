@@ -58,6 +58,10 @@ class Mpris(private val actions: Actions) {
     /** Whether the desktop can see Lucense. */
     val running: Boolean get() = connection != null
 
+    /** Why the last start didn't work, or null. */
+    @Volatile var problem: Throwable? = null
+        private set
+
     /** Announces Lucense on the session bus; false where there is none to announce on. */
     @Synchronized
     fun start(): Boolean {
@@ -73,7 +77,7 @@ class Mpris(private val actions: Actions) {
             bus.exportObject(PATH, Exported())
             connection = bus
             name
-        }.isSuccess
+        }.onFailure { problem = it }.onSuccess { problem = null }.isSuccess
     }
 
     @Synchronized
