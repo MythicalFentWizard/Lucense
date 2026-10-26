@@ -28,8 +28,12 @@ class LyricsRepository(context: Context, private val prefs: AppPrefs) {
             NeteaseLyricsProvider(),
             LyricsOvhProvider(),
             GeniusLyricsProvider()
-        )
+        ),
+        isOn = { label -> label !in prefs.lyricsProvidersOff.value }
     )
+
+    /** The lyrics services, in the order they are asked, for Settings. */
+    val providers: List<String> get() = chain.labels
 
     fun observe(trackId: Long): Flow<Lyrics?> = dao.observe(trackId)
 

@@ -282,7 +282,8 @@ class DesktopController(parent: CoroutineScope) {
             NeteaseLyricsProvider(),
             LyricsOvhProvider(),
             GeniusLyricsProvider()
-        )
+        ),
+        isOn = { label -> lyricsProviderOn(label) }
     )
 
     /**
@@ -2652,7 +2653,7 @@ class DesktopController(parent: CoroutineScope) {
                     )
                 }
             }
-            match.artworkUrl?.let { Covers.fetchAndStore(track, it, writeTags) }
+            coverOf(match)?.let { Covers.fetchAndStore(track, it, writeTags) }
             io { store.mark(track.file.absolutePath, "identifiedAt") }
             tab.status = "Applied \"${match.display}\" to ${track.file.name}."
             tab.busy = false
@@ -3115,6 +3116,37 @@ class DesktopController(parent: CoroutineScope) {
     /** The cover services, in the order they are normally asked. */
     val coverProviders: List<String> get() = libraryLookup.labels
 
+    /** The lyrics services, in the order they are asked. */
+    val lyricsProviders: List<String> get() = lyricsChain.labels
+
+    private val lyricsOffState = mutableStateOf(settings.lyricsProvidersOff)
+    private val coversOffState = mutableStateOf(settings.coverProvidersOff)
+
+    fun lyricsProviderOn(label: String): Boolean = label !in lyricsOffState.value
+
+    fun setLyricsProvider(label: String, on: Boolean) {
+        val next = if (on) lyricsOffState.value - label else lyricsOffState.value + label
+        lyricsOffState.value = next
+        settings.lyricsProvidersOff = next
+    }
+
+    /** Whether covers are taken from [label]; a source not in the list, like Shazam, always is. */
+    fun coverProviderOn(label: String?): Boolean = label == null || label !in coversOffState.value
+
+    fun setCoverProvider(label: String, on: Boolean) {
+        val next = if (on) coversOffState.value - label else coversOffState.value + label
+        coversOffState.value = next
+        settings.coverProvidersOff = next
+        // The one asked first can't be one that is off.
+        if (!on && coverProvider.equals(label, ignoreCase = true)) coverProvider = ""
+    }
+
+    /** The cover services that are on, with the preferred one asked first. */
+    private fun coverLookup() = libraryLookup.only { coverProviderOn(it) }.preferring(coverProvider)
+
+    /** [match]'s cover, unless it comes from a service turned off. */
+    private fun coverOf(match: MusicMatch): String? = match.artworkUrl?.takeIf { coverProviderOn(match.provider) }
+
     private val coverProviderState = mutableStateOf(settings.coverProvider)
 
     /** Which of them to ask first; blank asks them all in their usual order. */
@@ -3127,7 +3159,7 @@ class DesktopController(parent: CoroutineScope) {
 
     private suspend fun bulkCover(track: DesktopTrack): BulkOutcome {
         if (io { Covers.hasLocalArt(track) }) return BulkOutcome.ALREADY_HAD
-        val stored = libraryLookup.preferring(coverProvider).findArtwork(track.searchQuery) { url ->
+        val stored = coverLookup().findArtwork(track.searchQuery) { url ->
             Covers.fetchAndStore(track, url, writeTags).takeIf { it }?.also {
                 // Kept because Discord needs an address, not a local file.
                 io { store.saveCoverUrl(track.file.absolutePath, url) }
@@ -3206,7 +3238,7 @@ class DesktopController(parent: CoroutineScope) {
                 )
             }
         }
-        match.artworkUrl?.let { Covers.fetchAndStore(track, it, writeTags) }
+        coverOf(match)?.let { Covers.fetchAndStore(track, it, writeTags) }
         return true
     }
 
@@ -5134,7 +5166,7 @@ class DesktopController(parent: CoroutineScope) {
         scope.launch {
             val found = io { store.coverUrl(path) }
                 ?: runCatching {
-                    libraryLookup.searchAll(track.searchQuery, limitPer = 3)
+                    coverLookup().searchAll(track.searchQuery, limitPer = 3)
                         .firstNotNullOfOrNull { it.artworkUrl }
                 }.getOrNull()
             coverUrls[path] = found.orEmpty()

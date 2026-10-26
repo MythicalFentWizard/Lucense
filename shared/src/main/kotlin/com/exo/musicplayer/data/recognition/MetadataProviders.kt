@@ -43,6 +43,9 @@ class MetadataProviderChain(private val providers: List<MetadataProvider>) {
      * tie, not about throwing away the only cover anyone has. An unknown or
      * blank label leaves the order alone.
      */
+    /** The same services without those [isOn] turns down: Settings' choice of cover services. */
+    fun only(isOn: (String) -> Boolean): MetadataProviderChain = MetadataProviderChain(providers.filter { isOn(it.label) })
+
     fun preferring(label: String?): MetadataProviderChain {
         if (label.isNullOrBlank()) return this
         val first = providers.firstOrNull { it.label.equals(label, ignoreCase = true) } ?: return this

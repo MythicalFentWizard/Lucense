@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.ui
 
+import com.exo.musicplayer.data.ProviderNotes
 import com.exo.musicplayer.desktop.system.Platform
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -454,20 +455,55 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                 )
             }
             Spacer(Modifier.height(18.dp))
-            Text("Cover art service", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Text("Lyrics services", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
             Spacer(Modifier.height(4.dp))
             Hint(
-                "Asked first when covers are fetched in bulk. The others are still " +
-                    "tried when it has nothing, so a preference never costs you a cover."
+                "Asked in this order until one has the song's words. One that's unticked is never asked. " +
+                    "With all of them off, nothing is looked up online; lyrics can still be typed in."
             )
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                SegmentedRow(
-                    options = listOf("") + controller.coverProviders,
-                    selected = controller.coverProvider,
-                    label = { if (it.isBlank()) "Automatic" else it },
-                    onSelect = { controller.coverProvider = it }
-                )
+            Spacer(Modifier.height(4.dp))
+            for (label in controller.lyricsProviders) {
+                CheckRow(
+                    label = label,
+                    checked = controller.lyricsProviderOn(label),
+                    note = ProviderNotes.lyrics(label).ifEmpty { null }
+                ) { controller.setLyricsProvider(label, it) }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text("Cover art services", style = MaterialTheme.typography.titleMedium, color = Palette.Text)
+            Spacer(Modifier.height(4.dp))
+            Hint(
+                "Where covers come from: when they're fetched in bulk, by Fix, from a match in Identify, " +
+                    "and for Discord. One that's unticked never gives a song its cover. Tags still come " +
+                    "from all of them."
+            )
+            Spacer(Modifier.height(4.dp))
+            for (label in controller.coverProviders) {
+                CheckRow(
+                    label = label,
+                    checked = controller.coverProviderOn(label),
+                    note = ProviderNotes.cover(label).ifEmpty { null }
+                ) { controller.setCoverProvider(label, it) }
+            }
+            val coversOn = controller.coverProviders.filter { controller.coverProviderOn(it) }
+            if (coversOn.size > 1) {
+                Spacer(Modifier.height(10.dp))
+                Text("Asked first", style = MaterialTheme.typography.titleSmall, color = Palette.Text)
+                Spacer(Modifier.height(4.dp))
+                Hint("The others that are on are still asked when it has nothing, so a preference never costs you a cover.")
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    SegmentedRow(
+                        options = listOf("") + coversOn,
+                        selected = controller.coverProvider.takeIf { it in coversOn }.orEmpty(),
+                        label = { if (it.isBlank()) "Automatic" else it },
+                        onSelect = { controller.coverProvider = it }
+                    )
+                }
+            } else if (coversOn.isEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Hint("With every service off, songs keep the covers they have, and new ones come only from files and tags.")
             }
 
             Spacer(Modifier.height(28.dp))

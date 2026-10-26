@@ -132,6 +132,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** The cover services, in their usual order, for the Settings choice. */
     val coverProviders: List<String> get() = lookup.labels
 
+    /** The lyrics services, in the order they are asked. */
+    val lyricsProviders: List<String> get() = app.lyrics.providers
+
+    val lyricsProvidersOff: StateFlow<Set<String>> get() = prefs.lyricsProvidersOff
+    val coverProvidersOff: StateFlow<Set<String>> get() = prefs.coverProvidersOff
+
+    fun setLyricsProviderOn(label: String, on: Boolean) {
+        val off = prefs.lyricsProvidersOff.value
+        prefs.setLyricsProvidersOff(if (on) off - label else off + label)
+    }
+
+    fun setCoverProviderOn(label: String, on: Boolean) {
+        val off = prefs.coverProvidersOff.value
+        prefs.setCoverProvidersOff(if (on) off - label else off + label)
+        // The one asked first can't be one that is off.
+        if (!on && prefs.coverProvider.value.equals(label, ignoreCase = true)) prefs.setCoverProvider("")
+    }
+
+    /** [match] without its cover when that comes from a service turned off; Shazam's is always taken. */
+    private fun withAllowedCover(match: MusicMatch): MusicMatch =
+        if (match.artworkUrl != null && match.provider in prefs.coverProvidersOff.value) match.copy(artworkUrl = null) else match
+
     // ---- The library, and how it's ordered ------------------------------------
 
     private val allTracks: StateFlow<List<Track>> = library.observeAllTracks()
@@ -625,7 +647,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun identify(track: Track): Boolean {
         val match = listenTo(track)
-        val applied = match != null && runCatching { library.applyMatch(track, match) }.isSuccess
+        val applied = match != null && runCatching { library.applyMatch(track, withAllowedCover(match)) }.isSuccess
         library.markIdentified(track.id)
         return applied
     }
@@ -666,7 +688,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun cover(track: Track): Boolean {
         val query = listOfNotNull(track.artist, track.title).joinToString(" ")
         val ok = runCatching {
-            lookup.preferring(prefs.coverProvider.value.ifBlank { null }).findArtwork(query) { url ->
+            lookup.only { it !in prefs.coverProvidersOff.value }
+                .preferring(prefs.coverProvider.value.ifBlank { null }).findArtwork(query) { url ->
                 library.updateArtwork(track, url).takeIf { it }
             }
         }.getOrNull() == true
@@ -1120,7 +1143,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun applyTagMatch(match: MusicMatch) {
         val track = _tagTarget.value ?: return
         viewModelScope.launch {
-            runCatching { library.applyMatch(track, match) }
+            runCatching { library.applyMatch(track, withAllowedCover(match)) }
             _notice.value = "Details updated"
             dismissFixTags()
         }

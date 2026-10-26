@@ -1,5 +1,6 @@
 package com.exo.musicplayer.desktop.data
 
+import com.exo.musicplayer.data.ProviderNotes
 import java.io.File
 import java.util.prefs.Preferences
 
@@ -215,6 +216,16 @@ class DesktopSettings {
         get() = prefs.get(KEY_COVER_PROVIDER, "")
         set(value) = prefs.put(KEY_COVER_PROVIDER, value)
 
+    /** Lyrics services turned off in Settings, by name; a service added later starts on. */
+    var lyricsProvidersOff: Set<String>
+        get() = ProviderNotes.parse(prefs.get(KEY_LYRICS_OFF, ""))
+        set(value) = prefs.put(KEY_LYRICS_OFF, ProviderNotes.write(value))
+
+    /** Cover services turned off in Settings, by name. */
+    var coverProvidersOff: Set<String>
+        get() = ProviderNotes.parse(prefs.get(KEY_COVERS_OFF, ""))
+        set(value) = prefs.put(KEY_COVERS_OFF, ProviderNotes.write(value))
+
     /** The last few library searches, newest first. */
     var searchHistory: List<String>
         get() = prefs.get(KEY_SEARCH_HISTORY, "").split('|').filter { it.isNotBlank() }
@@ -368,6 +379,8 @@ class DesktopSettings {
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_CUSTOM = "lyrics_term_custom"
         const val KEY_COVER_PROVIDER = "cover_provider"
+        const val KEY_LYRICS_OFF = "lyrics_providers_off"
+        const val KEY_COVERS_OFF = "cover_providers_off"
         const val KEY_SEARCH_HISTORY = "search_history"
         const val KEY_DISCORD = "discord"
         const val KEY_DISCORD_ID = "discord_id"

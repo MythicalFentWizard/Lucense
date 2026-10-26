@@ -1,5 +1,6 @@
 package com.exo.musicplayer.ui.settings
 
+import com.exo.musicplayer.data.ProviderNotes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +64,9 @@ class SettingsValues(
     val lyricsPattern: String,
     val coverProvider: String,
     val coverProviders: List<String>,
+    val lyricsProviders: List<String> = emptyList(),
+    val lyricsProvidersOff: Set<String> = emptySet(),
+    val coverProvidersOff: Set<String> = emptySet(),
     val downloadProxy: String,
     val update: UpdateState,
     val youtubeSignedIn: Boolean = false
@@ -82,6 +86,8 @@ class SettingsActions(
     val onLyricsTerm: (LyricsTerm) -> Unit,
     val onLyricsPattern: (String) -> Unit,
     val onCoverProvider: (String) -> Unit,
+    val onLyricsProviderOn: (String, Boolean) -> Unit = { _, _ -> },
+    val onCoverProviderOn: (String, Boolean) -> Unit = { _, _ -> },
     val onDownloadProxy: (String) -> Unit,
     val onBackUp: () -> Unit,
     val onRestore: () -> Unit,
@@ -163,14 +169,37 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
             }
         }
         Setting(
-            "Cover art service",
-            "Asked first when covers are fetched in bulk. The others are still tried when it has nothing."
-        ) {
-            Picker(
-                current = values.coverProvider.ifBlank { "Any, in the usual order" },
-                options = listOf("Any, in the usual order" to { actions.onCoverProvider("") }) +
-                    values.coverProviders.map { it to { actions.onCoverProvider(it) } }
-            )
+            "Lyrics services",
+            "Asked in this order until one has the song's words. One that's off is never asked."
+        ) {}
+        for (label in values.lyricsProviders) {
+            SwitchSetting(label, ProviderNotes.lyrics(label), label !in values.lyricsProvidersOff) {
+                actions.onLyricsProviderOn(label, it)
+            }
+        }
+
+        Setting(
+            "Cover art services",
+            "Where covers come from, in bulk, by Fix and from Identify. One that's off never gives a song " +
+                "its cover; tags still come from all of them."
+        ) {}
+        for (label in values.coverProviders) {
+            SwitchSetting(label, ProviderNotes.cover(label), label !in values.coverProvidersOff) {
+                actions.onCoverProviderOn(label, it)
+            }
+        }
+        val coversOn = values.coverProviders.filter { it !in values.coverProvidersOff }
+        if (coversOn.size > 1) {
+            Setting(
+                "Asked first",
+                "The others that are on are still tried when it has nothing."
+            ) {
+                Picker(
+                    current = values.coverProvider.takeIf { it in coversOn }.orEmpty().ifBlank { "Any, in the usual order" },
+                    options = listOf("Any, in the usual order" to { actions.onCoverProvider("") }) +
+                        coversOn.map { it to { actions.onCoverProvider(it) } }
+                )
+            }
         }
 
         Section("Downloads")

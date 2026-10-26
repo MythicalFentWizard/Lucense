@@ -1,5 +1,6 @@
 package com.exo.musicplayer.data.prefs
 
+import com.exo.musicplayer.data.ProviderNotes
 import android.content.Context
 import com.exo.musicplayer.data.lyrics.LyricsTerm
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -127,6 +128,18 @@ class AppPrefs(context: Context) {
     val coverProvider: StateFlow<String> = _coverProvider.asStateFlow()
     fun setCoverProvider(value: String) = put(_coverProvider, value) { putString(KEY_COVER_PROVIDER, value) }
 
+    /** Lyrics services turned off in Settings, by name; one added later starts on. */
+    private val _lyricsProvidersOff = MutableStateFlow(ProviderNotes.parse(prefs.getString(KEY_LYRICS_OFF, null)))
+    val lyricsProvidersOff: StateFlow<Set<String>> = _lyricsProvidersOff.asStateFlow()
+    fun setLyricsProvidersOff(value: Set<String>) =
+        put(_lyricsProvidersOff, value) { putString(KEY_LYRICS_OFF, ProviderNotes.write(value)) }
+
+    /** Cover services turned off in Settings, by name. */
+    private val _coverProvidersOff = MutableStateFlow(ProviderNotes.parse(prefs.getString(KEY_COVERS_OFF, null)))
+    val coverProvidersOff: StateFlow<Set<String>> = _coverProvidersOff.asStateFlow()
+    fun setCoverProvidersOff(value: Set<String>) =
+        put(_coverProvidersOff, value) { putString(KEY_COVERS_OFF, ProviderNotes.write(value)) }
+
     /** A proxy for downloads only, as typed; blank sends them the way everything else goes. */
     private val _downloadProxy = MutableStateFlow(prefs.getString(KEY_DOWNLOAD_PROXY, null).orEmpty())
     val downloadProxy: StateFlow<String> = _downloadProxy.asStateFlow()
@@ -175,6 +188,8 @@ class AppPrefs(context: Context) {
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_PATTERN = "lyrics_term_custom"
         const val KEY_COVER_PROVIDER = "cover_provider"
+        const val KEY_LYRICS_OFF = "lyrics_providers_off"
+        const val KEY_COVERS_OFF = "cover_providers_off"
         const val KEY_DOWNLOAD_PROXY = "download_proxy"
         const val KEY_DOWNLOAD_FORMAT = "download_format"
         const val KEY_DOWNLOAD_QUALITY = "download_quality"
