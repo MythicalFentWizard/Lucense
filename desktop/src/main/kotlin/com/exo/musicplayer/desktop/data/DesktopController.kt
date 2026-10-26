@@ -352,6 +352,17 @@ class DesktopController(parent: CoroutineScope) {
         private set
 
     var query by mutableStateOf("")
+
+    /** What the Albums and Artists pages are searched for, each its own. */
+    var albumQuery by mutableStateOf("")
+    var artistQuery by mutableStateOf("")
+
+    fun collectionQuery(kind: CollectionKind): String = if (kind == CollectionKind.ALBUMS) albumQuery else artistQuery
+
+    fun searchCollection(kind: CollectionKind, text: String) {
+        if (kind == CollectionKind.ALBUMS) albumQuery = text else artistQuery = text
+    }
+
     // Ordering is remembered between sessions: each of these writes itself
     // into the settings as it changes, and is read back by name on the way in.
     private val sortState = mutableStateOf(

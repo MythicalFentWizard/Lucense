@@ -783,6 +783,17 @@ private fun ContentHeader(
                 )
             }
 
+            if ((destination == Destination.ALBUMS || destination == Destination.ARTISTS) && !showSettings) {
+                val kind = if (destination == Destination.ALBUMS) CollectionKind.ALBUMS else CollectionKind.ARTISTS
+                TextInput(
+                    value = controller.collectionQuery(kind),
+                    onValueChange = { controller.searchCollection(kind, it) },
+                    placeholder = if (kind == CollectionKind.ALBUMS) "Search albums" else "Search artists",
+                    leading = Icons.Default.Search,
+                    modifier = Modifier.width(if (narrowHeader) 170.dp else 240.dp)
+                )
+            }
+
             if (destination == Destination.LIBRARY && !showSettings) {
                 TextInput(
                     value = controller.query,
