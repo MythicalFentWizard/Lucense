@@ -143,7 +143,15 @@ enum class Destination(val label: String, val icon: ImageVector) {
     IDENTIFY("Identify", Icons.Default.Fingerprint),
     MOODS("Moods", Icons.Default.Cloud),
     STATS("Stats", Icons.Default.BarChart),
-    DOWNLOAD("Download", Icons.Default.Download)
+    DOWNLOAD("Download", Icons.Default.Download);
+
+    /** The cards this page shows, for Albums and Artists. */
+    val collectionKind: CollectionKind?
+        get() = when (this) {
+            ALBUMS -> CollectionKind.ALBUMS
+            ARTISTS -> CollectionKind.ARTISTS
+            else -> null
+        }
 }
 
 /**
@@ -237,7 +245,12 @@ fun DesktopApp(
                     compact = !roomy,
                     current = if (showSettings) null else destination,
                     settingsOpen = showSettings,
-                    onSelect = { destination = it; showSettings = false },
+                    onSelect = {
+                        // Its own item again goes back to the cards from an album or artist open there.
+                        if (it == destination && !showSettings) it.collectionKind?.let { kind -> controller.openGroup(kind, null) }
+                        destination = it
+                        showSettings = false
+                    },
                     onSettings = { showSettings = !showSettings }
                 )
 
@@ -267,7 +280,10 @@ fun DesktopApp(
                     Box(Modifier.fillMaxSize().onSizeChanged { paneWidth = with(density) { it.width.toDp() }.steppedAt(PANE_STEPS) }) {
                     CompositionLocalProvider(LocalPaneWidth provides paneWidth) {
                     Column(Modifier.fillMaxSize()) {
-                        ContentHeader(
+                        // An album's or an artist's page has its own banner in place of the page's title.
+                        val groupOpen = !showSettings &&
+                            destination.collectionKind?.let { controller.openGroupKey(it) != null } == true
+                        if (!groupOpen) ContentHeader(
                             controller = controller,
                             title = if (showSettings) "Settings" else destination.label,
                             destination = destination,
@@ -322,6 +338,15 @@ fun DesktopApp(
                                     onClearDuplicates = { within ->
                                         controller.findDuplicates(within)
                                         dialog = DialogKind.DUPLICATES
+                                    },
+                                    onOpenGroup = { kind, key ->
+                                        controller.openGroup(kind, key)
+                                        destination = if (kind == CollectionKind.ALBUMS) Destination.ALBUMS else Destination.ARTISTS
+                                    },
+                                    onAddToPlaylist = { items ->
+                                        playlistTargets = items
+                                        controller.refreshPlaylists()
+                                        dialog = DialogKind.ADD_TO_PLAYLIST
                                     }
                                 )
                             destination == Destination.PLAYLISTS ->
@@ -1182,6 +1207,11 @@ private fun TrackRow(
                     }
                 )
                 .hoverable(interaction)
+                // Dragged out of the window, the song goes as its file - or, from
+                // a picked row, every picked song does.
+                .dragOutFiles {
+                    if (isSelected) controller.selectedPaths.map(::File) else listOf(track.file)
+                }
                 // Ctrl and Shift are read from the click itself. They used to come
                 // from the window's keyboard state, which a Ctrl+click did not
                 // reliably reach, so it was taken for a plain click: it played the
@@ -1328,9 +1358,10 @@ private fun TransportBar(
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Artwork(track, 46.dp)
+            // The song playing can be dragged out by its cover or its name.
+            Artwork(track, 46.dp, modifier = Modifier.dragOutFiles { listOfNotNull(track?.file) })
             Spacer(Modifier.width(13.dp))
-            Column(Modifier.width(if (narrow) 140.dp else 200.dp)) {
+            Column(Modifier.width(if (narrow) 140.dp else 200.dp).dragOutFiles { listOfNotNull(track?.file) }) {
                 Text(
                     track?.title ?: "Nothing playing",
                     style = MaterialTheme.typography.bodyMedium,

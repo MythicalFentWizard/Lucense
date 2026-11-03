@@ -58,6 +58,9 @@ dependencies {
     implementation(libs.dbus.java.transport)
 
     testImplementation(kotlin("test-junit5"))
+    // Drives pages with a pretend mouse: the album page's drag to reorder.
+    @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+    testImplementation(compose.uiTest)
 }
 
 tasks.test {

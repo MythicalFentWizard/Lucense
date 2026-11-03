@@ -176,6 +176,48 @@ class DesktopStore(databaseFile: File) {
                 )
                 """.trimIndent()
             )
+            // Albums whose songs were dragged into an order of their own: the files' paths, one per line.
+            st.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS album_orders (
+                    album TEXT PRIMARY KEY,
+                    paths TEXT NOT NULL
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    // ---- Albums in an order of their own ----
+
+    // An album's key holds a NUL between its name and artist, which SQLite's
+    // text would cut short; a line break stands in for it, as no tag holds one.
+    private fun albumColumn(key: String) = key.replace('\u0000', '\n')
+
+    fun albumOrders(): Map<String, List<String>> = buildMap {
+        connection.createStatement().use { st ->
+            st.executeQuery("SELECT album, paths FROM album_orders").use { rs ->
+                while (rs.next()) {
+                    put(rs.getString(1).replace('\n', '\u0000'), rs.getString(2).split('\n').filter { it.isNotEmpty() })
+                }
+            }
+        }
+    }
+
+    fun saveAlbumOrder(key: String, paths: List<String>) {
+        connection.prepareStatement(
+            "INSERT INTO album_orders(album, paths) VALUES (?,?) ON CONFLICT(album) DO UPDATE SET paths=excluded.paths"
+        ).use {
+            it.setString(1, albumColumn(key))
+            it.setString(2, paths.joinToString("\n"))
+            it.executeUpdate()
+        }
+    }
+
+    fun deleteAlbumOrder(key: String) {
+        connection.prepareStatement("DELETE FROM album_orders WHERE album = ?").use {
+            it.setString(1, albumColumn(key))
+            it.executeUpdate()
         }
     }
 

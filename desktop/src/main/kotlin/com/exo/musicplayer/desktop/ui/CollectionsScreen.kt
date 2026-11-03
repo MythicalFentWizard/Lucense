@@ -46,6 +46,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
@@ -65,12 +68,17 @@ import com.exo.musicplayer.desktop.data.MergePlan
 import com.exo.musicplayer.desktop.data.TrackGroup
 import com.exo.musicplayer.desktop.data.TrackGroups
 import com.exo.musicplayer.desktop.library.DesktopTrack
+import com.exo.musicplayer.desktop.system.Explorer
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * Albums or artists as cards.
  *
- * Ctrl+click picks a card and Shift+click a run of them, as in the library; a
- * plain click plays. Two or more picked can be merged into one; "Merge
+ * A plain click opens the album or artist on a page of its own, as Spotify
+ * does; the play button that shows under the mouse plays it straight away.
+ * Ctrl+click picks a card and Shift+click a run of them, as in the library.
+ * Two or more picked can be merged into one; "Merge
  * duplicates" finds the ones spelled more than one way; "Clear duplicates"
  * looks for songs that are there twice - in the picked cards, or in all of
  * them when none are picked.
@@ -80,10 +88,34 @@ fun CollectionScreen(
     controller: DesktopController,
     kind: CollectionKind,
     onMerge: () -> Unit,
-    onClearDuplicates: (List<DesktopTrack>) -> Unit
+    onClearDuplicates: (List<DesktopTrack>) -> Unit,
+    /** Goes to an album's or an artist's page, on whichever of the two pages it belongs. */
+    onOpenGroup: (CollectionKind, String) -> Unit,
+    onAddToPlaylist: (List<DesktopTrack>) -> Unit
 ) {
     val sort = if (kind == CollectionKind.ALBUMS) controller.albumSort else controller.artistSort
-    val all = remember(controller.tracks, kind, sort) { TrackGroups.gather(kind, controller.tracks, sort) }
+    val orders = controller.albumOrders
+    val all = remember(controller.tracks, kind, sort, orders) {
+        TrackGroups.gather(kind, controller.tracks, sort).let { groups ->
+            // Albums dragged into an order of their own play in it, from the card too.
+            if (kind != CollectionKind.ALBUMS || orders.isEmpty()) {
+                groups
+            } else {
+                groups.map { group -> orders[group.key]?.let { TrackGroups.inOrder(group, it) } ?: group }
+            }
+        }
+    }
+
+    // One open on its own page. Gone from the library - merged, retagged, deleted - the cards come back.
+    val openKey = controller.openGroupKey(kind)
+    val open = openKey?.let { key -> all.firstOrNull { it.key == key } }
+    if (openKey != null && open == null) {
+        LaunchedEffect(openKey) { controller.openGroup(kind, null) }
+    }
+    if (open != null) {
+        OpenGroup(controller, kind, open, onOpenGroup, onAddToPlaylist)
+        return
+    }
     val query = controller.collectionQuery(kind)
     // An album by its name or who it's by; an artist by name. What is shown is what picking and merging act on.
     val groups = remember(all, query) { if (query.isBlank()) all else all.filter { NameSearch.matches(query, it.name, it.artist) } }
@@ -193,6 +225,7 @@ fun CollectionScreen(
                     picked = group.key in picked,
                     onPick = { controller.togglePicked(kind, group) },
                     onPickRun = { controller.extendPicked(kind, group, groups) },
+                    onOpen = { controller.openGroup(kind, group.key) },
                     onPlay = { controller.play(group.tracks.first(), group.tracks) }
                 )
             }
@@ -208,6 +241,7 @@ private fun GroupCard(
     picked: Boolean,
     onPick: () -> Unit,
     onPickRun: () -> Unit,
+    onOpen: () -> Unit,
     onPlay: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -228,7 +262,7 @@ private fun GroupCard(
             // Read from the click itself, as the library rows do.
             .onClick(keyboardModifiers = { isCtrlPressed }, onClick = onPick)
             .onClick(keyboardModifiers = { isShiftPressed && !isCtrlPressed }, onClick = onPickRun)
-            .onClick(keyboardModifiers = { !isCtrlPressed && !isShiftPressed }, onClick = onPlay)
+            .onClick(keyboardModifiers = { !isCtrlPressed && !isShiftPressed }, onClick = onOpen)
             .padding(8.dp),
         horizontalAlignment = if (artist) Alignment.CenterHorizontally else Alignment.Start
     ) {
@@ -253,16 +287,19 @@ private fun GroupCard(
                 }
             }
             if (hovered) {
+                // Plays without opening the page; the card itself opens it.
                 Box(
                     Modifier
+                        .align(Alignment.BottomEnd)
                         .padding(8.dp)
-                        .size(30.dp)
+                        .size(36.dp)
+                        .shadow(6.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Palette.Accent)
-                        .align(Alignment.BottomEnd),
+                        .clickable(onClick = onPlay),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.PlayArrow, "Play", Modifier.size(16.dp), tint = Palette.OnAccent)
+                    Icon(Icons.Default.PlayArrow, "Play", Modifier.size(20.dp), tint = Palette.OnAccent)
                 }
             }
         }
@@ -287,6 +324,80 @@ private fun GroupCard(
             overflow = TextOverflow.Ellipsis
         )
     }
+}
+
+/** An album's or an artist's page, fed from the controller. */
+@Composable
+private fun OpenGroup(
+    controller: DesktopController,
+    kind: CollectionKind,
+    group: TrackGroup,
+    onOpenGroup: (CollectionKind, String) -> Unit,
+    onAddToPlaylist: (List<DesktopTrack>) -> Unit
+) {
+    // The song and whether it plays, without the position: that changes many times a second.
+    val playback by remember(controller) {
+        controller.engine.status.map { it.track to it.playing }.distinctUntilChanged()
+    }.collectAsState(controller.engine.status.value.let { it.track to it.playing })
+
+    DisposableEffect(kind) {
+        controller.groupPageShown = kind
+        onDispose { if (controller.groupPageShown == kind) controller.groupPageShown = null }
+    }
+
+    // An artist's albums, whole, newest first; an album's artists, each with a page where they have one.
+    val albums = remember(controller.tracks, group, kind) {
+        if (kind != CollectionKind.ARTISTS) {
+            emptyList()
+        } else {
+            val files = group.tracks.mapTo(HashSet()) { it.file }
+            TrackGroups.albums(controller.tracks)
+                .filter { album -> album.tracks.any { it.file in files } }
+                .sortedByDescending { album -> album.tracks.maxOf { it.year ?: 0 } }
+        }
+    }
+    val credits = remember(controller.tracks, group, kind) {
+        if (kind != CollectionKind.ALBUMS) {
+            emptyList()
+        } else {
+            val artists = TrackGroups.artists(controller.tracks).mapTo(HashSet()) { it.key }
+            TrackGroups.splitArtists(group.artist).map { name ->
+                name to ("artist:" + TrackGroups.caseKey(name)).takeIf { it in artists }
+            }
+        }
+    }
+
+    GroupPage(
+        GroupView(
+            group = group,
+            kind = kind,
+            albums = albums,
+            credits = credits,
+            nowPlaying = playback.first,
+            playing = playback.second,
+            fromHere = controller.isQueue(group.tracks),
+            shuffle = controller.shuffle,
+            plays = controller.playCounts,
+            favourites = controller.favourites,
+            ownOrder = kind == CollectionKind.ALBUMS && group.key in controller.albumOrders
+        ),
+        GroupActions(
+            play = { track, from -> controller.play(track, from) },
+            togglePlay = { controller.togglePlay() },
+            setShuffle = { controller.shuffle = it },
+            playNext = { controller.playNext(it) },
+            addToQueue = { controller.addToQueue(it) },
+            toggleFavourite = { controller.toggleFavourite(it) },
+            addToPlaylist = onAddToPlaylist,
+            edit = { controller.editTarget = it },
+            reveal = { Explorer.reveal(it) },
+            openArtist = { onOpenGroup(CollectionKind.ARTISTS, it) },
+            openAlbum = { onOpenGroup(CollectionKind.ALBUMS, it) },
+            back = { controller.openGroup(kind, null) },
+            reorder = { controller.reorderAlbum(group, it) },
+            resetOrder = { controller.resetAlbumOrder(group) }
+        )
+    )
 }
 
 /** Reviews albums or artists about to be merged, and merges them. */

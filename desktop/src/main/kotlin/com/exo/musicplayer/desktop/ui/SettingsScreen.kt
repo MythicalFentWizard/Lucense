@@ -411,6 +411,26 @@ fun SettingsScreen(controller: DesktopController, onChooseFolder: () -> File?) {
                         "media controls with the song playing and its cover."
                 }
             ) { controller.mediaKeysEnabled = it }
+            Spacer(Modifier.height(14.dp))
+            CheckRow(
+                label = "Keep playing in the tray when the window is closed",
+                checked = controller.keepInTray && controller.trayAvailable,
+                enabled = controller.trayAvailable,
+                note = if (controller.trayAvailable) {
+                    "Closing the window leaves Lucense playing, with its icon by the clock. " +
+                        "Double-click the icon to bring the window back; quit from its menu."
+                } else {
+                    "This desktop has no tray for Lucense to wait in, so closing the window quits."
+                }
+            ) { controller.keepInTray = it }
+            Spacer(Modifier.height(10.dp))
+            CheckRow(
+                label = "Show the mini player while it's in the tray",
+                checked = controller.trayMiniPlayer,
+                enabled = controller.keepInTray && controller.trayAvailable,
+                note = "The small window that stays on top, with the song, its cover and the buttons. " +
+                    "Also in the tray icon's menu, and the Mini button by the volume."
+            ) { controller.trayMiniPlayer = it }
             // On Linux the package puts Lucense in the Open with list itself.
             if (Platform.isWindows) {
                 Spacer(Modifier.height(14.dp))

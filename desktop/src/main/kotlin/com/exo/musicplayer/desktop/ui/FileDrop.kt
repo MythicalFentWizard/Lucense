@@ -20,12 +20,15 @@ internal fun fileDropTarget(
     onFiles: (List<File>) -> Unit,
     onText: (String) -> Boolean
 ): DragAndDropTarget = object : DragAndDropTarget {
-    override fun onEntered(event: DragAndDropEvent) = onHover(true)
+    // A song dragged out of Lucense itself passes over the window on its way
+    // out; it is not something being brought in.
+    override fun onEntered(event: DragAndDropEvent) = onHover(!DragOut.active)
     override fun onExited(event: DragAndDropEvent) = onHover(false)
     override fun onEnded(event: DragAndDropEvent) = onHover(false)
 
     override fun onDrop(event: DragAndDropEvent): Boolean {
         onHover(false)
+        if (DragOut.active) return false
         val transferable = event.awtTransferable
         val files = runCatching {
             (transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<*>)
