@@ -95,7 +95,8 @@ same list (YouTube, iTunes, Deezer, Audius, Genius, MusicBrainz), so if you'd
 rather no song took a music video's still as its cover, untick YouTube. If all
 four lyrics services come up empty, you can paste them in yourself. Timed lyrics that run early or late can
 be moved a quarter-second at a time, and each song keeps its own setting.
-*Translate* puts the lyrics in your language under each line, and the
+*Translate* puts the lyrics in your language under each line, even in a song
+only partly in another language (just those lines get one), and the
 translation is kept: the next time the song plays it's there at once, with
 nothing asked of Google again, until you hide it. The text can be selected and
 copied, and *Fullscreen* shows just the lyrics, big, over the

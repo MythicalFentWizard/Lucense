@@ -73,6 +73,21 @@ class TrayAndAlbumsTest {
         assertTrue(File(folder, "translations").listFiles()!!.none { it.name.endsWith(".part") })
     }
 
+    /** Asks Google itself, so only with LUCENSE_NET set. */
+    @Test
+    fun onlyTheLinesInAnotherLanguageAreTranslated() = kotlinx.coroutines.runBlocking {
+        if (System.getenv("LUCENSE_NET") == null) return@runBlocking
+        val lines = listOf("I walk the city at night", "", "Nobody knows the way I feel", "Je ne sais pas pourquoi",
+            "I keep on running down the road", "Every window has a story", "La vie est belle ce soir")
+        val back = assertNotNull(LyricsTranslator.translate(lines, "en"))
+        assertEquals(List(5) { "" }, back.lines.filterIndexed { i, _ -> i != 3 && i != 6 })
+        assertTrue(back.lines[3].isNotBlank() && back.lines[6].isNotBlank(), back.lines.toString())
+        assertEquals("fr", back.from)
+        // All English: nothing to show, which the apps call "already in your language".
+        assertTrue(assertNotNull(LyricsTranslator.translate(lines.filterIndexed { i, _ -> i != 3 && i != 6 }, "en")).lines.all { it.isBlank() })
+        println("translated: " + back.lines)
+    }
+
     // ---- Albums in an order of their own ----
 
     @Test

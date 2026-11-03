@@ -39,24 +39,31 @@ object LyricsTranslator {
             val worded = lines.indices.filter { lines[it].isNotBlank() }
             if (worded.isEmpty()) return@withContext Translation(lines.map { "" }, null)
             val translated = HashMap<Int, String>(worded.size)
-            var from: String? = null
+            val languages = HashMap<String, Int>()
+            val target = to.substringBefore('-').lowercase()
             for (chunk in chunks(worded) { lines[it].trim().length }) {
-                val text = chunk.joinToString("\n") { lines[it].trim() }
-                val url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t" +
-                    "&tl=" + URLEncoder.encode(to, "UTF-8") + "&q=" + URLEncoder.encode(text, "UTF-8")
+                // One q per line, answered as [[translation, its language], ...] in order.
+                // Asked as one text, a song mostly in English with a few lines of
+                // French was taken for English and handed back untranslated.
+                val url = "https://translate.googleapis.com/translate_a/t?client=gtx&sl=auto&tl=" +
+                    URLEncoder.encode(to, "UTF-8") +
+                    chunk.joinToString("") { "&q=" + URLEncoder.encode(lines[it].trim(), "UTF-8") }
                 val json = Http.get(url) ?: return@withContext null
-                val parsed = runCatching { JSONArray(json) }.getOrNull() ?: return@withContext null
-                val pieces = parsed.optJSONArray(0) ?: return@withContext null
-                val joined = buildString {
-                    for (i in 0 until pieces.length()) append(pieces.optJSONArray(i)?.optString(0).orEmpty())
+                val back = runCatching { JSONArray(json) }.getOrNull() ?: return@withContext null
+                // Lined up by position, so a different count means it can't be trusted.
+                if (back.length() != chunk.size) return@withContext null
+                chunk.forEachIndexed { i, index ->
+                    val pair = back.optJSONArray(i)
+                    val text = (pair?.optString(0) ?: back.optString(i)).trim()
+                    val language = pair?.optString(1)?.lowercase().orEmpty()
+                    // A line already in [to] stays blank, so only the foreign ones show a translation.
+                    val same = language.substringBefore('-') == target ||
+                        text.equals(lines[index].trim(), ignoreCase = true)
+                    translated[index] = if (same) "" else text
+                    if (!same && language.isNotBlank()) languages[language] = (languages[language] ?: 0) + 1
                 }
-                from = from ?: parsed.optString(2).takeIf { it.isNotBlank() }
-                val back = joined.split('\n')
-                // Lined up by position, so too few lines back means it can't be trusted.
-                if (back.size < chunk.size) return@withContext null
-                chunk.forEachIndexed { i, index -> translated[index] = back[i].trim() }
             }
-            Translation(lines.indices.map { translated[it].orEmpty() }, from)
+            Translation(lines.indices.map { translated[it].orEmpty() }, languages.maxByOrNull { it.value }?.key)
         }
 
     /** [items] in runs whose [length]s, plus a line break each, stay under [CHUNK_CHARS]. */
