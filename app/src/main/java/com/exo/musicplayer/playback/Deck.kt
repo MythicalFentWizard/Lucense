@@ -78,9 +78,10 @@ class Deck(context: Context, sinks: List<TeeAudioProcessor.AudioBufferSink>) {
             )
             // Pause instead of blaring out of the speaker when headphones are pulled.
             .setHandleAudioBecomingNoisy(true)
-            // Keeps the processor running with the screen off. Without it some
-            // phones let playback stutter or stop once the screen went dark.
-            .setWakeMode(C.WAKE_MODE_LOCAL)
+            // Keeps the processor running with the screen off, and Wi-Fi too:
+            // a song streamed rather than played from a file stopped once the
+            // phone let Wi-Fi sleep with the screen dark.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
     }
 

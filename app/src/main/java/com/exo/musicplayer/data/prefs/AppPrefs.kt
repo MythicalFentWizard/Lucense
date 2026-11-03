@@ -115,6 +115,11 @@ class AppPrefs(context: Context) {
     val sleepFade: StateFlow<Boolean> = _sleepFade.asStateFlow()
     fun setSleepFade(value: Boolean) = put(_sleepFade, value) { putBoolean(KEY_SLEEP_FADE, value) }
 
+    /** Whether Lucense has asked once to be let off battery saving; it doesn't ask again. */
+    private val _backgroundAsked = MutableStateFlow(prefs.getBoolean(KEY_BACKGROUND_ASKED, false))
+    val backgroundAsked: StateFlow<Boolean> = _backgroundAsked.asStateFlow()
+    fun setBackgroundAsked() = put(_backgroundAsked, true) { putBoolean(KEY_BACKGROUND_ASKED, true) }
+
     private val _lyricsTerm = MutableStateFlow(LyricsTerm.of(prefs.getString(KEY_LYRICS_TERM, null)))
     val lyricsTerm: StateFlow<LyricsTerm> = _lyricsTerm.asStateFlow()
     fun setLyricsTerm(value: LyricsTerm) = put(_lyricsTerm, value) { putString(KEY_LYRICS_TERM, value.name) }
@@ -185,6 +190,7 @@ class AppPrefs(context: Context) {
         const val KEY_CROSSFADE = "crossfade_seconds"
         const val KEY_LEVELLING = "levelling"
         const val KEY_SLEEP_FADE = "sleep_fade"
+        const val KEY_BACKGROUND_ASKED = "background_asked"
         const val KEY_LYRICS_TERM = "lyrics_term"
         const val KEY_LYRICS_PATTERN = "lyrics_term_custom"
         const val KEY_COVER_PROVIDER = "cover_provider"
