@@ -1085,7 +1085,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = saved?.let { LyricsTranslator.Translation(it.lines, it.from) } ?: LyricsTranslator.translate(lines)
             _lyricsTranslating.value = false
             if (currentTrackId.value != id) return@launch
-            val already = result != null && result.lines.map { it.trim() } == lines.map { it.trim() }
+            val already = result != null && result.lines.all { it.isBlank() }
             if (result != null) {
                 withContext(Dispatchers.IO) { savedTranslations.put(lines, language, result, shown = !already) }
             }

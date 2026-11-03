@@ -56,7 +56,9 @@ class SavedTranslations(private val folder: File) {
 
     private fun fileFor(lyrics: List<String>, language: String): File {
         val digest = MessageDigest.getInstance("SHA-256")
-        digest.update(language.lowercase().toByteArray())
+        // "2": translated line by line since 1.54.1; what 1.54.0 kept for a song
+        // only partly in another language was the song untranslated.
+        digest.update(("2:" + language.lowercase()).toByteArray())
         digest.update(0)
         // Spacing at either end of a line doesn't make it other lyrics.
         digest.update(lyrics.joinToString("\n") { it.trim() }.toByteArray())

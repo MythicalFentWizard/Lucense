@@ -1994,7 +1994,7 @@ class DesktopController(parent: CoroutineScope) {
             val result = saved?.let { LyricsTranslator.Translation(it.lines, it.from) } ?: LyricsTranslator.translate(lines)
             lyricsTranslating = false
             if (engine.status.value.track?.file != track.file) return@launch
-            val already = result != null && result.lines.map { it.trim() } == lines.map { it.trim() }
+            val already = result != null && result.lines.all { it.isBlank() }
             if (result != null) io { savedTranslations.put(lines, language, result, shown = !already) }
             when {
                 result == null -> lyricsTranslationNote = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
