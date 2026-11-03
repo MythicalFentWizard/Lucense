@@ -252,9 +252,10 @@ val packageSetup by tasks.registering(Exec::class) {
 // postinst was jpackage's own, byte for byte). Instead the finished app image
 // gets the permission back, and the .deb and .rpm are packaged from that image
 // rather than built from scratch again, so they carry it as it is.
-val linuxTools = listOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
 tasks.matching { it.name == "createDistributable" || it.name == "createReleaseDistributable" }.configureEach {
     val image = (this as org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask).destinationDir
+    // Kept inside the task: a value of the script itself can't go in the configuration cache.
+    val linuxTools = listOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
     doLast {
         if (!System.getProperty("os.name").lowercase().contains("linux")) return@doLast
         val resources = image.get().asFile.resolve("Lucense/lib/app/resources")
