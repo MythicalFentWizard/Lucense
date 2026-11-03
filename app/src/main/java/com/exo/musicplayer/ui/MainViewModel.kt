@@ -33,6 +33,7 @@ import com.exo.musicplayer.data.lyrics.LyricLine
 import com.exo.musicplayer.data.lyrics.LyricsFetch
 import com.exo.musicplayer.data.lyrics.LyricsTerm
 import com.exo.musicplayer.data.lyrics.LyricsTranslator
+import com.exo.musicplayer.data.lyrics.SavedTranslations
 import com.exo.musicplayer.data.lyrics.tidyLyrics
 import com.exo.musicplayer.data.playlist.PlaylistEntry
 import com.exo.musicplayer.data.playlist.PlaylistFile
@@ -1007,6 +1008,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _lyricsTranslationNote = MutableStateFlow<String?>(null)
     val lyricsTranslationNote: StateFlow<String?> = _lyricsTranslationNote.asStateFlow()
 
+    /** Translations fetched before, so a song translated once shows it again without asking Google. */
+    private val savedTranslations by lazy { SavedTranslations(File(app.filesDir, "translations")) }
+
+    /** The lyrics of [lyrics], line by line: the timed ones where there are, else the plain. */
+    private fun linesOf(lyrics: Lyrics): List<String> =
+        lyrics.syncedText?.let(LrcParser::parse).orEmpty().map { it.text }
+            .ifEmpty { lyrics.plainText.orEmpty().lines() }
+
     init {
         // A translation and an offset belong to one song.
         viewModelScope.launch {
@@ -1016,6 +1025,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _lyricsTranslationNote.value = null
             }
         }
+        // A saved translation that was left showing comes back with its lyrics, without a fetch.
+        viewModelScope.launch {
+            currentLyrics.collect { lyrics ->
+                if (lyrics == null || lyrics.trackId != currentTrackId.value) return@collect
+                val lines = linesOf(lyrics).takeIf { it.isNotEmpty() } ?: return@collect
+                val language = LyricsTranslator.deviceLanguage()
+                val saved = withContext(Dispatchers.IO) { savedTranslations.get(lines, language) }
+                if (saved == null || !saved.shown) return@collect
+                if (currentLyrics.value?.trackId != lyrics.trackId || _lyricsTranslation.value != null) return@collect
+                showTranslation(LyricsTranslator.Translation(saved.lines, saved.from), language)
+            }
+        }
+    }
+
+    private fun showTranslation(result: LyricsTranslator.Translation, language: String) {
+        val into = LyricsTranslator.languageName(language) ?: "your language"
+        _lyricsTranslation.value = result.lines
+        _lyricsTranslationNote.value = LyricsTranslator.languageName(result.from)
+            ?.let { "Translated from $it into $into" } ?: "Translated into $into"
     }
 
     fun nudgeLyrics(deltaMs: Long) {
@@ -1029,33 +1057,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetLyricsOffset() = nudgeLyrics(-_lyricsOffsetMs.value)
 
-    /** Translates the lyrics into the phone's language, or hides the translation if one is showing. */
+    /**
+     * Translates the lyrics into the phone's language, or hides the
+     * translation if one is showing. A translation is saved once fetched, and
+     * remembers whether it was left showing: one left on comes back with the
+     * song, one hidden stays hidden.
+     */
     fun translateLyrics() {
+        val language = LyricsTranslator.deviceLanguage()
+        val lyrics = currentLyrics.value
         if (_lyricsTranslation.value != null) {
             _lyricsTranslation.value = null
             _lyricsTranslationNote.value = null
+            val lines = lyrics?.let(::linesOf).orEmpty()
+            if (lines.isNotEmpty()) {
+                viewModelScope.launch(Dispatchers.IO) { savedTranslations.setShown(lines, language, false) }
+            }
             return
         }
-        val lyrics = currentLyrics.value ?: return
-        val lines = currentLyricLines.value.map { it.text }
-            .ifEmpty { lyrics.plainText.orEmpty().lines() }
+        if (lyrics == null) return
+        val lines = linesOf(lyrics)
         if (lines.isEmpty() || _lyricsTranslating.value) return
         val id = currentTrackId.value
         viewModelScope.launch {
             _lyricsTranslating.value = true
-            val result = LyricsTranslator.translate(lines)
+            val saved = withContext(Dispatchers.IO) { savedTranslations.get(lines, language) }
+            val result = saved?.let { LyricsTranslator.Translation(it.lines, it.from) } ?: LyricsTranslator.translate(lines)
             _lyricsTranslating.value = false
             if (currentTrackId.value != id) return@launch
-            val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
+            val already = result != null && result.lines.map { it.trim() } == lines.map { it.trim() }
+            if (result != null) {
+                withContext(Dispatchers.IO) { savedTranslations.put(lines, language, result, shown = !already) }
+            }
             when {
                 result == null -> _lyricsTranslationNote.value = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
-                result.lines.map { it.trim() } == lines.map { it.trim() } ->
-                    _lyricsTranslationNote.value = "These lyrics are already in $language."
-                else -> {
-                    _lyricsTranslation.value = result.lines
-                    _lyricsTranslationNote.value = LyricsTranslator.languageName(result.from)
-                        ?.let { "Translated from $it into $language" } ?: "Translated into $language"
-                }
+                already -> _lyricsTranslationNote.value =
+                    "These lyrics are already in ${LyricsTranslator.languageName(language) ?: "your language"}."
+                else -> showTranslation(result, language)
             }
         }
     }

@@ -79,6 +79,7 @@ import com.exo.musicplayer.data.youtube.YouTubeVideo
 import com.exo.musicplayer.data.youtube.YtDlpFlatSearch
 import com.exo.musicplayer.desktop.audio.PreviewPlayer
 import com.exo.musicplayer.data.lyrics.LyricsTranslator
+import com.exo.musicplayer.data.lyrics.SavedTranslations
 import com.exo.musicplayer.data.lyrics.LrcParser
 import com.exo.musicplayer.data.youtube.PreviewLabel
 import java.util.concurrent.atomic.AtomicInteger
@@ -361,6 +362,69 @@ class DesktopController(parent: CoroutineScope) {
 
     fun searchCollection(kind: CollectionKind, text: String) {
         if (kind == CollectionKind.ALBUMS) albumQuery = text else artistQuery = text
+    }
+
+    /** The album and the artist open on a page of their own, by card key; null shows the cards. */
+    var openAlbum by mutableStateOf<String?>(null)
+        private set
+    var openArtist by mutableStateOf<String?>(null)
+        private set
+
+    fun openGroupKey(kind: CollectionKind): String? = if (kind == CollectionKind.ALBUMS) openAlbum else openArtist
+
+    fun openGroup(kind: CollectionKind, key: String?) {
+        if (kind == CollectionKind.ALBUMS) openAlbum = key else openArtist = key
+    }
+
+    /** Which of those pages is on screen, if one is: what Escape goes back from. */
+    var groupPageShown by mutableStateOf<CollectionKind?>(null)
+
+    /** Back from the album or artist page on screen to the cards; false when none is showing. */
+    fun closeGroupPage(): Boolean {
+        val kind = groupPageShown ?: return false
+        openGroup(kind, null)
+        return true
+    }
+
+    /**
+     * Whether the queue is [tracks], in that order: an album playing from its
+     * own page, where the big button pauses it rather than starting it over.
+     */
+    fun isQueue(tracks: List<DesktopTrack>): Boolean =
+        queue.size == tracks.size && queue.indices.all { queue[it].file == tracks[it].file }
+
+    /** Albums whose songs were dragged into an order of their own, by album key: the files' paths in that order. */
+    var albumOrders by mutableStateOf<Map<String, List<String>>>(emptyMap())
+        private set
+
+    /**
+     * Puts [group]'s songs in the order [tracks] are in, from now on: on its
+     * page, from its card's play button, and - when the album is what's
+     * playing - for the rest of what's playing now.
+     */
+    fun reorderAlbum(group: TrackGroup, tracks: List<DesktopTrack>) {
+        val paths = tracks.map { it.file.absolutePath }
+        albumOrders = albumOrders + (group.key to paths)
+        scope.launch { io { store.saveAlbumOrder(group.key, paths) } }
+        followNewOrder(group.tracks, tracks)
+    }
+
+    /** Back to the album's own order, by track number. */
+    fun resetAlbumOrder(group: TrackGroup) {
+        albumOrders = albumOrders - group.key
+        scope.launch { io { store.deleteAlbumOrder(group.key) } }
+        followNewOrder(group.tracks, group.tracks.sortedWith(TrackGroups.ALBUM_ORDER))
+    }
+
+    /** When the album playing is put in another order, what's still to come follows it. */
+    private fun followNewOrder(before: List<DesktopTrack>, after: List<DesktopTrack>) {
+        if (!isQueue(before)) return
+        // Only when the order playing is the album's as it was: a shuffle, or songs
+        // queued by hand, are kept as they are.
+        val plain = !shuffle && order.size == before.size && order.indices.all { order[it].file == before[it].file }
+        queue = after
+        if (plain) order = after
+        refreshUpNext()
     }
 
     // Ordering is remembered between sessions: each of these writes itself
@@ -661,6 +725,7 @@ class DesktopController(parent: CoroutineScope) {
         val stars = io { store.ratings() }
         loadOriginals()
         val measured = io { store.levels() }
+        albumOrders = io { store.albumOrders() }
         listenTimes = listen
         playCounts = plays
         favourites = favs
@@ -1898,34 +1963,65 @@ class DesktopController(parent: CoroutineScope) {
 
     fun resetLyricsOffset() = nudgeLyrics(-lyricsOffsetMs)
 
-    /** Translates the lyrics into the computer's language, or hides the translation if one is showing. */
+    /** Translations fetched before, so a song translated once shows it again without asking Google. */
+    private val savedTranslations = SavedTranslations(File(AppDirs.root, "translations"))
+
+    /** The lyrics showing, line by line: the timed ones where there are, else the plain. */
+    private fun lyricLines(): List<String>? =
+        lyricsSynced?.let { LrcParser.parse(it).map { line -> line.text } }?.takeIf { it.isNotEmpty() }
+            ?: lyricsPlain?.lines()
+
+    /**
+     * Translates the lyrics into the computer's language, or hides the
+     * translation if one is showing. A translation is saved once fetched, and
+     * remembers whether it was left showing: one left on comes back with the
+     * song, one hidden stays hidden.
+     */
     fun translateLyrics() {
+        val language = LyricsTranslator.deviceLanguage()
         if (lyricsTranslation != null) {
             lyricsTranslation = null
             lyricsTranslationNote = null
+            lyricLines()?.let { lines -> scope.launch { io { savedTranslations.setShown(lines, language, false) } } }
             return
         }
         val track = engine.status.value.track ?: return
-        val lines = lyricsSynced?.let { LrcParser.parse(it).map { line -> line.text } }?.takeIf { it.isNotEmpty() }
-            ?: lyricsPlain?.lines()
-            ?: return
+        val lines = lyricLines() ?: return
         if (lyricsTranslating) return
         lyricsTranslating = true
         scope.launch {
-            val result = LyricsTranslator.translate(lines)
+            val saved = io { savedTranslations.get(lines, language) }
+            val result = saved?.let { LyricsTranslator.Translation(it.lines, it.from) } ?: LyricsTranslator.translate(lines)
             lyricsTranslating = false
             if (engine.status.value.track?.file != track.file) return@launch
-            val language = LyricsTranslator.languageName(LyricsTranslator.deviceLanguage()) ?: "your language"
+            val already = result != null && result.lines.map { it.trim() } == lines.map { it.trim() }
+            if (result != null) io { savedTranslations.put(lines, language, result, shown = !already) }
             when {
                 result == null -> lyricsTranslationNote = "Google Translate couldn't be reached, or is turning this network away for now. Try again in a while."
-                result.lines.map { it.trim() } == lines.map { it.trim() } ->
-                    lyricsTranslationNote = "These lyrics are already in $language."
-                else -> {
-                    lyricsTranslation = result.lines
-                    lyricsTranslationNote = LyricsTranslator.languageName(result.from)
-                        ?.let { "Translated from $it into $language" } ?: "Translated into $language"
-                }
+                already -> lyricsTranslationNote =
+                    "These lyrics are already in ${LyricsTranslator.languageName(language) ?: "your language"}."
+                else -> showTranslation(result, language)
             }
+        }
+    }
+
+    private fun showTranslation(result: LyricsTranslator.Translation, language: String) {
+        val into = LyricsTranslator.languageName(language) ?: "your language"
+        lyricsTranslation = result.lines
+        lyricsTranslationNote = LyricsTranslator.languageName(result.from)
+            ?.let { "Translated from $it into $into" } ?: "Translated into $into"
+    }
+
+    /** A saved translation that was left showing comes back with its lyrics, without a fetch. */
+    private fun restoreTranslation(track: DesktopTrack) {
+        val lines = lyricLines() ?: return
+        val language = LyricsTranslator.deviceLanguage()
+        scope.launch {
+            val saved = io { savedTranslations.get(lines, language) } ?: return@launch
+            // Still this song, still these lyrics, and nothing shown in the meantime.
+            if (!saved.shown || engine.status.value.track?.file != track.file) return@launch
+            if (lyricsTranslation != null || lyricLines() != lines) return@launch
+            showTranslation(LyricsTranslator.Translation(saved.lines, saved.from), language)
         }
     }
 
@@ -1943,6 +2039,7 @@ class DesktopController(parent: CoroutineScope) {
                 lyricsPlain = stored.plain?.let(::tidyLyrics)
                 lyricsSynced = stored.synced
                 lyricsSource = stored.source
+                restoreTranslation(track)
             }
         }
     }
@@ -1993,6 +2090,9 @@ class DesktopController(parent: CoroutineScope) {
                     lyricsPlain = result.plain
                     lyricsSynced = result.synced
                     lyricsSource = provider
+                    lyricsTranslation = null
+                    lyricsTranslationNote = null
+                    restoreTranslation(track)
                     io {
                         store.saveLyrics(
                             track.file.absolutePath,
@@ -2045,6 +2145,10 @@ class DesktopController(parent: CoroutineScope) {
                 lyricsSynced = if (looksTimed) trimmed else null
                 lyricsSource = "Added by hand"
             }
+            // Other lyrics, so the translation shown was of the old ones.
+            lyricsTranslation = null
+            lyricsTranslationNote = null
+            if (trimmed.isNotEmpty()) restoreTranslation(track)
             lyricsNote = null
         }
     }
@@ -5210,6 +5314,59 @@ class DesktopController(parent: CoroutineScope) {
 
     /** Whether the small always-on-top player is open. */
     var miniPlayer by mutableStateOf(false)
+
+    /** Whether this desktop has a tray to keep Lucense in. Windows always does; plain GNOME doesn't. */
+    val trayAvailable: Boolean by lazy { runCatching { java.awt.SystemTray.isSupported() }.getOrDefault(false) }
+
+    private val keepInTrayState = mutableStateOf(settings.keepInTray)
+
+    /** Closing the window leaves Lucense playing in the tray, quit from there. */
+    var keepInTray: Boolean
+        get() = keepInTrayState.value
+        set(value) {
+            keepInTrayState.value = value
+            settings.keepInTray = value
+        }
+
+    private val trayMiniPlayerState = mutableStateOf(settings.trayMiniPlayer)
+
+    /** Going to the tray brings up the mini player, so what's playing is still in sight. */
+    var trayMiniPlayer: Boolean
+        get() = trayMiniPlayerState.value
+        set(value) {
+            trayMiniPlayerState.value = value
+            settings.trayMiniPlayer = value
+        }
+
+    /** Whether the main window is showing, or Lucense is in the tray. */
+    var windowShown by mutableStateOf(true)
+        private set
+
+    /** Goes up each time the main window is asked to come to the front. */
+    var windowRaised by mutableStateOf(0)
+        private set
+
+    /** The window's close button: into the tray when that is chosen and there is one; false means quit. */
+    fun closeToTray(): Boolean {
+        if (!keepInTray || !trayAvailable) return false
+        windowShown = false
+        if (trayMiniPlayer && !miniPlayer) {
+            miniPlayer = true
+            miniPlayerFromTray = true
+        }
+        return true
+    }
+
+    /** The mini player came up because the window went to the tray, so it goes when the window is back. */
+    private var miniPlayerFromTray = false
+
+    /** Brings the main window back, from the tray, the mini player, or Lucense being started again. */
+    fun showWindow() {
+        if (!windowShown && miniPlayerFromTray) miniPlayer = false
+        miniPlayerFromTray = false
+        windowShown = true
+        windowRaised++
+    }
 
     /** Whether the list of keyboard shortcuts is on screen. */
     var showShortcuts by mutableStateOf(false)

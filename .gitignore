@@ -33,3 +33,6 @@ sdk files/
 # The installer's build output.
 installer/bin/
 installer/obj/
+
+# The knowledge graph graphify builds of the code, for questions about it; rebuilt locally.
+graphify-out/

@@ -58,6 +58,9 @@ dependencies {
     implementation(libs.dbus.java.transport)
 
     testImplementation(kotlin("test-junit5"))
+    // Drives pages with a pretend mouse: the album page's drag to reorder.
+    @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+    testImplementation(compose.uiTest)
 }
 
 tasks.test {
@@ -241,20 +244,29 @@ val packageSetup by tasks.registering(Exec::class) {
     )
 }
 
-// The bundled tools are programs: on Linux they need permission to run, which
-// Compose's copy of them into the app image leaves behind (measured: rw-r--r--
-// in the .deb, and "Permission denied" running them). So it is given back on
-// the finished image, which the .deb and .rpm are then made from. ToolPaths
-// copies one that can't run somewhere it can be given it, but that is 300 MB
-// copied on first use.
+// The bundled tools are programs: on Linux they need permission to run, and
+// Compose's copy of them into the app image leaves it behind (measured:
+// rw-r--r-- in the .deb and .rpm, and "Permission denied" running them).
+// Install scripts can't put it back: Compose hands jpackage a resource folder
+// of its own after any given here, so jpackage never saw ours (the .deb's
+// postinst was jpackage's own, byte for byte). Instead the finished app image
+// gets the permission back, and the .deb and .rpm are packaged from that image
+// rather than built from scratch again, so they carry it as it is.
+val linuxTools = listOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
 tasks.matching { it.name == "createDistributable" || it.name == "createReleaseDistributable" }.configureEach {
+    val image = (this as org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask).destinationDir
     doLast {
-        if (!buildingOnLinux) return@doLast
-        val tools = setOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
-        outputs.files.forEach { root ->
-            root.walkTopDown()
-                .filter { it.isFile && it.name in tools && it.parentFile?.name == "resources" }
-                .forEach { it.setExecutable(true, false) }
+        if (!System.getProperty("os.name").lowercase().contains("linux")) return@doLast
+        val resources = image.get().asFile.resolve("Lucense/lib/app/resources")
+        linuxTools.map { resources.resolve(it) }.filter { it.isFile }.forEach { it.setExecutable(true, false) }
+    }
+}
+listOf("", "Release").forEach { variant ->
+    tasks.matching { it.name == "package${variant}Deb" || it.name == "package${variant}Rpm" }.configureEach {
+        val image = tasks.named<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>("create${variant}Distributable")
+        (this as org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask).apply {
+            dependsOn(image)
+            appImage.set(image.flatMap { it.destinationDir.dir("Lucense") })
         }
     }
 }

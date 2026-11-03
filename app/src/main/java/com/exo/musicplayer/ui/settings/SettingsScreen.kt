@@ -37,6 +37,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -69,7 +70,9 @@ class SettingsValues(
     val coverProvidersOff: Set<String> = emptySet(),
     val downloadProxy: String,
     val update: UpdateState,
-    val youtubeSignedIn: Boolean = false
+    val youtubeSignedIn: Boolean = false,
+    /** Whether Android lets Lucense run in the background, off battery saving. */
+    val backgroundAllowed: Boolean = true
 )
 
 /** What the settings page can change. */
@@ -95,7 +98,8 @@ class SettingsActions(
     val onOpenUpdate: (String) -> Unit,
     val onYouTubeSignIn: () -> Unit = {},
     val onYouTubeCookieFile: () -> Unit = {},
-    val onYouTubeSignOut: () -> Unit = {}
+    val onYouTubeSignOut: () -> Unit = {},
+    val onAllowBackground: () -> Unit = {}
 )
 
 @Composable
@@ -148,6 +152,19 @@ fun SettingsScreen(values: SettingsValues, actions: SettingsActions, modifier: M
             values.sleepFade,
             actions.onSleepFade
         )
+        Setting(
+            "Keep playing with the screen off",
+            if (values.backgroundAllowed) {
+                "Lucense may run in the background, so Android won't stop the music to save battery."
+            } else {
+                "To save battery, Android can stop Lucense once the screen is off, and on many phones that " +
+                    "cuts the music off. Allow it to run in the background and it won't."
+            }
+        ) {
+            if (!values.backgroundAllowed) {
+                OutlinedButton(onClick = actions.onAllowBackground) { Text("Allow") }
+            }
+        }
 
         Section("Lyrics and artwork")
         Setting("Lyrics search", values.lyricsTerm.note) {

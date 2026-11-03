@@ -3,7 +3,9 @@ package com.exo.musicplayer.playback
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.C
+import android.util.Log
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -133,6 +135,16 @@ class PlaybackService : MediaSessionService(), PlayerHost {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
+    /**
+     * Stays in the foreground while a call or another app's sound has the
+     * music paused. Android stops apps it thinks are idle, and won't let one
+     * that dropped out of the foreground back into it by itself once the
+     * call ends - so the music never came back.
+     */
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        super.onUpdateNotification(session, startInForegroundRequired || focus?.pausedForInterruption == true)
+    }
+
     /** Swiping the app away should not kill audio that is still playing. */
     override fun onTaskRemoved(rootIntent: Intent?) {
         remember()
@@ -237,8 +249,13 @@ class PlaybackService : MediaSessionService(), PlayerHost {
             if (deck === active) rememberSoon()
         }
 
+        override fun onPlayerError(error: PlaybackException) {
+            if (deck === active) carryOnPast(deck.player, error)
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (deck !== active) return
+            if (isPlaying) failedInARow = 0
             if (isPlaying) startWatching() else {
                 rememberSoon()
                 // Pausing in the middle of a crossfade silences both songs.
@@ -267,6 +284,39 @@ class PlaybackService : MediaSessionService(), PlayerHost {
                 rememberSoon()
             }
         }
+    }
+
+    /** Songs in a row that wouldn't play. */
+    private var failedInARow = 0
+
+    /** The song tried once more after the network dropped, so it isn't tried forever. */
+    private var retried: String? = null
+
+    /**
+     * A song that won't play - a file gone, a stream whose link ran out - used
+     * to stop everything right there, as if the phone had put the music to
+     * sleep. Now the network gets one more go after a moment, and otherwise
+     * the next song plays. Past a handful in a row it stops, rather than
+     * racing through a queue that can't play at all.
+     */
+    private fun carryOnPast(player: ExoPlayer, error: PlaybackException) {
+        val item = player.currentMediaItem?.mediaId
+        Log.w(TAG, "Couldn't play $item (${error.errorCodeName})", error)
+        val network = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+        if (network && retried != item) {
+            retried = item
+            serviceScope.launch {
+                delay(RETRY_MS)
+                if (player.playerError != null && player.currentMediaItem?.mediaId == item) player.prepare()
+            }
+            return
+        }
+        retried = null
+        failedInARow++
+        if (failedInARow > MOST_FAILED_IN_A_ROW || !player.hasNextMediaItem()) return
+        player.seekToNextMediaItem()
+        player.prepare()
     }
 
     private var watcher: Job? = null
@@ -474,6 +524,9 @@ class PlaybackService : MediaSessionService(), PlayerHost {
     }
 
     private companion object {
+        const val TAG = "PlaybackService"
+        const val RETRY_MS = 2_000L
+        const val MOST_FAILED_IN_A_ROW = 5
         const val WATCH_MS = 250L
         const val SAVE_EVERY_MS = 5_000L
         const val FADE_STEP_MS = 50L

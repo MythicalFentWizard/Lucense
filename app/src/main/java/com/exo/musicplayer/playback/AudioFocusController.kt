@@ -54,6 +54,9 @@ class AudioFocusController(
 
     /** Set when we paused ourselves, so we know a later GAIN should resume. */
     private var pausedByFocusLoss = false
+
+    /** Paused for a call or another app's sound, and coming back once it's over. */
+    val pausedForInterruption: Boolean get() = pausedByFocusLoss
     private var fadeJob: Job? = null
 
     /**

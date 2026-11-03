@@ -25,7 +25,20 @@ object CoverColour {
      * [pixels] are ARGB; a few thousand is plenty, more are sampled. [background]
      * is the colour the accent will sit on.
      */
-    fun accentFrom(pixels: IntArray, background: Int): Int? {
+    fun accentFrom(pixels: IntArray, background: Int): Int? =
+        dominant(pixels)?.let { (h, s) -> readable(h, s.coerceIn(0.45, 0.85), background) }
+
+    /**
+     * A deep shade of the cover's colour for the banner across the top of an
+     * album's page, as Spotify colours one: dark enough that white writing on
+     * it reads (7:1), so the title is white whatever the theme. Null for a
+     * cover that is all greys.
+     */
+    fun bannerFrom(pixels: IntArray): Int? =
+        dominant(pixels)?.let { (h, s) -> deep(h, s.coerceIn(0.40, 0.80)) }
+
+    /** The hue and saturation of the cover's main colour: the group of hues both large and vivid. */
+    private fun dominant(pixels: IntArray): Pair<Double, Double>? {
         if (pixels.isEmpty()) return null
         val step = max(1, pixels.size / 6_000)
         val weight = DoubleArray(BINS)
@@ -75,7 +88,18 @@ object CoverColour {
         if (best < 0 || count[best] < seen * 0.03) return null
 
         val (h, s, _) = hsl(red[best] / weight[best], green[best] / weight[best], blue[best] / weight[best])
-        return readable(h, s.coerceIn(0.45, 0.85), background)
+        return h to s
+    }
+
+    /** The colour at hue [h] and saturation [s], darkened until white on it is 7:1. */
+    private fun deep(h: Double, s: Double): Int {
+        var l = 0.36
+        var colour = fromHsl(h, s, l)
+        while (contrast(luminance(colour), 1.0) < 7.0 && l > 0.08) {
+            l -= 0.02
+            colour = fromHsl(h, s, l)
+        }
+        return colour
     }
 
     /**

@@ -871,7 +871,7 @@ fun ShortcutsDialog(onDismiss: () -> Unit) {
             "M" to "Mute, or put the volume back",
             "R" to "Repeat: all, then one, then off",
             "Ctrl + A" to "Select every song in view",
-            "Esc" to "Clear the selection",
+            "Esc" to "Clear the selection, or back from an album or artist",
             "Ctrl + click" to "Add one song to the selection",
             "Shift + click" to "Select everything between",
             "/" to "This list"

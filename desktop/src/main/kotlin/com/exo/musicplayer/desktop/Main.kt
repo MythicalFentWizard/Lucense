@@ -61,6 +61,8 @@ import com.exo.musicplayer.desktop.ui.Palette
 import com.exo.musicplayer.desktop.ui.LucenseDesktopTheme
 import com.exo.musicplayer.desktop.ui.ScaledToWindow
 import com.exo.musicplayer.desktop.ui.Typing
+import com.exo.musicplayer.desktop.system.SingleInstance
+import androidx.compose.runtime.snapshotFlow
 import java.awt.GraphicsEnvironment
 import java.awt.SystemTray
 import java.awt.image.BufferedImage
@@ -80,7 +82,14 @@ import javax.swing.filechooser.FileNameExtensionFilter
  * snapping back to Windows ([NativeFrame]), so it keeps Windows' snap layouts,
  * animations and shadow.
  */
-fun main(args: Array<String>) = application {
+fun main(args: Array<String>) {
+    // Already running - perhaps out of sight in the tray: that one takes the
+    // files and comes to the front, and this one goes.
+    if (SingleInstance.handOver(args)) return
+    lucense(args)
+}
+
+private fun lucense(args: Array<String>) = application {
     // The folder picker is Swing; matching the OS look keeps it from standing out.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
 
@@ -89,14 +98,28 @@ fun main(args: Array<String>) = application {
     val scope = rememberCoroutineScope()
     val controller = remember { DesktopController(scope) }
 
+    // Lucense started again while this one runs: show this one, and play what it was opened with.
+    remember {
+        SingleInstance.listen { paths ->
+            controller.showWindow()
+            if (paths.isNotEmpty()) controller.openExternal(paths)
+        }
+    }
+
     // A tray icon, so the keys and the transport are there while the window is
-    // behind something else. Not every desktop has a tray; Windows always does.
-    if (SystemTray.isSupported()) {
+    // behind something else - or closed, when Lucense is kept in the tray.
+    // Not every desktop has a tray; Windows always does.
+    if (controller.trayAvailable) {
         val playing by controller.engine.status.collectAsState()
         Tray(
             icon = remember { trayIcon() },
             tooltip = playing.track?.let { "${it.title} — Lucense" } ?: "Lucense",
+            // A double-click on the icon, as Windows has it.
+            onAction = { controller.showWindow() },
             menu = {
+                Item("Open Lucense") { controller.showWindow() }
+                CheckboxItem("Mini player", checked = controller.miniPlayer) { controller.miniPlayer = it }
+                Separator()
                 Item(if (playing.playing) "Pause" else "Play") { controller.togglePlay() }
                 Item("Next") { controller.next() }
                 Item("Previous") { controller.previous() }
@@ -106,11 +129,14 @@ fun main(args: Array<String>) = application {
         )
     }
 
+    val mainWindow = rememberWindowState(width = 1280.dp, height = 820.dp)
     Window(
-        onCloseRequest = ::exitApplication,
+        // Kept in the tray when that is chosen; otherwise closing quits.
+        onCloseRequest = { if (!controller.closeToTray()) exitApplication() },
+        visible = controller.windowShown,
         title = "Lucense",
         icon = painterResource(FALLBACK_ICON),
-        state = rememberWindowState(width = 1280.dp, height = 820.dp),
+        state = mainWindow,
         // Lucense draws its own title strip and edges (WindowFrame), and
         // Windows 11 rounds the corners.
         undecorated = true,
@@ -184,6 +210,8 @@ fun main(args: Array<String>) = application {
                         controller.showShortcuts = !controller.showShortcuts
                         true
                     }
+                    // Back from an album's or an artist's page to the cards.
+                    Key.Escape -> controller.closeGroupPage()
                     else -> false
                 }
             }
@@ -192,9 +220,17 @@ fun main(args: Array<String>) = application {
         EveryIconSize()
         // The smallest window the scaled layout still fits in.
         LaunchedEffect(Unit) { window.minimumSize = Dimension(760, 500) }
+        // Asked to the front - from the tray, the mini player, or a second start.
+        LaunchedEffect(controller.windowRaised) {
+            if (controller.windowRaised == 0) return@LaunchedEffect
+            mainWindow.isMinimized = false
+            window.toFront()
+            window.requestFocus()
+        }
         // Anything Windows handed over: a double-clicked file, or "Open with".
         LaunchedEffect(Unit) { controller.openExternal(args.toList()) }
-        val frame = remember { WindowFrame(window, ::exitApplication) }
+        // The title strip's close button, like the window's: into the tray when that is chosen.
+        val frame = remember { WindowFrame(window) { if (!controller.closeToTray()) exitApplication() } }
         LaunchedEffect(Unit) {
             // Windows moves, sizes and snaps it from here on; Compose's own
             // resize border along the edges would only be in the way.
@@ -214,16 +250,38 @@ fun main(args: Array<String>) = application {
     }
 
     if (controller.miniPlayer) {
+        // Where it was left last time, or the bottom right corner of the screen.
+        val miniState = rememberWindowState(
+            width = 392.dp,
+            height = 128.dp,
+            position = controller.settings.miniPlayerAt.split(',').mapNotNull { it.trim().toFloatOrNull() }
+                .takeIf { it.size == 2 }
+                ?.let { (x, y) -> WindowPosition(x.dp, y.dp) }
+                ?: WindowPosition(Alignment.BottomEnd)
+        )
         Window(
             onCloseRequest = { controller.miniPlayer = false },
             title = "Lucense",
             icon = painterResource(FALLBACK_ICON),
-            state = rememberWindowState(width = 400.dp, height = 156.dp),
+            state = miniState,
+            undecorated = true,
+            transparent = true,
             resizable = false,
             alwaysOnTop = true
         ) {
             EveryIconSize()
-            LucenseDesktopTheme { MiniPlayer(controller) }
+            LaunchedEffect(Unit) {
+                snapshotFlow { miniState.position }.collect { at ->
+                    if (at is WindowPosition.Absolute) controller.settings.miniPlayerAt = "${at.x.value},${at.y.value}"
+                }
+            }
+            LucenseDesktopTheme {
+                MiniPlayer(
+                    controller,
+                    onExpand = { controller.showWindow() },
+                    onClose = { controller.miniPlayer = false }
+                )
+            }
         }
     }
 

@@ -329,6 +329,10 @@ private fun Header(
                 )
             }
         }
+        // Downloads, one tap from the library, rather than inside the add menu.
+        IconButton(onClick = onOpenDownload) {
+            Icon(Icons.Default.Download, contentDescription = "Downloads")
+        }
         AddMenu(onAddFiles, onAddFolder, onOpenDownload)
         IconButton(onClick = onOpenTools) {
             Icon(Icons.Default.Build, contentDescription = "Library tools")

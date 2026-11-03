@@ -144,6 +144,21 @@ class DesktopSettings {
         get() = prefs.getBoolean(KEY_LYRICS_OWN_BACKGROUND, false)
         set(value) = prefs.putBoolean(KEY_LYRICS_OWN_BACKGROUND, value)
 
+    /** Closing the window leaves Lucense playing in the tray instead of quitting. */
+    var keepInTray: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_IN_TRAY, false)
+        set(value) = prefs.putBoolean(KEY_KEEP_IN_TRAY, value)
+
+    /** Going to the tray opens the mini player. */
+    var trayMiniPlayer: Boolean
+        get() = prefs.getBoolean(KEY_TRAY_MINI_PLAYER, true)
+        set(value) = prefs.putBoolean(KEY_TRAY_MINI_PLAYER, value)
+
+    /** Where the mini player was left, as "x,y" in dp; empty for its corner of the screen. */
+    var miniPlayerAt: String
+        get() = prefs.get(KEY_MINI_PLAYER_AT, "")
+        set(value) = prefs.put(KEY_MINI_PLAYER_AT, value)
+
     /** Whether the window is drawn as liquid glass. */
     var glass: Boolean
         get() = prefs.getBoolean(KEY_GLASS, false)
@@ -359,6 +374,9 @@ class DesktopSettings {
         const val KEY_COVER_COLOURS = "cover_colours"
         const val KEY_GLASS = "glass_ui"
         const val KEY_LYRICS_OWN_BACKGROUND = "lyrics_own_background"
+        const val KEY_KEEP_IN_TRAY = "keep_in_tray"
+        const val KEY_TRAY_MINI_PLAYER = "tray_mini_player"
+        const val KEY_MINI_PLAYER_AT = "mini_player_at"
         const val KEY_DUCK_ENABLED = "duck_enabled"
         const val KEY_DUCK_KEY = "duck_key"
         const val KEY_DUCK_PERCENT = "duck_percent"

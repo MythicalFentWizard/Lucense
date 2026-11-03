@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- To ask, once, to be let off battery saving, which on many phones cuts the music off. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Attaching the reverb AudioEffect needs this on some OEM builds. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 

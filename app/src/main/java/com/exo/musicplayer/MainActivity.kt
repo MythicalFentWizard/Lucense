@@ -69,7 +69,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.exo.musicplayer.playback.BackgroundPlay
 import com.exo.musicplayer.data.db.Track
 import com.exo.musicplayer.data.discover.DiscoverBrowser
 import com.exo.musicplayer.data.download.DownloadFormat
@@ -278,6 +281,10 @@ private fun AppScaffold(
     val state by viewModel.playbackState.collectAsStateWithLifecycle()
     val currentTrackId by viewModel.currentTrackId.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+    // Whether Android lets Lucense off battery saving; read again on coming back from its question.
+    var backgroundAllowed by remember { mutableStateOf(BackgroundPlay.allowed(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { backgroundAllowed = BackgroundPlay.allowed(context) }
+    val backgroundAsked by context.musicApp.prefs.backgroundAsked.collectAsStateWithLifecycle()
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
     val queue by viewModel.queue.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -992,7 +999,8 @@ private fun AppScaffold(
                                     coverProvidersOff = coverProvidersOff,
                                     downloadProxy = downloadProxy,
                                     youtubeSignedIn = youtubeSignedIn,
-                                    update = update
+                                    update = update,
+                                    backgroundAllowed = backgroundAllowed
                                 ),
                                 actions = SettingsActions(
                                     onBack = { settingsRoute = null },
@@ -1012,6 +1020,7 @@ private fun AppScaffold(
                                     onYouTubeSignIn = { signingInToYouTube = true },
                                     onYouTubeCookieFile = { cookieFileLauncher.launchOrExplain(arrayOf("text/*", "*/*"), context) },
                                     onYouTubeSignOut = { context.musicApp.youtubeCookies.signOut() },
+                                    onAllowBackground = { BackgroundPlay.ask(context) },
                                     onBackUp = {
                                         viewModel.backUp { text ->
                                             pendingText = text
@@ -1031,6 +1040,30 @@ private fun AppScaffold(
         }
 
         // ---- Dialogs ----------------------------------------------------------
+
+        // The first time music plays, once: battery saving is what stops it with the screen off.
+        if (isPlaying && !backgroundAllowed && !backgroundAsked) {
+            AlertDialog(
+                onDismissRequest = { context.musicApp.prefs.setBackgroundAsked() },
+                title = { Text("Keep the music playing?") },
+                text = {
+                    Text(
+                        "To save battery, Android can stop Lucense once the screen is off, and on many phones " +
+                            "that cuts the music off mid-song. Let Lucense run in the background and it won't. " +
+                            "You can change this later in Settings."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        context.musicApp.prefs.setBackgroundAsked()
+                        BackgroundPlay.ask(context)
+                    }) { Text("Allow") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { context.musicApp.prefs.setBackgroundAsked() }) { Text("Not now") }
+                }
+            )
+        }
 
         // Riff's playlist migration: a list from another service, by its link.
         if (linkingPlaylist) {
