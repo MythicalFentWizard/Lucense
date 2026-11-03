@@ -245,14 +245,28 @@ val packageSetup by tasks.registering(Exec::class) {
 }
 
 // The bundled tools are programs: on Linux they need permission to run, and
-// jpackage's own copy of them into the package leaves it behind (measured:
-// rw-r--r-- in the .deb, and "Permission denied" running them). So jpackage is
-// given its install scripts from packaging/linux: its own templates, with the
-// permission given back - in the .rpm as it is built, and by the .deb as it
-// installs. Compose clears its own resource folder as it runs, so this one is
-// passed after it, and the later --resource-dir is the one jpackage takes.
-tasks.matching { it.name in setOf("packageDeb", "packageRpm", "packageReleaseDeb", "packageReleaseRpm") }.configureEach {
-    (this as org.jetbrains.compose.desktop.application.tasks.AbstractJvmToolOperationTask).freeArgs.addAll(
-        "--resource-dir", layout.projectDirectory.dir("packaging/linux").asFile.absolutePath
-    )
+// Compose's copy of them into the app image leaves it behind (measured:
+// rw-r--r-- in the .deb and .rpm, and "Permission denied" running them).
+// Install scripts can't put it back: Compose hands jpackage a resource folder
+// of its own after any given here, so jpackage never saw ours (the .deb's
+// postinst was jpackage's own, byte for byte). Instead the finished app image
+// gets the permission back, and the .deb and .rpm are packaged from that image
+// rather than built from scratch again, so they carry it as it is.
+val linuxTools = listOf("yt-dlp", "ffmpeg", "qjs", "spotdl")
+tasks.matching { it.name == "createDistributable" || it.name == "createReleaseDistributable" }.configureEach {
+    val image = (this as org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask).destinationDir
+    doLast {
+        if (!System.getProperty("os.name").lowercase().contains("linux")) return@doLast
+        val resources = image.get().asFile.resolve("Lucense/lib/app/resources")
+        linuxTools.map { resources.resolve(it) }.filter { it.isFile }.forEach { it.setExecutable(true, false) }
+    }
+}
+listOf("", "Release").forEach { variant ->
+    tasks.matching { it.name == "package${variant}Deb" || it.name == "package${variant}Rpm" }.configureEach {
+        val image = tasks.named<org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask>("create${variant}Distributable")
+        (this as org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask).apply {
+            dependsOn(image)
+            appImage.set(image.flatMap { it.destinationDir.dir("Lucense") })
+        }
+    }
 }
