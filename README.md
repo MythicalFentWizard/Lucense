@@ -95,8 +95,10 @@ same list (YouTube, iTunes, Deezer, Audius, Genius, MusicBrainz), so if you'd
 rather no song took a music video's still as its cover, untick YouTube. If all
 four lyrics services come up empty, you can paste them in yourself. Timed lyrics that run early or late can
 be moved a quarter-second at a time, and each song keeps its own setting.
-*Translate* puts the lyrics in your language under each line, the text can be
-selected and copied, and *Fullscreen* shows just the lyrics, big, over the
+*Translate* puts the lyrics in your language under each line, and the
+translation is kept: the next time the song plays it's there at once, with
+nothing asked of Google again, until you hide it. The text can be selected and
+copied, and *Fullscreen* shows just the lyrics, big, over the
 song's blurred cover or over your own background (your wallpaper and moving
 background). You choose what gets searched for: the tags
 as they are, a tidied title with `(Official Video)`, `[HD]` and `feat. …`
@@ -195,8 +197,21 @@ go through it; on Windows the setting covers everything the app does online.
 - **Trim** any song from its menu: drag the two handles over its waveform, hear
   the cut, and save it as a new song. The cut is lossless, nothing is encoded
   again, and the cover and tags come with it.
-- **Mini player** (Windows): a small always-on-top window. There's also a tray
-  icon with play/pause, next, previous and quit.
+- **Keep playing in the tray** (Windows). Tick it in Settings → Playback, and
+  closing the window leaves the music playing with Lucense in the tray.
+  Double-click the tray icon, or pick *Open Lucense* from its menu, to bring
+  the window back; *Quit* there ends it. The menu also has play/pause, next,
+  previous and the mini player.
+- **Mini player** (Windows): a small card that stays on top of everything,
+  with the cover, the song, a seek bar and the buttons. Drag it anywhere and
+  it stays there next time. It can come up by itself whenever Lucense goes to
+  the tray, and goes again when the window comes back.
+- **One Lucense at a time** (Windows): starting it again, or opening a song
+  with it, while it's already running brings up the one running, even from the
+  tray, and plays what you opened.
+- **Drag songs out** (Windows): drag a song from the list, an album's page, the
+  player bar or the mini player's cover into Explorer, Discord or a chat, and
+  its file goes there. Several selected songs go together.
 
 ### Finding things
 
@@ -214,6 +229,17 @@ when the box is empty.
 **Albums and Artists have a search of their own.** Type any part of a name, or of
 who it's by, in any order and with or without accents: `beyonce lemonade` finds
 *Lemonade*. On a phone, the search button searches whichever tab is open.
+
+**Albums and artists open to a page of their own** (Windows), as in Spotify:
+the cover over a band of its own colour, the year, the number of songs and the
+running time, *Play* and *Shuffle*, and the songs. An artist's page has their
+albums under the songs. **Esc**, or the arrow at the top, goes back to the
+cards.
+
+**Put an album in your own order** (Windows): on an album's page, drag a song
+by the handle at its left up or down. The album plays in that order from then
+on, everywhere, and the button beside *Shuffle* puts the album's own order
+back.
 
 You can sort by artist, title, album, length, times played, time listened, date
 added, rating or year. **J** (or *Playing* on Android) scrolls the list to
@@ -287,7 +313,7 @@ file said before anything touched it.
   | J | jump the list to the song playing |
   | M | mute, or put the volume back |
   | S · R | shuffle · repeat (all, one, off) |
-  | Ctrl + A · Esc | select everything in view · clear the selection |
+  | Ctrl + A · Esc | select everything in view · clear the selection, or back from an album's page |
 
   Your keyboard's or headset's **media keys** work even while Lucense is in the
   background.
@@ -345,6 +371,7 @@ Left out, because a phone either can't do them or has its own way:
 | Windows feature | on a phone |
 |---|---|
 | Keyboard shortcuts, tray icon, mini player window | no keyboard or desktop; the notification and lock screen have the controls |
+| Album and artist pages in Spotify's style, your own album order, dragging songs out | not yet; an album opens to its song list |
 | Discord Rich Presence | Discord's phone app has no way for another app to set it |
 | Lyrics in their own window | Android apps don't float windows over each other |
 | Game-ducking hotkey | no global hotkeys; Android lowers music for calls and alerts itself |
@@ -354,7 +381,21 @@ Left out, because a phone either can't do them or has its own way:
 | Liquid glass, the window frame | a phone's app fills the screen; there's no window to frame |
 
 There's no splash screen on Android any more: the app opens straight to where
-you left it.
+you left it. **Downloads** is one tap away, from the button at the top of the
+library.
+
+**It keeps playing with the screen off.** Some phones stopped the music a
+while after the screen went dark. Now:
+
+- The first time music plays, Lucense asks once to be let off battery saving,
+  which is what cuts the music off on many phones (Samsung, Xiaomi, OnePlus
+  and others). It's in Settings → Playback afterwards if you said not now.
+- Wi-Fi is kept awake too while a song plays, so a streamed song doesn't stall
+  when the phone lets Wi-Fi sleep.
+- A song that won't play, a file gone or a link run out, is skipped instead of
+  stopping everything. A dropped connection gets one more go first.
+- During a call, or another app's sound, Lucense stays ready, so the music
+  comes back afterwards instead of staying silent.
 
 ---
 
