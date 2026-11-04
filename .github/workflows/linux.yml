@@ -110,7 +110,14 @@ jobs:
           "$r/yt-dlp" --version
           "$r/ffmpeg" -hide_banner -version | head -1
           echo 'console.log("quickjs runs")' > /tmp/q.js && "$r/qjs" /tmp/q.js
-          "$r/spotdl" --version
+          # spotdl's own Linux build needs glibc 2.38; on an older system it must fail
+          # for that reason and no other, which Lucense then explains.
+          if ldd --version | head -1 | grep -qE ' 2\.(3[0-7]|[12][0-9])$'; then
+            ! "$r/spotdl" --version > /tmp/spotdl.txt 2>&1
+            grep -q "GLIBC_2.3[89]' not found" /tmp/spotdl.txt
+          else
+            "$r/spotdl" --version
+          fi
 
       - name: Start Lucense and look at it
         run: |

@@ -299,11 +299,19 @@ object YtDlp {
                     .also(NetworkProxy::configure)
                     .start()
                 registerProcess(process)
+                // spotdl's Linux build needs glibc 2.38: Ubuntu 22.04 and Debian 12 are older.
+                var systemTooOld = false
                 process.inputStream.bufferedReader().forEachLine { line ->
+                    if ("GLIBC_" in line && "not found" in line) systemTooOld = true
                     onProgress(DownloadProgress(null, line.trim()))
                 }
                 val code = process.waitFor()
-                code to "spotdl exited with code $code."
+                code to if (systemTooOld) {
+                    "Spotify links need a newer Linux than this one: spotdl, which reads them, needs glibc 2.38 " +
+                        "or later (Ubuntu 24.04, Fedora 39, Debian 13). Type the artist and song name instead."
+                } else {
+                    "spotdl exited with code $code."
+                }
             }
         }
     }

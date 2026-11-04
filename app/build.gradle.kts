@@ -1,3 +1,5 @@
+import java.security.KeyStore
+import java.security.MessageDigest
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -135,3 +137,36 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
 }
+
+// ---- The release key -------------------------------------------------------
+//
+// Android installs an update only when it is signed with the same key as the
+// app already on the phone. Lucense's key is this machine's debug key, which
+// Gradle makes by itself when it finds none: on a new machine, or after the
+// .android folder is gone, a release would come out signed with a fresh key
+// that no phone with Lucense on it accepts, short of uninstalling and losing
+// the library. So a release build first checks the key is the one every APK
+// so far was signed with, and stops if not.
+val checkReleaseKey by tasks.registering {
+    val store = android.signingConfigs.getByName("debug").storeFile
+    val password = android.signingConfigs.getByName("debug").storePassword ?: "android"
+    val alias = android.signingConfigs.getByName("debug").keyAlias ?: "androiddebugkey"
+    val expected = providers.gradleProperty("lucenseReleaseKeySha256")
+        .getOrElse("893eab7415de067fa474a63a1bd4f79753ae970c735eb1ffe96f4871a9726b9e")
+    doLast {
+        val file = store ?: error("No signing key is set up for release builds.")
+        check(file.isFile) {
+            "Lucense's signing key isn't at $file. Restore it from its backup before building a release: " +
+                "an APK signed with any other key can't install over Lucense."
+        }
+        val keys = KeyStore.getInstance(file, password.toCharArray())
+        val cert = keys.getCertificate(alias) ?: error("$file has no key named $alias.")
+        val found = MessageDigest.getInstance("SHA-256").digest(cert.encoded)
+            .joinToString("") { "%02x".format(it) }
+        check(found == expected) {
+            "$file is not Lucense's signing key (SHA-256 $found, expected $expected). Restore Lucense's key from " +
+                "its backup: an APK signed with this one can't install over Lucense."
+        }
+    }
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(checkReleaseKey) }
