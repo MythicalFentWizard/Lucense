@@ -235,7 +235,9 @@ who it's by, in any order and with or without accents: `beyonce lemonade` finds
 the cover over a band of its own colour, the year, the number of songs and the
 running time, *Play* and *Shuffle*, and the songs. An artist's page has their
 albums under the songs. **Esc**, or the arrow at the top, goes back to the
-cards.
+cards. An artist's or an album's name on a song is a way in too: click it in
+the song list, under the song playing in the player bar, or on another page,
+and its page opens.
 
 **Put an album in your own order** (Windows): on an album's page, drag a song
 by the handle at its left up or down. The album plays in that order from then

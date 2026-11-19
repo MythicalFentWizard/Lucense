@@ -117,6 +117,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -185,6 +186,14 @@ fun DesktopApp(
     var showSettings by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<DialogKind?>(null) }
     var playlistTargets by remember { mutableStateOf<List<DesktopTrack>>(emptyList()) }
+
+    // An album's or an artist's page, on whichever of Albums and Artists it belongs:
+    // from its card, or from its name in the song list or in the bar below.
+    val openGroup: (CollectionKind, String) -> Unit = { kind, key ->
+        controller.openGroup(kind, key)
+        destination = if (kind == CollectionKind.ALBUMS) Destination.ALBUMS else Destination.ARTISTS
+        showSettings = false
+    }
 
     val status by controller.engine.status.collectAsState()
     val visible = controller.visibleTracks
@@ -324,7 +333,8 @@ fun DesktopApp(
                                         controller.identifyTarget = track
                                         destination = Destination.IDENTIFY
                                         controller.identifyFile(track)
-                                    }
+                                    },
+                                    onOpenGroup = openGroup
                                 )
                             destination == Destination.ALBUMS || destination == Destination.ARTISTS ->
                                 CollectionScreen(
@@ -339,10 +349,7 @@ fun DesktopApp(
                                         controller.findDuplicates(within)
                                         dialog = DialogKind.DUPLICATES
                                     },
-                                    onOpenGroup = { kind, key ->
-                                        controller.openGroup(kind, key)
-                                        destination = if (kind == CollectionKind.ALBUMS) Destination.ALBUMS else Destination.ARTISTS
-                                    },
+                                    onOpenGroup = openGroup,
                                     onAddToPlaylist = { items ->
                                         playlistTargets = items
                                         controller.refreshPlaylists()
@@ -392,7 +399,8 @@ fun DesktopApp(
                 track = status.track,
                 isPlaying = status.playing,
                 positionMs = status.positionMs,
-                durationMs = status.durationMs
+                durationMs = status.durationMs,
+                onOpenGroup = openGroup
             )
         }
         }
@@ -991,7 +999,8 @@ private fun LibraryPane(
     nowPlaying: DesktopTrack?,
     onAddFolder: () -> Unit,
     onAddToPlaylist: (List<DesktopTrack>) -> Unit,
-    onIdentify: (DesktopTrack) -> Unit
+    onIdentify: (DesktopTrack) -> Unit,
+    onOpenGroup: (CollectionKind, String) -> Unit
 ) {
     if (controller.tracks.isEmpty() && !controller.scanning) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1100,7 +1109,8 @@ private fun LibraryPane(
                     onAddToPlaylist = { onAddToPlaylist(listOf(track)) },
                     onIdentify = { onIdentify(track) },
                     onToggleSelect = { controller.toggleSelection(track) },
-                    onExtendSelect = { controller.extendSelection(track, tracks) }
+                    onExtendSelect = { controller.extendSelection(track, tracks) },
+                    onOpenGroup = onOpenGroup
                 )
             }
         }
@@ -1159,7 +1169,9 @@ private fun TrackRow(
     onAddToPlaylist: () -> Unit,
     onIdentify: () -> Unit,
     onToggleSelect: () -> Unit = {},
-    onExtendSelect: () -> Unit = {}
+    onExtendSelect: () -> Unit = {},
+    /** Goes to an album's or an artist's page, from its name in the row. */
+    onOpenGroup: (CollectionKind, String) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -1249,8 +1261,11 @@ private fun TrackRow(
                 Modifier.weight(2.2f),
                 if (isCurrent) Palette.Accent else Palette.Text
             )
-            Cell(track.displayArtist, Modifier.weight(1.4f), Palette.TextDim)
-            if (LocalPaneWidth.current >= 640.dp) Cell(track.displayAlbum, Modifier.weight(1.4f), Palette.TextDim)
+            // The names go to their pages; the rest of the row still plays the song.
+            Cell(artistLinks(track) { onOpenGroup(CollectionKind.ARTISTS, it) }, Modifier.weight(1.4f), Palette.TextDim)
+            if (LocalPaneWidth.current >= 640.dp) {
+                Cell(albumLink(track) { onOpenGroup(CollectionKind.ALBUMS, it) }, Modifier.weight(1.4f), Palette.TextDim)
+            }
 
             Row(
                 Modifier.width(100.dp),
@@ -1317,7 +1332,10 @@ private fun trailingValue(controller: DesktopController, track: DesktopTrack): S
     }
 
 @Composable
-private fun Cell(text: String, modifier: Modifier, colour: Color) {
+private fun Cell(text: String, modifier: Modifier, colour: Color) = Cell(AnnotatedString(text), modifier, colour)
+
+@Composable
+private fun Cell(text: AnnotatedString, modifier: Modifier, colour: Color) {
     Text(
         text,
         style = MaterialTheme.typography.bodyMedium,
@@ -1334,7 +1352,8 @@ private fun TransportBar(
     track: DesktopTrack?,
     isPlaying: Boolean,
     positionMs: Long,
-    durationMs: Long
+    durationMs: Long,
+    onOpenGroup: (CollectionKind, String) -> Unit
 ) {
     val panel = controller.sidePanel
     // A narrow window's bar: a shorter seek line and title, and the two least-used toggles go.
@@ -1369,8 +1388,17 @@ private fun TransportBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                // Each artist named goes to their page - when the song is one of the
+                // library's, so there is a page to go to.
+                val inLibrary = remember(track, controller.tracks) {
+                    track != null && controller.tracks.any { it.file == track.file }
+                }
                 Text(
-                    track?.displayArtist ?: "—",
+                    when {
+                        track == null -> AnnotatedString("—")
+                        inLibrary -> artistLinks(track) { onOpenGroup(CollectionKind.ARTISTS, it) }
+                        else -> AnnotatedString(track.displayArtist)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = Palette.TextDim,
                     maxLines = 1,
