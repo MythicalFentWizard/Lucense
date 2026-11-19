@@ -758,7 +758,7 @@ private fun SongRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    track.displayArtist,
+                    artistLinks(track, actions.openArtist),
                     style = MaterialTheme.typography.bodySmall,
                     color = Palette.TextDim,
                     maxLines = 1,
@@ -767,7 +767,7 @@ private fun SongRow(
             }
             if (artistPage && roomy) {
                 Text(
-                    track.displayAlbum,
+                    albumLink(track, actions.openAlbum),
                     style = MaterialTheme.typography.bodySmall,
                     color = Palette.TextDim,
                     maxLines = 1,

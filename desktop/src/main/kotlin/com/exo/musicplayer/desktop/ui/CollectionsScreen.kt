@@ -362,7 +362,7 @@ private fun OpenGroup(
         } else {
             val artists = TrackGroups.artists(controller.tracks).mapTo(HashSet()) { it.key }
             TrackGroups.splitArtists(group.artist).map { name ->
-                name to ("artist:" + TrackGroups.caseKey(name)).takeIf { it in artists }
+                name to TrackGroups.artistGroupKey(name).takeIf { it in artists }
             }
         }
     }
